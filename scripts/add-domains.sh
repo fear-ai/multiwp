@@ -21,8 +21,8 @@ set -e
 # Configuration
 TEMPLATE_DIR="../templates"
 APACHE_SITES_DIR="/etc/apache2/sites-available"
-SSL_CERT_DIR="/etc/ssl/certs"
-SSL_KEY_DIR="/etc/ssl/private"
+SSL_CERT_DIR="/etc/ssl/cloudflare-origin/certs"
+SSL_KEY_DIR="/etc/ssl/cloudflare-origin/keys"
 WORDPRESS_ROOT="/var/www/html/wordpress"
 
 # Default behavior
@@ -116,6 +116,8 @@ create_safe_name() {
 check_certificates() {
     local domain="$1"
     local safe_name=$(create_safe_name "$domain")
+    # Expect Cloudflare Origin cert/key named after the domain (apex + www covered by the same cert)
+    # Origin certs are only validated between Cloudflare and the origin; they are not public-trust.
     local cert_file="$SSL_CERT_DIR/${safe_name}.crt"
     local key_file="$SSL_KEY_DIR/${safe_name}.key"
     
@@ -300,4 +302,3 @@ if [ $processed_count -gt 0 ]; then
     echo "3. Generate SSL certificates as needed"
     echo ""
 fi
-

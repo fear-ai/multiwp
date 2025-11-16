@@ -6,8 +6,9 @@
 
 `scripts/`: operational Bash scripts
 - setup-wp.sh: WordPress multisite bootstrap (expects sudo-capable Ubuntu user).
-- add-domains.sh: Add domains/hostnames to an network.
+- add-domains.sh: Add domains/hostnames to a network; uses templates and Cloudflare-origin cert paths.
 - cloud-cert.sh: Issue and install certs for the multisite host (cloud/SSL helper).
+- ensure-origin-cert.sh: Validate or install Cloudflare Origin cert/key at `/etc/ssl/cloudflare-origin/{certs,keys}` for SSL vhosts.
 
 `templates/`: WordPress and Apache config templates
 - wp-config-multisite*.php
