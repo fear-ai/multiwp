@@ -32,3 +32,10 @@
 ## Security & Configuration Tips
 - Validate hosts and paths before writing to system locations (`/etc/apache2`, `/var/www/html/wordpress`).
 - NEVER hardcode credentials; rely on prompts or environment variables, avoid running as root.
+
+## Structure and Update
+- When adding new sections or subjects, leave existing sections intact unless explicitly requested to change them.
+- When resequencing, only move sections or paragraphs; do not alter their content.
+- When refactoring, you may rewrite or condense, but do not delete or omit existing material unless instructed.
+- Order sections so dependencies are introduced before they’re referenced.
+- Use an expansive, professional voice and include rationale and dependencies rather than terse summaries.
