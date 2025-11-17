@@ -18,12 +18,36 @@
 
 set -e
 
-# Configuration
-TEMPLATE_DIR="../templates"
-APACHE_SITES_DIR="/etc/apache2/sites-available"
-SSL_CERT_DIR="/etc/ssl/cloudflare-origin/certs"
-SSL_KEY_DIR="/etc/ssl/cloudflare-origin/keys"
-WORDPRESS_ROOT="/var/www/html/wordpress"
+#!/bin/bash
+# add-domains.sh - Add domains to WordPress multisite
+# Creates Apache virtual hosts using templates with enhanced validation and flexibility
+#
+# Usage: ./add-domains.sh [OPTIONS] domain1.com domain2.com ...
+#
+# Options:
+#   --http            Create only HTTP virtual hosts
+#   --ssl             Create only SSL virtual hosts (requires certificates)
+#   --root PATH       Set WordPress root directory (default: /var/www/html/wordpress)
+#   --temp PATH       Set templates directory (default: ../templates)
+#   --ssl-dir PATH    Set base SSL directory (default: /etc/ssl/cloudflare-origin)
+#   --help            Show this help message
+#
+# Examples:
+#   ./add-domains.sh client1.com client2.com client3.com
+#   ./add-domains.sh --http test-domain.org
+#   ./add-domains.sh --ssl secure-site.com
+#   ./add-domains.sh --root /opt/wordpress --temp /etc/multiwp/templates client.com
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/common.sh"
+
+# Configuration (overridable via args/env)
+TEMPLATE_DIR="${TEMPLATE_DIR}"
+APACHE_SITES_DIR="${APACHE_SITES_DIR}"
+SSL_CERT_DIR="${SSL_CERT_DIR}"
+SSL_KEY_DIR="${SSL_KEY_DIR}"
+WORDPRESS_ROOT="${WORDPRESS_ROOT}"
 
 # Default behavior
 HTTP_ONLY=false
@@ -52,21 +76,12 @@ show_help() {
     exit 0
 }
 
-# Function to convert domain name to lower case
-tolower() {
-    local domain="$1"
-    
-    # Convert to lowercase
-    domain=$(echo "$domain" | tr '[:upper:]' '[:lower:]')
-    echo "$domain"
-}
-
 # Function to validate domain name
 validate_domain() {
     local domain="$1"
     
     # Convert to lowercase
-    domain=$(tolower $domain)
+    domain=$(tolower "$domain")
     
     # Check maximum total length (255 characters)
     if [ ${#domain} -gt 255 ]; then
@@ -102,20 +117,10 @@ validate_domain() {
     return 0
 }
 
-# Function to create safe name from domain
-create_safe_name() {
-    local domain="$1"
-    
-    # Create safe name by removing dots and hyphens
-    local safe_name=$(echo "$domain" | sed 's/[.-]//g')
-    
-    echo "$safe_name"
-}
-
 # Function to check SSL certificates
 check_certificates() {
     local domain="$1"
-    local safe_name=$(create_safe_name "$domain")
+    local safe_name=$(safe_name "$domain")
     # Expect Cloudflare Origin cert/key named after the domain (apex + www covered by the same cert)
     # Origin certs are only validated between Cloudflare and the origin; they are not public-trust.
     local cert_file="$SSL_CERT_DIR/${safe_name}.crt"
@@ -136,7 +141,7 @@ check_certificates() {
 process_domain() {
     local domain="$1"
     domain=$(tolower "$domain")
-    local safe_name=$(create_safe_name "$domain")
+    local safe_name=$(safe_name "$domain")
     
     echo "Processing domain: $domain"
     
@@ -186,47 +191,24 @@ process_domain() {
     return 0
 }
 
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --http)
-            HTTP_ONLY=true
-            shift
+while getopts ":h-:" opt; do
+    case "$opt" in
+        h) show_help ;;
+        -)
+            case "${OPTARG}" in
+                http) HTTP_ONLY=true ;;
+                ssl) SSL_ONLY=true ;;
+                root=*) WORDPRESS_ROOT="${OPTARG#*=}" ;;
+                temp=*) TEMPLATE_DIR="${OPTARG#*=}" ;;
+                ssl-dir=*) SSL_BASE="${OPTARG#*=}"; SSL_CERT_DIR="$SSL_BASE/certs"; SSL_KEY_DIR="$SSL_BASE/keys" ;;
+                help) show_help ;;
+                *) show_help ;;
+            esac
             ;;
-        --ssl)
-            SSL_ONLY=true
-            shift
-            ;;
-        --root)
-            if [ -z "$2" ]; then
-                echo "Error: --root requires a path argument"
-                exit 1
-            fi
-            WORDPRESS_ROOT="$2"
-            shift 2
-            ;;
-        --temp)
-            if [ -z "$2" ]; then
-                echo "Error: --temp requires a path argument"
-                exit 1
-            fi
-            TEMPLATE_DIR="$2"
-            shift 2
-            ;;
-        --help)
-            show_help
-            ;;
-        -*)
-            echo "Unknown option: $1"
-            echo "Use --help for usage information"
-            exit 1
-            ;;
-        *)
-            DOMAINS+=("$1")
-            shift
-            ;;
+        \?) show_help ;;
     esac
 done
+shift $((OPTIND-1))
 
 # Validate arguments
 if [ ${#DOMAINS[@]} -eq 0 ]; then
