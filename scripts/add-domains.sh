@@ -6,7 +6,7 @@
 # Options:
 #   --http            Create only HTTP virtual hosts
 #   --ssl             Create only SSL virtual hosts (requires certificates)
-#   --root PATH       Set WordPress root directory (default: /var/www/html/wordpress)
+#   --root PATH       Set WordPress root directory (updates docroot in templates; default: /var/www/html/wordpress)
 #   --temp PATH       Set templates directory (default: ../templates)
 #   --help            Show this help message
 #
