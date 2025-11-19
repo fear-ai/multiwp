@@ -1,6 +1,6 @@
 # Server & Web Stack Configuration (Origin Runbook)
 
-*Internal specifics (versions, IPs, paths, domains) live in CONF.md. This runbook stays generic; substitute values from CONF as needed.*
+*Internal specifics (versions, IPs, paths, domains) live in CONF.md. This runbook stays generic; substitute values from CONF as needed. For terminology, see DNSTerms.md.*
 
 ## Table of Contents
 1. [Host & Services](#1-host--services)
@@ -18,7 +18,7 @@
 
 ## 2. Web Server & Vhosts
 - Model: one vhost per domain; no wildcards.
-- Paths/templates: use `templates/apache-*.conf` and `scripts/add-domains.sh`; vhost destinations and active sites are in CONF.
+- Paths/templates: use `templates/apache-*.conf` and `scripts/apache-vhost.sh`; vhost destinations and active sites are in CONF.
 - After edits: `sudo apache2ctl configtest && sudo systemctl reload apache2`.
 
 ## 3. PHP & Database
@@ -50,8 +50,7 @@
 - DB routing tables: `mysql -u <db_user> -p -D <db_name> -e "SELECT blog_id, domain, path FROM wp_blogs;"`.
 - Functional check: browse domain → confirm HTTPS and admin login; create a test site in Network Admin and verify routing; confirm Cloudflare Full (strict) and DNS after each addition (per CloudflareSettings.md).
 
-## 8. Automation Helpers
-- Zone/DNS creation: `scripts/add-zone-and-dns.sh <domain> <ipv4> [ipv6]` (Cloudflare API).
-- Origin cert install/validate: `scripts/ensure-origin-cert.sh <domain>`.
-- Vhost generation: `scripts/add-domains.sh <domain>` (uses origin cert paths; runs configtest).
+- Zone/DNS creation: `scripts/cloud-dns.sh <domain> <ipv4> [ipv6]` (Cloudflare API; no UI required).
+- Origin cert install/validate: `scripts/install-cert.sh <domain>`.
+- Vhost generation: `scripts/apache-vhost.sh <domain>` (uses origin cert paths; runs configtest).
 - WordPress mapping: `wp site update --blog_id=<id> --domain=<domain> --path=/ --network`; update `siteurl/home` accordingly.

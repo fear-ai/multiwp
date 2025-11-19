@@ -6,14 +6,16 @@
 
 `scripts/`: operational Bash scripts
 - setup-wp.sh: WordPress multisite bootstrap (expects sudo-capable Ubuntu user).
-- add-domains.sh: Add domains/hostnames to a network; uses templates and Cloudflare-origin cert paths.
+- apache-vhost.sh: Add domains/hostnames to the network; uses templates and Cloudflare-origin cert paths.
+- cloud-dns.sh: Create Cloudflare zone + DNS records via API (no UI interaction).
 - cloud-cert.sh: Issue and install certs for the multisite host (cloud/SSL helper).
-- ensure-origin-cert.sh: Validate or install Cloudflare Origin cert/key at `/etc/ssl/cloudflare-origin/{certs,keys}` for SSL vhosts.
+- install-cert.sh: Validate or install Cloudflare Origin cert/key at `/etc/ssl/cloudflare-origin/{certs,keys}` for SSL vhosts.
 
 `templates/`: WordPress and Apache config templates
 - wp-config-multisite*.php
 - apache-*.conf
 - .htaccess
+- Glossary: DNSTerms.md (DNS/Cloudflare terminology)
 
 ## Coding Style & Naming Conventions
 - Shell scripts use Bash (`#!/bin/bash`), 4-space indentation, and `set -e` for fail-fast behavior; prefer POSIX-friendly.
@@ -39,3 +41,5 @@
 - When refactoring, you may rewrite or condense, but do not delete or omit existing material unless instructed.
 - Order sections so dependencies are introduced before they’re referenced.
 - Use an expansive, professional voice and include rationale and dependencies rather than terse summaries.
+- When a user says “stop” or “halt,” cease running commands or edits immediately and await further instruction; do not retry failed patches unless asked.
+- On apply_patch or command failure, report the issue once and ask before retrying, instead of looping.

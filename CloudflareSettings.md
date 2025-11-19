@@ -2,77 +2,99 @@
 
 ## Table of Contents
 1. [Overview](#overview)
-2. [UI Flow: HTTPS & Certs](#ui-flow-https--certs)
+2. [Proxy Model (Cloudflare Edge)](#proxy-model-cloudflare-edge)
+3. [UI Flow: HTTPS & Certs](#ui-flow-https--certs)
    2.1. [DNS & Proxy](#21-dns--proxy)
    2.2. [Issue Origin Certificate](#22-issue-origin-certificate)
    2.3. [Enforce Full (Strict)](#23-enforce-full-strict)
-   2.4. [Force HTTPS](#24-force-https)
+   2.4. [Force HTTPS (Edge Certificates vs Redirect Rules)](#24-force-https-edge-certificates-vs-redirect-rules)
    2.5. [Add Security Headers](#25-add-security-headers)
-3. [Automation Aids](#automation-aids)
+   2.6. [Before Enabling HSTS](#26-before-enabling-hsts)
+4. [Automation Aids](#automation-aids)
    3.1. [Create Zone + DNS](#31-create-zone--dns)
    3.2. [Origin Cert Placement](#32-origin-cert-placement)
    3.3. [Vhost Generation](#33-vhost-generation)
-4. [Hybrid Execution (UI + Automation)](#hybrid-execution-ui--automation)
-5. [Domain Registration & Transfer to Cloudflare](#domain-registration--transfer-to-cloudflare)
+5. [Hybrid Execution (UI + Automation)](#hybrid-execution-ui--automation)
+6. [Domain Registration & Transfer to Cloudflare](#domain-registration--transfer-to-cloudflare)
    5.1. [Manual Transfer Steps (Namecheap, NameSilo)](#51-manual-transfer-steps-namecheap-namesilo)
    5.2. [Automation Outline for Transfers](#52-automation-outline-for-transfers)
-6. [Notes & Rationale](#notes--rationale)
+7. [Notes & Rationale](#notes--rationale)
 
 ## Overview
-Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HTTP is redirected to HTTPS at the edge, and security headers are applied consistently. Origin servers use per-domain Cloudflare Origin certificates; Cloudflare presents edge certificates to visitors. Use the UI for clarity; layer scripts where it saves time.
+Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HTTP is redirected to HTTPS at the edge, and security headers are applied consistently. Origin servers use per-domain Cloudflare Origin certificates; Cloudflare presents edge certificates to visitors. Use the UI for clarity; layer scripts where it saves time. For terminology, see `DNSTerms.md`.
+
+## Proxy Model (Cloudflare Edge)
+- Cloudflare’s orange cloud behaves as a reverse proxy: clients connect to Cloudflare; Cloudflare connects to our origin. References: [Cloudflare reverse proxy overview](https://www.cloudflare.com/learning/cdn/glossary/reverse-proxy/), [MDN reverse proxy](https://developer.mozilla.org/en-US/docs/Glossary/Reverse_proxy).
+- Benefits: hides origin addresses, offloads TLS, enables caching and WAF features.
+- Our usage: proxy apex and `www`, issue origin certs per apex+www pair, and let Cloudflare enforce HTTPS and headers at the edge.
 
 ## UI Flow: HTTPS & Certs
 
 ### 2.1. DNS & Proxy
 - Path: `DNS`.
-- Add A/AAAA for apex and www pointing to the origin; enable proxy (orange cloud).
+- Add A for apex (`@`) pointing to the origin; enable proxy (orange cloud).
+- Add CNAME for `www` pointing to apex when proxying; this keeps a single source of truth for the origin address.
+- Optional: wildcard `*` CNAME to apex to catch stray hosts, but keep explicit apex/www records when proxying.
+- IPv6 (AAAA) is optional; add proxied AAAA for apex/www only if you serve IPv6.
 - If origin IP changes, update DNS before enforcing strict TLS to avoid downtime.
+- Assumes nameservers already point to Cloudflare; DNSSEC is not required for this flow.
 
 ### 2.2. Issue Origin Certificate
 - Path: Zone → `SSL/TLS` → `Origin Server` → `Create Certificate`.
 - Options: “Let Cloudflare generate a private key and CSR”; Hostnames: apex + www; Key type: RSA; Validity: default.
-- Download cert/key; install on origin at `/etc/ssl/cloudflare-origin/certs|keys/<safe>.{crt,key}` (safe = domain minus dots/hyphens). These certs are used only between Cloudflare and origin (not publicly trusted).
+- Download cert/key in PEM format; install on origin at `/etc/ssl/cloudflare-origin/certs|keys/<safe>.{crt,key}` (safe = domain minus dots/hyphens). These certs are used only between Cloudflare and origin (not publicly trusted). Issue one per apex+www pair.
 - Use separate origin certs per domain (or per apex+www pair) to avoid exposing tenant lists and to keep trust scoped.
 
 ### 2.3. Enforce Full (Strict)
-- Path: `SSL/TLS` → `Overview`.
-- Set “SSL/TLS encryption mode” to `Full (strict)` so Cloudflare validates your origin cert on proxied requests.
+- Navigation: left nav `SSL/TLS` → `Overview`.
+- Setting: “SSL/TLS encryption mode” → select `Full (strict)` to have Cloudflare validate your origin cert on proxied requests.
+- Minimum TLS (Edge Certificates page): set to TLS 1.2 (stronger than defaults). Enable TLS 1.3.
 
-### 2.4. Force HTTPS
-- Path: `Rules` → `Redirect Rules` (preferred).
-- Create rule: Condition `Hostname equals apex OR www`; Action: 301 to `https://{host}{uri}`.
-- This keeps HTTP→HTTPS at the edge. Redundant Apache redirects can cause loops when proxied or add extra hops; prefer a single redirect at Cloudflare.
+### 2.4. Force HTTPS (Edge Certificates vs Redirect Rules)
+- Free tier (no Advanced Certificate Manager): `SSL/TLS` → `Edge Certificates` → toggle “Always Use HTTPS” ON. Use this for now; it’s simple and avoids custom rule errors.
+- Redirect Rules (more control but higher risk): `Rules` → `Redirect Rules`; Condition `Hostname equals apex OR www`; Action: 301 to `https://{host}{uri}`. Keep “Always Use HTTPS” OFF if you add a rule. **Warning:** misconfigured rules or overlapping redirects can create redirect loops; only use when you have a tested need and a solid test plan.
+- Avoid Apache-level HTTPS redirects when proxying to prevent loops and extra hops.
 
 ### 2.5. Add Security Headers
-- Path: `Rules` → `Transform Rules` → `HTTP Response Header Modification`.
+- Path: `Rules` → `Settings` → `Managed Transforms` → `HTTP Response Headers` → “Add security headers.” Reference: [Cloudflare managed transforms / add security headers](https://developers.cloudflare.com/rules/transform/managed-transforms/reference/#add-security-headers).
 - Condition: `Hostname equals apex OR www`.
-- Add headers:
+- Configure the rule to set:
   - `Strict-Transport-Security: max-age=31536000; includeSubDomains`
   - `X-Content-Type-Options: nosniff`
-  - `X-Frame-Options: DENY`
-  - `Referrer-Policy: no-referrer-when-downgrade`
+  - `X-XSS-Protection: 1; mode=block`
+  - `X-Frame-Options: SAMEORIGIN`
+  - `Referrer-Policy: same-origin`
+  - `Expect-CT: max-age=86400, enforce`
+
+### 2.6. Before Enabling HSTS
+- HSTS pros: enforces HTTPS at the browser; prevents downgrade/mixed-mode requests after first load.
+- HSTS cons: can lock you out if HTTPS breaks; preload is a long-term commitment.
+- Validate first: confirm apex and www redirect to HTTPS, no mixed content, certs valid (Full strict), admin/login works over HTTPS.
+- Rollout: start with short max-age (e.g., 300) if testing; then raise to 31536000 with includeSubDomains when confident. Preload only when you are sure HTTPS is permanent.
+- Automation: add HSTS via the Managed Transforms UI or API when ready; keep it disabled until validation passes.
 
 ## Automation Aids
 
-### 4.1. Create Zone + DNS
-- Script: `scripts/add-zone-and-dns.sh <domain> <ipv4> [ipv6]`
-- Does: creates zone (full), adds proxied A/AAAA for apex+www. Env: `CF_API_TOKEN`, `CF_ACCOUNT_ID`.
+### 3.1. Create Zone + DNS
+- Script: `scripts/cloud-dns.sh <domain> <ipv4> [ipv6]`
+- Fit: use when onboarding a new domain; interacts with the Cloudflare API instead of the UI.
+- Does: creates the zone (full setup) and adds proxied A/AAAA for apex+www. Env or flags: `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `--token`, `--account`.
 
-### 4.2. Origin Cert Placement
-- Script: `scripts/ensure-origin-cert.sh <domain>`
+### 3.2. Origin Cert Placement
+- Script: `scripts/install-cert.sh <domain>`
 - Does: validate/install Cloudflare Origin cert/key into `/etc/ssl/cloudflare-origin/{certs,keys}/<safe>.{crt,key}` with perms root:ssl-cert 640; prints SANs.
 
-### 4.3. Vhost Generation
-- Script: `scripts/add-domains.sh <domain>`
+### 3.3. Vhost Generation
+- Script: `scripts/apache-vhost.sh <domain>`
 - Uses templates pointing at origin cert paths; enables HTTP/SSL vhosts. Add origin certs first, then run; script runs `apache2ctl configtest`.
 
 ## Hybrid Execution (UI + Automation)
 - Sequence (per domain):
   1) UI/API: Create/verify zone and DNS (apex + www), proxy on.
   2) UI: Issue origin cert, download cert/key.
-  3) Automation: Run `ensure-origin-cert.sh` to place cert/key on origin with correct perms.
-  4) Automation: Run `add-domains.sh` to generate/enable vhosts referencing the origin certs; script runs configtest.
-  5) UI: Set SSL mode to Full (strict); add Redirect Rule for HTTPS; add Transform Rule for headers.
+  3) Automation: Run `install-cert.sh` to place cert/key on origin with correct perms.
+  4) Automation: Run `apache-vhost.sh` to generate/enable vhosts referencing the origin certs; script runs configtest.
+  5) UI: Set SSL mode to Full (strict); add HTTPS enforcement (Always Use HTTPS) and headers. Introduce Redirect Rules only if you have a tested need; otherwise leave them disabled to avoid loops.
   6) Verify: Browse HTTP→HTTPS redirect, check headers, confirm Full (strict) active.
 - Dependencies:
   - Cert placement must precede enabling SSL vhosts and setting Full (strict), or strict mode will fail.
