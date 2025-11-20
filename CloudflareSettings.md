@@ -35,7 +35,6 @@ Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HT
 - Add A for apex (`@`) pointing to the origin; enable proxy (orange cloud).
 - Add CNAME for `www` pointing to apex when proxying; this keeps a single source of truth for the origin address.
 - Optional: wildcard `*` CNAME to apex to catch stray hosts, but keep explicit apex/www records when proxying.
-- IPv6 (AAAA) is optional; add proxied AAAA for apex/www only if you serve IPv6.
 - If origin IP changes, update DNS before enforcing strict TLS to avoid downtime.
 - Assumes nameservers already point to Cloudflare; DNSSEC is not required for this flow.
 
@@ -83,6 +82,7 @@ Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HT
 ### 3.2. Origin Cert Placement
 - Script: `scripts/install-cert.sh <domain>`
 - Does: validate/install Cloudflare Origin cert/key into `/etc/ssl/cloudflare-origin/{certs,keys}/<safe>.{crt,key}` with perms root:ssl-cert 640; prints SANs.
+- Paths: defaults align with the origin cert locations defined in `ConfigServers.md`; update that runbook first if you need non-default storage and keep templates/scripts in sync.
 
 ### 3.3. Vhost Generation
 - Script: `scripts/apache-vhost.sh <domain>`
@@ -133,3 +133,4 @@ Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HT
 - Edge HTTPS and headers belong at Cloudflare when proxied; avoid redundant Apache redirects to prevent loops and extra hops.
 - Separate origin certs per domain (or per apex+www pair) keep tenant lists private and scope trust; avoid multi-tenant SANs.
 - UI is authoritative for SSL mode, redirects, and headers; scripts help with DNS, origin cert placement, and vhost generation. Use both to reduce errors and speed onboarding.
+- IPv6 is optional; if you later add AAAA records, proxy them and keep apex/www explicit. Add them after the core onboarding steps to avoid distractions during initial cutover.

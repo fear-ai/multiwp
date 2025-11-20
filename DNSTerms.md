@@ -21,18 +21,11 @@
 - **Reverse proxy**: Another term for an edge proxy that fronts origin servers (as opposed to a forward proxy used by clients). (Refs: Cloudflare reverse proxy overview: https://www.cloudflare.com/learning/cdn/glossary/reverse-proxy/ ; MDN reverse proxy: https://developer.mozilla.org/en-US/docs/Glossary/Reverse_proxy)
 - **Origin**: The actual server hosting your site. In a proxied setup: client → Cloudflare → origin.
 - **Cloudflare SSL/TLS mode (Full strict)**: Cloudflare validates your origin cert; requires a valid origin cert per domain.
-- **Origin certificate**: Cloudflare-issued cert used only between Cloudflare and your origin (not publicly trusted). Place per domain at `/etc/ssl/cloudflare-origin/{certs,keys}/<safe>.{crt,key}`, with matching vhosts.
+- **Origin certificate**: Cloudflare-issued cert used only between Cloudflare and your origin (not publicly trusted). Store each domain’s cert/key securely on the origin with restricted permissions; reference those paths in the corresponding vhosts.
 
 ### HTTPS and Headers (Edge)
 - **HTTPS redirect (edge)**: Rule at Cloudflare to force HTTP→HTTPS (e.g., Redirect Rule: Hostname equals apex/www → 301 to `https://{host}{uri}`).
 - **Security headers (edge)**: Response header rules at Cloudflare for HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy.
-
-### Workflow Sequence (common onboarding)
-1. **Zone creation & NS**: Create zone in Cloudflare; set registrar NS to Cloudflare.
-2. **DNS records**: Add A (apex), CNAME (www→apex); proxy on. Add AAAA only if serving IPv6. Optional wildcard `*` CNAME→apex for catch-all.
-3. **Origin cert**: Issue Cloudflare Origin cert (apex + www); install to `/etc/ssl/cloudflare-origin/{certs,keys}`; update vhosts to use it.
-4. **TLS mode**: Set SSL/TLS to Full (strict) in Cloudflare.
-5. **Redirects/headers**: Add HTTPS redirect (edge) and security headers (edge).
 
 ## Index (A–Z)
 - A record → Addressing
@@ -52,3 +45,13 @@
 - TLS redirect (HTTPS redirect) → HTTPS and Headers (Edge)
 - Zone → Names and Delegation
 - Wildcard `*` → Addressing
+
+## Reference Links
+- DNS fundamentals: RFC 1034 (Domain Names), RFC 1035 (Domain Names Implementation).
+- Cloudflare DNS record guide (A/AAAA/CNAME/proxy behavior): https://developers.cloudflare.com/dns/manage-dns-records/reference/dns-records/
+- Cloudflare reverse proxy overview: https://www.cloudflare.com/learning/cdn/glossary/reverse-proxy/
+- Cloudflare SSL/TLS encryption modes (Full strict): https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/
+- Cloudflare Origin CA certificates: https://developers.cloudflare.com/ssl/origin-configuration/origin-ca/
+- Cloudflare Redirect Rules / Always Use HTTPS: https://developers.cloudflare.com/rules/url-forwarding/
+- Cloudflare Managed Transforms / security headers: https://developers.cloudflare.com/rules/transform/managed-transforms/reference/
+- MDN reverse proxy glossary entry: https://developer.mozilla.org/en-US/docs/Glossary/Reverse_proxy
