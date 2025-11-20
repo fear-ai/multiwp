@@ -88,11 +88,11 @@ certificate=$(echo "$response" | jq -r '.result.certificate')
 private_key=$(echo "$response" | jq -r '.result.private_key')
 [ "$certificate" != "null" ] && [ "$private_key" != "null" ] || err "Failed to extract certificate or private key"
 
-sudo mkdir -p "$SSL_CERT_DIR" "$SSL_KEY_DIR"
-echo "$certificate" | sudo tee "$cert_file" >/dev/null
-echo "$private_key" | sudo tee "$key_file" >/dev/null
-sudo chown root:ssl-cert "$key_file" || true
-sudo chmod 640 "$key_file"
+priv mkdir -p "$SSL_CERT_DIR" "$SSL_KEY_DIR"
+echo "$certificate" | priv tee "$cert_file" >/dev/null
+echo "$private_key" | priv tee "$key_file" >/dev/null
+priv chown root:ssl-cert "$key_file" || true
+priv chmod 640 "$key_file"
 
 log "Files created:"
 log "  Certificate: $cert_file"
