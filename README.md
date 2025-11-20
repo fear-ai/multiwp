@@ -2,34 +2,34 @@
 
 WordPress multisite tooling and templates to host many client domains on shared infrastructure with per-domain SSL via Cloudflare and Apache.
 
-## What’s Included
-- Docs: `MULTI.md` (strategy/architecture), `ConfigServers.md` (origin/server runbook), `CloudflareSettings.md` (edge/Cloudflare setup).
-- Scripts: `setup-wp.sh` (multisite bootstrap), `apache-vhost.sh` (per-domain vhosts), `install-cert.sh` (place Cloudflare origin certs), `cloud-dns.sh` (create zone + DNS via Cloudflare API; no UI).
-- Templates: `apache-*.conf`, `wp-config-multisite*.php`, `.htaccess`.
-- Glossary: `DNSTerms.md` (DNS/Cloudflare terminology).
+## Overview
+- Architecture: `MULTI.md`
+- Origin runbook: `ConfigServers.md`
+- Edge/Cloudflare: `CloudflareSettings.md`
+- Apex/site mapping fixes: `ApexFixes.md`
+- DNS terminology: `DNSTerms.md`
 
-## Prerequisites
-- Apache 2.4 with `rewrite`, `ssl`, `headers`.
-- PHP 8.x, MySQL 8.x.
-- WP-CLI installed.
-- Cloudflare account/token if using automation.
-
-## Quick Start (placeholders)
+## Key Scripts (run from repo root)
 ```bash
-# Bootstrap multisite on a fresh host
+# Bootstrap/convert a host (legacy; planned for rewrite)
 bash scripts/setup-wp.sh
 
-# Add a domain vhost (expects certs at /etc/ssl/cloudflare-origin/{certs,keys}/<safe>.{crt,key})
-bash scripts/apache-vhost.sh example.com
+# Generate Apache vhosts (HTTP + SSL) for a domain
+sudo scripts/apache-vhost.sh example.com
 
-# Install/validate a Cloudflare origin cert on the server
-bash scripts/install-cert.sh example.com
+# Install or validate a Cloudflare origin cert/key
+scripts/install-cert.sh example.com
 
-# Create zone and DNS (apex + www) via Cloudflare API
-CF_API_TOKEN=... CF_ACCOUNT_ID=... bash scripts/cloud-dns.sh example.com 203.0.113.10
+# Create Cloudflare zone + DNS via API (no UI)
+CF_API_TOKEN=... CF_ACCOUNT_ID=... scripts/cloud-dns.sh example.com 203.0.113.10
+
+# Issue a new Cloudflare origin cert/key via API
+CF_API_TOKEN=... scripts/cloud-cert.sh example.com
 ```
 
-## Usage Notes
-- Vhosts are per-domain; templates assume Cloudflare origin cert paths. Use `apache-vhost.sh` after certs are in place.
-- Cloudflare configuration (Full strict, HTTPS redirects, headers) is documented in `CloudflareSettings.md`; keep HTTPS redirects at the edge to avoid loops.
-- Multisite model: subdirectory network with mapped apex domains to keep one core install while preserving client-brand URLs.
+## Notes
+- Templates `apache-*.conf` use `{{DOCROOT}}`; `apache-vhost.sh` substitutes based on `--root`.
+- `install-cert.sh` installs pre-obtained certs (e.g., from the Cloudflare UI). `cloud-cert.sh` calls the Cloudflare Origin CA API to request a new cert/key pair.
+- Cloudflare HTTPS/headers/HSTS configuration lives in `CloudflareSettings.md`.
+- Cert and vhost paths follow the defaults documented in `ConfigServers.md`; adjust that runbook first if you need non-standard locations so templates and scripts stay aligned.
+- Future work: rewrite `setup-wp.sh` using WP-CLI with thorough testing.
