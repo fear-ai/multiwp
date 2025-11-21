@@ -45,3 +45,5 @@
 - When a user says “stop” or “halt,” cease running commands or edits immediately and await further instruction; do not retry failed patches unless asked.
 - on command failure, report the issue once and ask before retrying, instead of looping.
 - Do not run git commands (status/add/commit) unless explicitly instructed; leave commits to user.
+- When told to “read” or “input” a file, open and quote the current version from the repository rather than relying on prior context or memory so instructions reflect the actual on-disk content.
+- Titles and subtitles should be plain, with no commentary or parenthetical remarks in the heading.
