@@ -9,7 +9,6 @@
    2.3. [Enforce Full (Strict)](#23-enforce-full-strict)
    2.4. [Force HTTPS (Edge Certificates vs Redirect Rules)](#24-force-https-edge-certificates-vs-redirect-rules)
    2.5. [Add Security Headers](#25-add-security-headers)
-   2.6. [Before Enabling HSTS](#26-before-enabling-hsts)
 4. [Automation Aids](#automation-aids)
    3.1. [Create Zone + DNS](#31-create-zone--dns)
    3.2. [Origin Cert Placement](#32-origin-cert-placement)
@@ -19,6 +18,7 @@
    5.1. [Manual Transfer Steps (Namecheap, NameSilo)](#51-manual-transfer-steps-namecheap-namesilo)
    5.2. [Automation Outline for Transfers](#52-automation-outline-for-transfers)
 7. [Notes & Rationale](#notes--rationale)
+   - [HSTS](#hsts)
 
 ## Overview
 Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HTTP is redirected to HTTPS at the edge, and security headers are applied consistently. Origin servers use per-domain Cloudflare Origin certificates; Cloudflare presents edge certificates to visitors. Use the UI for clarity; layer scripts where it saves time. For terminology, see `DNSTerms.md`.
@@ -64,13 +64,6 @@ Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HT
   - `X-Frame-Options: SAMEORIGIN`
   - `Referrer-Policy: same-origin`
   - `Expect-CT: max-age=86400, enforce`
-
-### 2.6. Before Enabling HSTS
-- HSTS pros: enforces HTTPS at the browser; prevents downgrade/mixed-mode requests after first load.
-- HSTS cons: can lock you out if HTTPS breaks; preload is a long-term commitment.
-- Validate first: confirm apex and www redirect to HTTPS, no mixed content, certs valid (Full strict), admin/login works over HTTPS.
-- Rollout: start with short max-age (e.g., 300) if testing; then raise to 31536000 with includeSubDomains when confident. Preload only when you are sure HTTPS is permanent.
-- Automation: add HSTS via the Managed Transforms UI or API when ready; keep it disabled until validation passes.
 
 ## Automation Aids
 
@@ -134,3 +127,9 @@ Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HT
 - Separate origin certs per domain (or per apex+www pair) keep tenant lists private and scope trust; avoid multi-tenant SANs.
 - UI is authoritative for SSL mode, redirects, and headers; scripts help with DNS, origin cert placement, and vhost generation. Use both to reduce errors and speed onboarding.
 - IPv6 is optional; if you later add AAAA records, proxy them and keep apex/www explicit. Add them after the core onboarding steps to avoid distractions during initial cutover.
+
+### HSTS
+- HSTS pros: enforces HTTPS at the browser; prevents downgrade/mixed-mode requests after first load.
+- HSTS cons: can lock you out if HTTPS breaks; preload is a long-term commitment.
+- Validate first: confirm apex and www redirect to HTTPS, no mixed content, certs valid (Full strict), admin/login works over HTTPS.
+- Rollout: start with short max-age (e.g., 300) if testing; then raise to 31536000 with includeSubDomains when confident. Preload only when you are sure HTTPS is permanent.
