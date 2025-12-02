@@ -1,4 +1,5 @@
-# Cloudflare Settings & Certs (UI and Automation)
+# Cloudflare Settings & Certs For Multi WordPress
+## Via UI and Automation
 
 ## Table of Contents
 1. [Overview](#overview)
@@ -38,26 +39,24 @@ Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HT
 - If origin IP changes, update DNS before enforcing strict TLS to avoid downtime.
 - Assumes nameservers already point to Cloudflare; DNSSEC is not required for this flow.
 
-### 2.2. Issue Origin Certificate
-- Path: Zone → `SSL/TLS` → `Origin Server` → `Create Certificate`.
+### Enforce Full (Strict) SSL Encryption
+- Path: `SSL/TLS` → `Overview`.
+- Setting: “SSL/TLS encryption mode” → select `Full (strict)`.
+
+### Issue Origin Certificate
+Use separate origin cert per domain (apex+www pair) to avoid exposing tenant lists and to keep trust scoped. The certs are used between Cloudflare and origin, not publicly trusted.
+- Path: `SSL/TLS` → `Origin Server` → `Create Certificate`.
 - Options: “Let Cloudflare generate a private key and CSR”; Hostnames: apex + www; Key type: RSA; Validity: default.
-- Download cert/key in PEM format; install on origin at `/etc/ssl/cloudflare-origin/certs|keys/<safe>.{crt,key}` (safe = domain minus dots/hyphens). These certs are used only between Cloudflare and origin (not publicly trusted). Issue one per apex+www pair.
-- Use separate origin certs per domain (or per apex+www pair) to avoid exposing tenant lists and to keep trust scoped.
+- Download cert/key in PEM format; install on origin at `/etc/ssl/cloudflare-origin/certs|keys/<safe>.{crt,key}` (safe = domain without dots/hyphens).
 
-### 2.3. Enforce Full (Strict)
-- Navigation: left nav `SSL/TLS` → `Overview`.
-- Setting: “SSL/TLS encryption mode” → select `Full (strict)` to have Cloudflare validate your origin cert on proxied requests.
-- Minimum TLS (Edge Certificates page): set to TLS 1.2 (stronger than defaults). Enable TLS 1.3.
+### Use HTTPS and TLS 1.2
+- Path: `SSL/TLS` → `Edge Certificates`.
+- Minimum TLS: TLS 1.2 (from 1.0 default).
+- “Always Use HTTPS” ON.
 
-### 2.4. Force HTTPS (Edge Certificates vs Redirect Rules)
-- Free tier (no Advanced Certificate Manager): `SSL/TLS` → `Edge Certificates` → toggle “Always Use HTTPS” ON. Use this for now; it’s simple and avoids custom rule errors.
-- Redirect Rules (more control but higher risk): `Rules` → `Redirect Rules`; Condition `Hostname equals apex OR www`; Action: 301 to `https://{host}{uri}`. Keep “Always Use HTTPS” OFF if you add a rule. **Warning:** misconfigured rules or overlapping redirects can create redirect loops; only use when you have a tested need and a solid test plan.
-- Avoid Apache-level HTTPS redirects when proxying to prevent loops and extra hops.
-
-### 2.5. Add Security Headers
-- Path: `Rules` → `Settings` → `Managed Transforms` → `HTTP Response Headers` → “Add security headers.” Reference: [Cloudflare managed transforms / add security headers](https://developers.cloudflare.com/rules/transform/managed-transforms/reference/#add-security-headers).
-- Condition: `Hostname equals apex OR www`.
-- Configure the rule to set:
+### Security Headers
+- Path: `Rules` → `Settings` → `Managed Transforms` → `HTTP Response Headers` → “Add security headers.” [Cloudflare add security headers](https://developers.cloudflare.com/rules/transform/managed-transforms/reference/#add-security-headers).
+- Configures:
   - `Strict-Transport-Security: max-age=31536000; includeSubDomains`
   - `X-Content-Type-Options: nosniff`
   - `X-XSS-Protection: 1; mode=block`
@@ -65,19 +64,20 @@ Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HT
   - `Referrer-Policy: same-origin`
   - `Expect-CT: max-age=86400, enforce`
 
-## Automation Aids
+## Automation
+Cloudflare UI is authoritative for SSL mode, redirects, and headers. Automation scripts can help with DNS, origin cert placement, and vhost generation.
 
-### 3.1. Create Zone + DNS
+### Create Zone + DNS
 - Script: `scripts/cloud-dns.sh <domain> <ipv4> [ipv6]`
 - Fit: use when onboarding a new domain; interacts with the Cloudflare API instead of the UI.
 - Does: creates the zone (full setup) and adds proxied A/AAAA for apex+www. Env or flags: `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `--token`, `--account`.
 
-### 3.2. Origin Cert Placement
+### Origin Cert Placement
 - Script: `scripts/install-cert.sh <domain>`
 - Does: validate/install Cloudflare Origin cert/key into `/etc/ssl/cloudflare-origin/{certs,keys}/<safe>.{crt,key}` with perms root:ssl-cert 640; prints SANs.
 - Paths: defaults align with the origin cert locations defined in `ConfigServers.md`; update that runbook first if you need non-default storage and keep templates/scripts in sync.
 
-### 3.3. Vhost Generation
+### Vhost Generation
 - Script: `scripts/apache-vhost.sh <domain>`
 - Uses templates pointing at origin cert paths; enables HTTP/SSL vhosts. Add origin certs first, then run; script runs `apache2ctl configtest`.
 
@@ -99,7 +99,7 @@ Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HT
 
 ## Domain Registration & Transfer to Cloudflare
 
-### 5.1. Manual Transfer Steps (Namecheap, NameSilo)
+### Manual Transfer Steps (Namecheap, NameSilo)
 - Prereqs: ≥60 days since registration/last transfer; domain unlocked; no contact-change lock; nameservers already on Cloudflare.
 - Namecheap:
   1) Dashboard → Domain List → choose domain → turn off Registrar Lock.
@@ -111,7 +111,7 @@ Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HT
   3) Cloudflare: Registrar → Transfer → enter domain + auth code; approve emails if required.
 - Cloudflare bills and adds one-year renewal; monitor status in Registrar.
 
-### 5.2. Automation Outline for Transfers
+### Automation Outline for Transfers
 - APIs:
   - Namecheap: `namecheap.domains.transfer.getEPPCode`, `namecheap.domains.setRegistrarLock` (OFF).
   - NameSilo: `getAuthCode`, `domainLock` (disable).
@@ -123,10 +123,13 @@ Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HT
 - Safeguards: verify 60-day window, confirm zone exists and nameservers point to Cloudflare, rate-limit calls, and handle registrant approval emails manually.
 
 ## Notes & Rationale
-- Edge HTTPS and headers belong at Cloudflare when proxied; avoid redundant Apache redirects to prevent loops and extra hops.
-- Separate origin certs per domain (or per apex+www pair) keep tenant lists private and scope trust; avoid multi-tenant SANs.
-- UI is authoritative for SSL mode, redirects, and headers; scripts help with DNS, origin cert placement, and vhost generation. Use both to reduce errors and speed onboarding.
-- IPv6 is optional; if you later add AAAA records, proxy them and keep apex/www explicit. Add them after the core onboarding steps to avoid distractions during initial cutover.
+- Edge HTTPS and headers belong at Cloudflare; do not add [redundant] Apache redirects to prevent loops and extra hops.
+- IPv6 is optional; if you later add AAAA records, proxy them and keep apex/www explicit.
+
+###  Force HTTPS via Edge Certificates vs Redirect Rules
+“Always Use HTTPS” ON is simple and avoids custom rule errors.
+- Redirect Rules on Cloudflare give more control but at a higher risk: `Rules` → `Redirect Rules`; Condition `Hostname equals apex OR www`; Action: 301 to `https://{host}{uri}`. Turn “Always Use HTTPS” OFF if using Rules.
+ **Warning:** misconfigured Rules or overlapping redirects can create loops; only use when needed and with a solid test plan.
 
 ### HSTS
 - HSTS pros: enforces HTTPS at the browser; prevents downgrade/mixed-mode requests after first load.
