@@ -6,7 +6,7 @@
 # Options:
 #   --http            Create only HTTP virtual hosts
 #   --ssl             Create only SSL virtual hosts (requires certificates)
-#   --root PATH       Set WordPress root directory (updates docroot in templates; default: /var/www/html/wordpress)
+#   --root PATH       Set WordPress root directory (override docroot from template; default: /var/www/html/wordpress)
 #   --temp PATH       Set templates directory (default: ../templates)
 #   --ssl-dir PATH    Set base SSL directory (default: /etc/ssl/cloudflare-origin)
 #   --help            Show this help message
@@ -27,8 +27,9 @@ require_cmd systemctl
 # Configuration (overridable via args/env)
 TEMPLATE_DIR="${TEMPLATE_DIR}"
 APACHE_SITES_DIR="${APACHE_SITES_DIR}"
-SSL_CERT_DIR="${SSL_CERT_DIR}"
-SSL_KEY_DIR="${SSL_KEY_DIR}"
+SSL_BASE="${SSL_BASE}"
+SSL_CERT_DIR="$SSL_BASE/certs"
+SSL_KEY_DIR="$SSL_BASE/keys"
 WORDPRESS_ROOT="${WORDPRESS_ROOT}"
 
 # Default behavior
@@ -45,8 +46,8 @@ show_help() {
     echo "Options:"
     echo "  --http            Create only HTTP virtual hosts"
     echo "  --ssl             Create only SSL virtual hosts"
-    echo "  --root PATH       Set WordPress root directory (updates docroot in templates)"
-    echo "  --temp PATH       Set templates directory"
+    echo "  --root PATH       Set WordPress root directory (override docroot from template; default: /var/www/html/wordpress)"
+    echo "  --temp PATH       Set templates directory (default: ../templates)"
     echo "  --ssl-dir PATH    Set base SSL directory (default: /etc/ssl/cloudflare-origin)"
     echo "  --help            Show this help message"
     echo ""
@@ -67,33 +68,39 @@ validate_domain() {
     domain=$(tolower "$domain")
     
     # Check maximum total length (255 characters)
+# length?
     if [ ${#domain} -gt 255 ]; then
+# only print some beginning
         echo "Error: $domain exceeds maximum length (255 characters)"
         return 1
     fi
     
     # Extract and validate TLD length (63 characters max)
+# tld Regex?
     local tld="${domain##*.}"
     if [ ${#tld} -gt 63 ]; then
         echo "Error: TLD '$tld' exceeds maximum length (63 characters)"
+# only print some beginning
+# minimum 2, alpha only??
         return 1
     fi
     
-    # Check for forbidden starting characters
+    # Character set validation: alphanumeric, dots, hyphens, must have TLD
+#TLD already checked above?
+    if [[ ! "$domain" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]]; then
+        echo "Error: domain name contains invalid characters"
+        return 1
+    fi
+
+    # Forbidden starting characters
     if [[ "$domain" =~ ^[.-] ]]; then
-        echo "Error: $domain cannot start with dot or hyphen"
+        echo "Error: domain cannot start with dot or hyphen"
         return 1
     fi
     
     # Check for ..
     if [[ "$domain" =~ \.\. ]]; then
-        echo "Error: $domain contains double dots"
-        return 1
-    fi
-    
-    # Basic validation: alphanumeric, dots, hyphens, must have TLD
-    if [[ ! "$domain" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]]; then
-        echo "Error: $domain name not valid"
+        echo "Error: domain contains double dots"
         return 1
     fi
     
@@ -104,19 +111,23 @@ validate_domain() {
 check_certificates() {
     local domain="$1"
     local safe_name=$(safe_name "$domain")
-    # Expect Cloudflare Origin cert/key named after the domain (apex + www covered by the same cert)
-    # Origin certs are only validated between Cloudflare and the origin; they are not public-trust.
+    # Expect Cloudflare Origin cert/key named after the domain (apex + www)
+    # Origin certs are used between Cloudflare and the origin, not publicly.
     local cert_file="$SSL_CERT_DIR/${safe_name}.crt"
     local key_file="$SSL_KEY_DIR/${safe_name}.key"
     
-    if [ -f "$cert_file" ] && [ -f "$key_file" ]; then
-        echo "SSL certificates found for $domain"
-        return 0
+    if [ -f "$cert_file" ]; then
+        echo "SSL certificate for $domain found: $cert_file"
     else
-        echo "SSL certificate or key file not found for $domain"
-        echo "Expected: $cert_file"
-        echo "Expected: $key_file"
-        return 1
+        echo "SSL certificate for $domain not found at: $cert_file"
+	return 1
+    fi
+
+    if [ -f "$key_file" ]; then
+        echo "SSL key for $domain found: $key_file"
+    else
+        echo "SSL key for $domain not found at: $key_file"
+	return 1
     fi
 }
 
@@ -125,23 +136,16 @@ process_domain() {
     local domain="$1"
     domain=$(tolower "$domain")
     local safe_name=$(safe_name "$domain")
-    local http_expected=true
-    local ssl_expected=true
     local http_done=false
     local ssl_done=false
     local success=true
-
-    if [ "$SSL_ONLY" = true ]; then
-        http_expected=false
-    fi
-    if [ "$HTTP_ONLY" = true ]; then
-        ssl_expected=false
-    fi
 
     echo "Processing domain: $domain"
     
     # Validate domain
     if ! validate_domain "$domain"; then
+# special case last domain?
+        echo "Error: Domain $domain invalid"
         read -p "Continue anyway? [y/N] " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -152,13 +156,24 @@ process_domain() {
     
     local http_conf="$APACHE_SITES_DIR/${safe_name}.conf"
     local ssl_conf="$APACHE_SITES_DIR/${safe_name}-ssl.conf"
+
+    local http_expected=true
+    local ssl_expected=true
+
+    if [ "$SSL_ONLY" = true ]; then
+        http_expected=false
+    fi
+    if [ "$HTTP_ONLY" = true ]; then
+        ssl_expected=false
+    fi
+
     local http_existing=false
     local ssl_existing=false
 
-    if priv test -f "$http_conf"; then
+    if test -f "$http_conf"; then
         http_existing=true
     fi
-    if priv test -f "$ssl_conf"; then
+    if test -f "$ssl_conf"; then
         ssl_existing=true
     fi
 
@@ -172,9 +187,9 @@ process_domain() {
                 -e "s/{{DOMAIN}}/$domain/g" \
                 -e "s/{{SAFE_NAME}}/$safe_name/g" \
                 -e "s#{{DOCROOT}}#$WORDPRESS_ROOT#g" \
-                "$TEMPLATE_DIR/apache-http.conf" | priv tee "$http_conf" > /dev/null
+                "$TEMPLATE_DIR/apache-http.conf" | tee "$http_conf" > /dev/null
         fi
-        priv a2ensite "${safe_name}.conf" >/dev/null
+        a2ensite "${safe_name}.conf" >/dev/null
         echo "HTTP vhost enabled: ${safe_name}.conf"
         http_done=true
     fi
@@ -195,15 +210,15 @@ process_domain() {
                 -e "s/{{DOMAIN}}/$domain/g" \
                 -e "s/{{SAFE_NAME}}/$safe_name/g" \
                 -e "s#{{DOCROOT}}#$WORDPRESS_ROOT#g" \
-                "$TEMPLATE_DIR/apache-ssl.conf" | run_cmd tee "$ssl_conf" > /dev/null
+                "$TEMPLATE_DIR/apache-ssl.conf" | tee "$ssl_conf" > /dev/null
         fi
-        run_cmd a2ensite "${safe_name}-ssl.conf" >/dev/null
+        a2ensite "${safe_name}-ssl.conf" >/dev/null
         echo "SSL vhost enabled: ${safe_name}-ssl.conf"
         ssl_done=true
     elif [ "$HTTP_ONLY" = true ]; then
         echo "Skipping SSL per --http option"
     else
-        echo "Missing SSL certificate or key for $domain (expected $SSL_CERT_DIR/${safe_name}.crt and $SSL_KEY_DIR/${safe_name}.key)"
+        echo "Missing SSL certificate or key for $domain"
     fi
     
     if [ "$http_expected" = true ] && [ "$http_done" = false ]; then
@@ -220,7 +235,7 @@ process_domain() {
 
     echo "Domain $domain encountered issues:"
     if [ "$http_expected" = true ] && [ "$http_done" = false ]; then
-        echo "  - HTTP vhost not created (check permissions/templates)."
+        echo "  - HTTP vhost not created (check permissions/template)."
     fi
     if [ "$ssl_expected" = true ] && [ "$ssl_done" = false ]; then
         echo "  - SSL vhost not created (missing cert/key or template)."
@@ -250,7 +265,7 @@ shift $((OPTIND-1))
 # Remaining args are domains
 if [ $# -eq 0 ]; then
     echo "Error: No domains specified"
-    echo "Usage: $0 [OPTIONS] domain1.com domain2.com ..."
+    echo "Usage: $0 [OPTIONS] domain1.com domain2.org ..."
     echo "Use --help for more information"
     exit 1
 fi
@@ -261,7 +276,6 @@ if [ "$HTTP_ONLY" = true ] && [ "$SSL_ONLY" = true ]; then
     exit 1
 fi
 
-# Verify prerequisites
 # Verify prerequisites
 if [ ! -d "$TEMPLATE_DIR" ]; then
     echo "Error: Template directory not found: $TEMPLATE_DIR"
@@ -279,25 +293,21 @@ if [ ! -f "$TEMPLATE_DIR/apache-ssl.conf" ] ; then
 fi
 
 # Verify we can write to Apache sites dir (requires sudo)
-if ! run_cmd test -w "$APACHE_SITES_DIR"; then
-    echo "Error: Need sudo write access to $APACHE_SITES_DIR (run via sudo or adjust permissions)."
+if ! test -w "$APACHE_SITES_DIR"; then
+    echo "Error: Need write access to $APACHE_SITES_DIR."
     exit 1
 fi
-if ! run_cmd test -w "$SSL_CERT_DIR" || ! run_cmd test -w "$SSL_KEY_DIR"; then
-    echo "Warning: Need sudo access to $SSL_CERT_DIR and $SSL_KEY_DIR for SSL cert operations."
+if ! test -r "$SSL_CERT_DIR" || ! test -r "$SSL_KEY_DIR"; then
+    echo "Error: Need read to $SSL_CERT_DIR and $SSL_KEY_DIR."
 fi
 
 # Display configuration
+# special case message for 1 domain?
 echo "Adding ${#DOMAINS[@]} domain(s) to WordPress multisite"
 echo "WordPress root: $WORDPRESS_ROOT"
-echo "Templates directory: $TEMPLATE_DIR"
-echo "SSL base dir: $SSL_CERT_DIR / $SSL_KEY_DIR"
-echo "Apache sites dir: $APACHE_SITES_DIR"
-if [ -n "$SUDO_BIN" ]; then
-    echo "Using sudo binary: $SUDO_BIN"
-else
-    echo "Running without sudo; ensure current user can write to Apache/SSL paths."
-fi
+echo "Templates: $TEMPLATE_DIR"
+echo "SSL base: $SSL_BASE"
+echo "Apache sites: $APACHE_SITES_DIR"
 echo ""
 
 # Process each domain
@@ -316,9 +326,9 @@ done
 
 # Test Apache configuration and reload
 echo "Testing Apache configuration..."
-if run_cmd apache2ctl configtest; then
+if apache2ctl configtest; then
     echo "Apache configuration valid, reloading"
-    run_cmd systemctl reload apache2
+    systemctl reload apache2
 else
     echo "Apache configuration failed"
     echo "Check the generated virtual host files and fix syntax errors"
@@ -331,11 +341,3 @@ echo "Domains Added"
 echo "Success: $processed_count"
 echo "Fail: $failed_count"
 echo ""
-
-if [ $processed_count -gt 0 ]; then
-    echo "Next steps for each domain:"
-    echo "1. Add DNS record pointing domain(s) to server IP"
-    echo "2. Create WordPress sites in Network Admin"
-    echo "3. Generate SSL certificates as needed"
-    echo ""
-fi
