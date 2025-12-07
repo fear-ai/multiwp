@@ -1,25 +1,29 @@
 # Cloudflare Settings & Certs For Multi WordPress
-## Via UI and Automation
+
+## Introduction
+Cloudflare edge configuration for the multisite network, covering the preferred UI-driven workflow and optional automation helpers. Pair with ConfigServers.md for origin/vhost steps.
 
 ## Table of Contents
-1. [Overview](#overview)
-2. [Proxy Model (Cloudflare Edge)](#proxy-model-cloudflare-edge)
-3. [UI Flow: HTTPS & Certs](#ui-flow-https--certs)
-   2.1. [DNS & Proxy](#21-dns--proxy)
-   2.2. [Issue Origin Certificate](#22-issue-origin-certificate)
-   2.3. [Enforce Full (Strict)](#23-enforce-full-strict)
-   2.4. [Force HTTPS (Edge Certificates vs Redirect Rules)](#24-force-https-edge-certificates-vs-redirect-rules)
-   2.5. [Add Security Headers](#25-add-security-headers)
-4. [Automation Aids](#automation-aids)
-   3.1. [Create Zone + DNS](#31-create-zone--dns)
-   3.2. [Origin Cert Placement](#32-origin-cert-placement)
-   3.3. [Vhost Generation](#33-vhost-generation)
-5. [Hybrid Execution (UI + Automation)](#hybrid-execution-ui--automation)
-6. [Domain Registration & Transfer to Cloudflare](#domain-registration--transfer-to-cloudflare)
-   5.1. [Manual Transfer Steps (Namecheap, NameSilo)](#51-manual-transfer-steps-namecheap-namesilo)
-   5.2. [Automation Outline for Transfers](#52-automation-outline-for-transfers)
-7. [Notes & Rationale](#notes--rationale)
+1. [Introduction](#introduction)
+2. [Overview](#overview)
+3. [Proxy Model (Cloudflare Edge)](#proxy-model-cloudflare-edge)
+4. [UI Flow: HTTPS & Certs](#ui-flow-https--certs)
+   4.1. [DNS & Proxy](#21-dns--proxy)
+   4.2. [Issue Origin Certificate](#22-issue-origin-certificate)
+   4.3. [Enforce Full (Strict)](#23-enforce-full-strict)
+   4.4. [Force HTTPS (Edge Certificates vs Redirect Rules)](#24-force-https-edge-certificates-vs-redirect-rules)
+   4.5. [Add Security Headers](#25-add-security-headers)
+5. [Automation Aids](#automation-aids)
+   5.1. [Create Zone + DNS](#31-create-zone--dns)
+   5.2. [Origin Cert Placement](#32-origin-cert-placement)
+   5.3. [Vhost Generation](#33-vhost-generation)
+6. [Hybrid Execution (UI + Automation)](#hybrid-execution-ui--automation)
+7. [Domain Registration & Transfer to Cloudflare](#domain-registration--transfer-to-cloudflare)
+   7.1. [Manual Transfer Steps (Namecheap, NameSilo)](#51-manual-transfer-steps-namecheap-namesilo)
+   7.2. [Automation Outline for Transfers](#52-automation-outline-for-transfers)
+8. [Notes & Rationale](#notes--rationale)
    - [HSTS](#hsts)
+9. [Target Audience](#target-audience)
 
 ## Overview
 Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HTTP is redirected to HTTPS at the edge, and security headers are applied consistently. Origin servers use per-domain Cloudflare Origin certificates; Cloudflare presents edge certificates to visitors. Use the UI for clarity; layer scripts where it saves time. For terminology, see `DNSTerms.md`.
@@ -136,3 +140,6 @@ Cloudflare UI is authoritative for SSL mode, redirects, and headers. Automation 
 - HSTS cons: can lock you out if HTTPS breaks; preload is a long-term commitment.
 - Validate first: confirm apex and www redirect to HTTPS, no mixed content, certs valid (Full strict), admin/login works over HTTPS.
 - Rollout: start with short max-age (e.g., 300) if testing; then raise to 31536000 with includeSubDomains when confident. Preload only when you are sure HTTPS is permanent.
+
+## Target Audience
+For operators managing Cloudflare zones and edge security for this multisite network. Common scenarios: onboarding a new domain (proxy, origin cert, HTTPS enforcement), validating TLS after origin changes, and tuning headers without creating redirect loops. Expected skills: navigating Cloudflare DNS/SSL/RULES, reading certificate SANs, and coordinating with origin changes in ConfigServers.md. Additional resources: ConfigServers.md (origin), MULTI.md (architecture), DNSTerms.md (terminology).

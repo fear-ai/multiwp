@@ -1,6 +1,7 @@
 # WordPress Multisite Tools
 
-WordPress multisite tooling and templates to host many client domains on shared infrastructure with per-domain SSL via Cloudflare and Apache.
+## Introduction
+WordPress multisite tooling and templates to host many client domains on shared infrastructure with per-domain SSL via Cloudflare and Apache. This file gives operators and developers a fast on-ramp and points to the authoritative runbooks (ConfigServers.md for origin/server steps, CloudflareSettings.md for edge policy, MULTI.md for strategy) before they perform any changes.
 
 ## Overview
 
@@ -29,6 +30,8 @@ This project implements a WordPress multisite network in subdirectory mode with 
 ### Adding a New Site to the Network
 
 **Prerequisites:** Domain registered, DNS pointed to Cloudflare, Cloudflare zone configured.
+
+For the canonical, step-by-step onboarding workflow and troubleshooting guidance, use the "Site Onboarding Workflow" section in ConfigServers.md; the sequence below is a condensed starter.
 
 ```bash
 # 1. Issue Cloudflare Origin certificate (via Cloudflare UI)
@@ -278,3 +281,8 @@ sudo openssl x509 -in /etc/ssl/cloudflare-origin/certs/examplecom.crt \
 
 ### Internal Documentation
 All files in this repository contain detailed procedures, decisions, and lessons learned. Start with MULTI.md for strategic context, then consult operational guides (CloudflareSettings.md, ConfigServers.md) for procedures.
+
+---
+
+## Target Audience
+This quick-start is for operators and developers who already have shell access to the origin host and Cloudflare account permissions for the relevant zones. Likely scenarios include onboarding a new client domain, validating TLS/vhost health after changes, and triaging domain-mapping issues. Recommended skills: comfortable with Bash, wp-cli, Apache vhost basics, and navigating the Cloudflare dashboard (SSL/TLS, DNS, Rules). Additional resources: ConfigServers.md for full origin runbooks, CloudflareSettings.md for edge policy, MULTI.md for architecture context, DNSTerms.md for terminology, and the scripts/ directory for executable helpers.
