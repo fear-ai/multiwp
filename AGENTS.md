@@ -1,49 +1,80 @@
-# multiwp repository OpenAI Codex settings
+# AI Assistant Guidelines
 
-## Project Structure & Modules
-- Internal or proprietary server-specific settings: `CONF.md`
-- WordPress Multisite configuration project:`MULTI.md`
-- No compile/build system currently; may need to operate from the repo root for relative template and script paths
-- Glossary of SSL/DNS/Cloudflare terminology: `DNSTerms.md`
+*Instructions for AI assistants working with this repository.*
 
-`scripts/`: operational Bash scripts
-- apache-vhost.sh: Add domains/hostnames to the network; uses templates and Cloudflare-origin cert paths.
-- cloud-dns.sh: Create Cloudflare zone + DNS records via API (no UI interaction).
-- cloud-cert.sh: Issue and install certs for the multisite host (cloud/SSL helper).
-- install-cert.sh: Validate or install Cloudflare Origin cert/key, default `/etc/ssl/cloudflare-origin/`
-- [obsole right now] setup-wp.sh: WordPress Multisite setup
+## Project Type
 
-`templates/`: WordPress and Apache config templates
-- wp-config-multisite*.php
-- apache-*.conf
-- .htaccess
+WordPress multisite hosting project. Read README.md first for project overview and structure.
 
-## Coding Style & Naming Conventions
-- Shell scripts use Bash `#!/bin/bash`, 4-space indentation, `set -e` for fail-fast behavior; prefer POSIX-friendly.
-- Filenames kebab-case for scripts and template descriptors.
-- Defensive checks (user, path, and service guards) and clear echo/log lines for major actions.
-- Keep template variables obvious {{PLACEHOLDER}} and document required substitutions.
+## Documentation Philosophy
 
-## Security & Configuration
-- Validate hosts and paths before writing to system locations (`/etc/apache2`, `/var/www/html/wordpress`).
-- NEVER hardcode credentials; rely on prompts or environment variables, avoid running as root.
+- **MULTI.md**: Strategic "why" - architecture decisions, tradeoffs, lessons, future work
+- **CloudflareSettings.md, ConfigServers.md**: Operational "how" - procedures and commands
+- **README.md**: Entry point with quick start and script reference
 
-## Testing
-- Suggest sanity-checking scripts via `bash -n` or `shellcheck`
+Don't duplicate content from these files. Read them when needed.
 
-## Commit & Pull Request
-- Commit messages: present-tense, imperative summary, history focused on operational changes: "Add domain helper prompts"
-- Pull requests may state the development, test, operaing systemenvironment, when relevant or changeds. May include Node, Ubuntu/PHP/MySQL versions.
-- Include file references when noting changes; attach logs or screenshots for Apache/WordPress validation when relevant.
+## Shell Script Conventions
 
-## Structure and Update
-- When adding new sections or subjects, leave existing sections intact unless explicitly requested to change them.
-- When resequencing, only move sections or paragraphs; do not alter their content.
-- When refactoring, you may rewrite or condense, but do not delete or omit existing material unless instructed.
-- Order sections so dependencies are introduced before they’re referenced.
-- Use an expansive, professional voice and include rationale and dependencies rather than terse summaries.
-- When a user says “stop” or “halt,” cease running commands or edits immediately and await further instruction; do not retry failed patches unless asked.
-- on command failure, report the issue once and ask before retrying, instead of looping.
-- Do not run git commands (status/add/commit) unless explicitly instructed; leave commits to user.
-- When told to “read” or “input” a file, open and quote the current version from the repository rather than relying on prior context or memory so instructions reflect the actual on-disk content.
-- Titles and subtitles should be plain, with no commentary or parenthetical remarks in the heading.
+See `scripts/Shell.md` for detailed conventions. Key points:
+- Use `common.sh` library functions
+- Run as ubuntu with sudo (never as root)
+- 4-space indent, quote variables
+- Scripts in kebab-case, functions in lowercase_with_underscores
+
+## Documentation Style
+
+### Markdown
+- ATX headers (`#`, `##`)
+- No commentary in headings
+- Code blocks specify language
+
+### Voice
+- Expansive and professional
+- Explain "why" with "how"
+- Document tradeoffs and alternatives
+
+### Updates
+- Read current file first
+- Preserve existing content unless changing
+- Update TOC if present
+- Don't delete material unless instructed
+
+## Security
+
+- Validate inputs before system operations
+- Never hardcode credentials
+- Document required permissions (e.g., ssl-cert group)
+
+## Git Behavior
+
+**Don't run git commands unless explicitly instructed:**
+- No automatic status/add/commit
+- On command failure: report once, ask before retry
+- When user says "stop": halt immediately
+
+## Commit Messages
+
+Present-tense imperative, focused on operational changes:
+- Good: "Add domain helper prompts"
+- Bad: "Updated file"
+
+## AI Boundaries
+
+### Do
+- Suggest improvements
+- Identify security issues
+- Update documentation
+- Explain operations
+
+### Ask About
+- Architecture changes
+- Operational procedure modifications
+- Breaking changes
+
+### Never Do Automatically
+- Commit to git
+- Run destructive operations
+- Modify production configs
+- Change DNS/Cloudflare
+- Alter database (unless documented procedure)

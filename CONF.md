@@ -17,11 +17,24 @@
 - Site routing handled via `.htaccess` in the WordPress root.
 - Network admin reachable through WordPress dashboard (per-domain login).
 
-## Current Sites (from DB)
-- `https://alphaeos.net/` (primary)
-- `http://alphaeos.net/demo/` (uses HTTP; GUI-created subdirectory)
-- `https://alphaeos.net/avtranscript.com/` (subdirectory; not mapped)
-- `https://recomp.one/` (mapped apex)
+## Current Sites in Multisite Network
+- `https://alphaeos.net/` (blog_id 1, primary site)
+- `https://avtranscript.com/` (blog_id 5, mapped apex, **LIVE**)
+- `https://recomp.one/` (blog_id 6, mapped apex, **LIVE**)
+- `https://talkdao.org/` (blog_id 7, mapped apex, testing domain)
+
+## Infrastructure Status
+Domains with Apache vhosts (HTTP + SSL) and Cloudflare Origin certificates:
+- `alphaeos.net` - Primary multisite domain
+- `avtranscript.com` - Production site
+- `recomp.one` - Production site
+- `talkdao.org` - Testing domain for multisite workflows
+- `zero.directory` - Standalone WordPress (not part of multisite)
+
+## Standalone WordPress Installations
+- **zero.directory**: Independent WordPress at `/var/www/html/zero.directory/`
+  - Not managed by multisite network
+  - Has dedicated vhost and SSL certificate
 
 ## Setup Steps (fresh host)
 - Follow ConfigServers.md for service setup, validation, vhost/cert layout, and CLI commands.

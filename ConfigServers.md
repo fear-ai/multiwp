@@ -2,16 +2,24 @@
 
 ## Table of Contents
 1. [Host & Services](#1-host--services)
-2. [Web Server & Vhosts](#2-web-server--vhosts)
-3. [PHP & Database](#3-php--database)
-4. [WordPress Files & Permissions](#4-wordpress-files--permissions)
-5. [wp-config.php & .htaccess](#5-wp-configphp--htaccess)
-6. [Certificates](#6-certificates)
-7. [Validation & Debug Workflows](#7-validation--debug-workflows)
+2. [User Permissions](#2-user-permissions)
+3. [Web Server & Vhosts](#3-web-server--vhosts)
+4. [PHP & Database](#4-php--database)
+5. [WordPress Files & Permissions](#5-wordpress-files--permissions)
+6. [wp-config.php & .htaccess](#6-wp-configphp--htaccess)
+7. [Certificates](#7-certificates)
+8. [Validation & Debug Workflows](#8-validation--debug-workflows)
 
 ## Host & Services
 - Provision Ubuntu {24} with Apache 2.4, PHP 8.x, MySQL 8.x.
 - Check CONF.md for the latest site-specific recommendations (versions, paths, domains)
+
+## User Permissions
+The deployment user (typically `ubuntu`) must be in the `ssl-cert` group to run scripts that read SSL certificates:
+```bash
+sudo usermod -aG ssl-cert ubuntu
+```
+After adding the group, log out and log back in, or run `newgrp ssl-cert` to activate. Verify with `groups ubuntu`.
 
 ## Cloudflare Origin Certificates
 HTTPS vhosts reference these paths per template.
@@ -45,7 +53,17 @@ HTTPS vhosts reference these paths per template.
 - WordPress state: `sudo -u www-data wp --path=<wp_root> core version`, `wp site list`.
 - DB routing tables: `mysql -u <db_user> -p -D <db_name> -e "SELECT blog_id, domain, path FROM wp_blogs;"`.
 - Functional check: browse domain → confirm HTTPS and admin login; create a test site in Network Admin and verify routing; confirm Cloudflare Full (strict) and DNS after each addition (per CloudflareSettings.md).
-- WordPress mapping: `wp site update --blog_id=<id> --domain=<domain> --path=/ --network`; update `siteurl/home` accordingly.
+- WordPress domain mapping: Map a site to an apex domain using database updates:
+  ```bash
+  # Create site first
+  sudo -u www-data wp --path=/var/www/html/wordpress site create --slug=<slug> --title="Site Title" --email=admin@example.com
+
+  # Update domain mapping in wp_blogs (replace 7 with actual blog_id)
+  sudo -u www-data wp --path=/var/www/html/wordpress db query "UPDATE wp_blogs SET domain='<domain>', path='/' WHERE blog_id=<id>;"
+
+  # Update siteurl and home in site options (replace 7 with actual blog_id)
+  sudo -u www-data wp --path=/var/www/html/wordpress db query "UPDATE wp_<id>_options SET option_value='https://<domain>' WHERE option_name IN ('siteurl', 'home');"
+  ```
 
 - Zone/DNS creation: `scripts/cloud-dns.sh <domain> <ipv4>` (Using Cloudflare API per CloudflareSettings.md, in development).
 
