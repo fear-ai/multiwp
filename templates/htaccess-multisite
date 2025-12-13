@@ -1,0 +1,30 @@
+# WordPress Multisite .htaccess Template
+# Location: /var/www/html/wordpress/.htaccess
+
+RewriteEngine On
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+RewriteBase /
+RewriteRule ^index\.php$ - [L]
+RewriteRule ^([_0-9a-zA-Z-]+/)?wp-admin$ $1wp-admin/ [R=301,L]
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+RewriteRule ^([_0-9a-zA-Z-]+/)?(wp-(content|admin|includes).*) $2 [L]
+RewriteRule ^([_0-9a-zA-Z-]+/)?(.*\.php)$ $2 [L]
+RewriteRule . index.php [L]
+
+# Security headers (security hardening)
+# <IfModule mod_headers.c>
+#     Header always set X-Content-Type-Options nosniff
+#     Header always set X-Frame-Options SAMEORIGIN
+#     Header always set X-XSS-Protection "1; mode=block"
+# </IfModule>
+
+# Block access to sensitive files (security hardening)
+# <Files wp-config.php>
+#     Require all denied
+# </Files>
+# 
+# <Files .htaccess>
+#     Require all denied
+# </Files>
