@@ -2,25 +2,39 @@
 # cloud-dns.sh - Create a Cloudflare zone via the API and add basic DNS records
 #
 # Usage:
-#   CF_API_TOKEN=... CF_ACCOUNT_ID=... cloud-dns.sh example.com 203.0.113.10 [2001:db8::1]
+#   CF_ACCOUNT_ID=... CF_API_TOKEN=... cloud-dns.sh example.com 200.0.1.2
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
 
+# Optional built-in defaults (use for non-sensitive test environments; prefer env/flags otherwise)
+CF_ACCOUNT_ID_DEFAULT=""
+CF_API_TOKEN_DEFAULT=""
+CF_API_EMAIL_DEFAULT=""
+CF_API_KEY_DEFAULT=""
+
 usage() {
   cat <<'EOF'
 Usage: CF_API_TOKEN=... CF_ACCOUNT_ID=...  cloud-dns.sh <domain> <ipv4> [ipv6]
 Creates a Cloudflare zone (full) and adds proxied A/AAAA for apex and www.
+Auth options (choose one):
+  - API Token (recommended): CF_API_TOKEN=... [--token TOKEN]
+  - Global API Key + email : CF_API_KEY=... CF_API_EMAIL=...
 Options:
   -h, --help             Show this help
-  --token TOKEN          Cloudflare API token (overrides CF_API_TOKEN env)
   --account ACCOUNT_ID   Cloudflare account ID (overrides CF_ACCOUNT_ID env)
+  --token TOKEN          Cloudflare API token (overrides CF_API_TOKEN env)
+Notes:
+  You may hardcode defaults in CF_API_TOKEN_DEFAULT / CF_API_KEY_DEFAULT / CF_API_EMAIL_DEFAULT / CF_ACCOUNT_ID_DEFAULT near the top of the script; env vars or flags override them.
 EOF
 }
 
-CF_API_TOKEN_VAL="${CF_API_TOKEN:-}"
-CF_ACCOUNT_ID_VAL="${CF_ACCOUNT_ID:-}"
+# Defer env resolution until after defaults/overrides are applied to avoid set -u errors.
+CF_ACCOUNT_ID_VAL="${CF_ACCOUNT_ID:-$CF_ACCOUNT_ID_DEFAULT}"
+CF_API_TOKEN_VAL="${CF_API_TOKEN:-$CF_API_TOKEN_DEFAULT}"
+CF_API_EMAIL_VAL="${CF_API_EMAIL:-$CF_API_EMAIL_DEFAULT}"
+CF_API_KEY_VAL="${CF_API_KEY:-$CF_API_KEY_DEFAULT}"
 
 while getopts ":h-:" opt; do
   case "$opt" in
@@ -28,8 +42,8 @@ while getopts ":h-:" opt; do
     -)
       case "${OPTARG}" in
         help) usage; exit 0 ;;
-        token=*) CF_API_TOKEN_VAL="${OPTARG#*=}" ;;
         account=*) CF_ACCOUNT_ID_VAL="${OPTARG#*=}" ;;
+        token=*) CF_API_TOKEN_VAL="${OPTARG#*=}" ;;
         *) usage; exit 1 ;;
       esac
       ;;
@@ -42,10 +56,14 @@ if [ $# -lt 2 ]; then usage; exit 1; fi
 
 DOMAIN="$1"
 IPV4="$2"
-IPV6="${3:-}"
 
-[ -n "$CF_API_TOKEN_VAL" ] || err "CF_API_TOKEN required (env or --token)"
 [ -n "$CF_ACCOUNT_ID_VAL" ] || err "CF_ACCOUNT_ID required (env or --account)"
+if [ -z "$CF_API_TOKEN_VAL" ]; then
+  [ -n "$CF_API_KEY_VAL" ] && [ -n "$CF_API_EMAIL_VAL" ] || err "Provide CF_API_TOKEN or both CF_API_KEY and CF_API_EMAIL"
+  AUTH_MODE="key"
+else
+  AUTH_MODE="token"
+fi
 require_cmd curl
 require_cmd jq
 
@@ -53,9 +71,14 @@ api() {
   local method="$1"
   local path="$2"
   shift 2
+  local headers=("-H" "Content-Type: application/json")
+  if [ "$AUTH_MODE" = "token" ]; then
+    headers+=("-H" "Authorization: Bearer $CF_API_TOKEN_VAL")
+  else
+    headers+=("-H" "X-Auth-Key: $CF_API_KEY_VAL" "-H" "X-Auth-Email: $CF_API_EMAIL_VAL")
+  fi
   curl -sS -X "$method" "$CF_API_BASE${path}" \
-    -H "Authorization: Bearer $CF_API_TOKEN_VAL" \
-    -H "Content-Type: application/json" \
+    "${headers[@]}" \
     "$@"
 }
 
@@ -96,10 +119,5 @@ add_dns() {
 
 add_dns "A" "$DOMAIN" "$IPV4"
 add_dns "A" "www.${DOMAIN}" "$IPV4"
-
-if [ -n "$IPV6" ]; then
-  add_dns "AAAA" "$DOMAIN" "$IPV6"
-  add_dns "AAAA" "www.${DOMAIN}" "$IPV6"
-fi
 
 log "Done. Set nameservers at registrar to the ones Cloudflare assigned for this zone."
