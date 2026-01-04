@@ -41,18 +41,21 @@ For the canonical, step-by-step onboarding workflow and troubleshooting guidance
 - Rules → Transform Rules → Managed Transforms → "Add security headers"
 
 #### Issue Cloudflare origin certificate
+If you are using the Cloudflare UI, create the certificate and download the cert/key pair.
 - SSL/TLS → Origin Server → Create Certificate
-  [Download of Copy cert and key]
+  [Download or Copy cert and key]
+If you are using the API workflow, `get-cert.sh` issues the certificate for you and this UI step is not required.
 
 #### Install certificate on origin server
-`sudo ./scripts/install-cert.sh domain.com`
+Use the unified helper so the same command supports manual paste and API issuance.
+`sudo ./scripts/get-cert.sh --manual domain.com`
   [Paste cert and key when prompted]
 
 #### Create Apache vhosts
 `sudo ./scripts/apache-vhost.sh domain.com`
 
 #### Add to WordPress multisite
-`./scripts/install-site.sh domain.com "Site Title" email@domain.com
+`./scripts/install-site.sh domain.com "Site Title" email@domain.com`
 
 #### Verify
 `curl -I https://domain.com`
@@ -66,7 +69,7 @@ For the canonical, step-by-step onboarding workflow and troubleshooting guidance
 `ls /etc/apache2/sites-enabled/`
 
 #### List installed certificates
-ls /etc/ssl/cloudflare-origin/certs/`
+`ls /etc/ssl/cloudflare-origin/certs/`
 
 #### Check DNS resolution
 `dig +short domain.com`
@@ -104,7 +107,6 @@ multiwp/
 |--------|---------|--------|
 | `apache-vhost.sh` | Create Apache HTTP + SSL vhosts for domain | Exercised |
 | `install-site.sh` | Add site to WordPress multisite, map to apex domain | Exercised |
-| `install-cert.sh` | Validate or install Cloudflare Origin cert/key | Exercised |
 | `cloud-dns.sh` | Create Cloudflare zone + DNS records via API | Not exercised |
 | `get-cert.sh` | Issue or install Cloudflare Origin cert/key (API or manual) | Not exercised |
 | `common.sh` | Shared library functions (sourced by other scripts) | Library |

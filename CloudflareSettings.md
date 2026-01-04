@@ -78,10 +78,9 @@ Cloudflare UI is authoritative for SSL mode, redirects, and headers. Automation 
 - Does: creates the zone (full setup) and adds proxied A/AAAA for apex+www. Env or flags: `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `--token`, `--account`.
 
 ### Origin Cert Placement
-For most workflows, use the unified cert helper so the same command works whether you prefer the Cloudflare API or manual paste. Keep `install-cert.sh` available when you already have a cert/key block and want a focused install/validation step.
+Use the unified cert helper so the same command supports manual paste, API issuance, and validation in a single workflow. This keeps the operational steps consistent across environments while preserving the default filesystem layout and permissions documented in ConfigServers.md.
 
-- Primary script: `scripts/get-cert.sh <domain>` (supports `--api`, `--manual`, or `--auto`)
-- Alternative/manual-only: `scripts/install-cert.sh <domain>`
+- Script: `scripts/get-cert.sh <domain>` (supports `--api`, `--manual`, or `--auto`)
 - Does: validate/install Cloudflare Origin cert/key into `/etc/ssl/cloudflare-origin/{certs,keys}/<safe>.{crt,key}` with perms root:ssl-cert 640; prints SANs.
 - Paths: defaults align with the origin cert locations defined in `ConfigServers.md`; update that runbook first if you need non-default storage and keep templates/scripts in sync.
 
@@ -117,7 +116,7 @@ Account-scoped tokens must be verified against the account endpoint rather than 
 - Sequence (per domain):
   1) UI/API: Create/verify zone and DNS (apex + www), proxy on.
   2) UI: Issue origin cert, download cert/key.
-  3) Automation: Run `install-cert.sh` to place cert/key on origin with correct perms.
+  3) Automation: Run `get-cert.sh` to place cert/key on origin with correct perms (manual or API-based issuance).
   4) Automation: Run `apache-vhost.sh` to generate/enable vhosts referencing the origin certs; script runs configtest.
   5) UI: Set SSL mode to Full (strict); add HTTPS enforcement (Always Use HTTPS) and headers. Introduce Redirect Rules only if you have a tested need; otherwise leave them disabled to avoid loops.
   6) Verify: Browse HTTP→HTTPS redirect, check headers, confirm Full (strict) active.

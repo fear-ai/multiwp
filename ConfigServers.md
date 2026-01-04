@@ -32,7 +32,7 @@ HTTPS vhosts reference these paths per template.
   - `/etc/ssl/cloudflare-origin/certs/<safe>.crt`
   - `/etc/ssl/cloudflare-origin/keys/<safe>.key`
   Permissions: root:ssl-cert 640.
-- Install: `sudo scripts/install-cert.sh <domain>`.
+- Install: `sudo scripts/get-cert.sh --manual <domain>` for a paste-based workflow, or `sudo scripts/get-cert.sh --api <domain>` when Cloudflare API credentials are configured.
 
 ## Web Server & Vhosts
 - Enable Apache modules: `sudo a2enmod rewrite ssl headers && sudo systemctl reload apache2`.

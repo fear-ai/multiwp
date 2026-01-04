@@ -70,7 +70,7 @@ The edge layer is where HTTP→HTTPS redirects, proxying, and response headers a
 Origin configuration is a prerequisite for strict TLS and correct routing, so evaluation validates health and wiring while operational scripts create or install the required files.
 
 - **Validation (`scripts/check-origin.sh`)**: Confirms origin health and configuration alignment as described above, including cert presence, vhost references, and Apache readiness.
-- **Operational scripts (`scripts/install-cert.sh`, `scripts/apache-vhost.sh`)**: Install certs or generate and enable vhosts; they are intended for setup, not compliance reporting.
+- **Operational scripts (`scripts/get-cert.sh`, `scripts/apache-vhost.sh`)**: Install or issue origin certs and generate/enable vhosts; they are intended for setup, not compliance reporting.
 
 ### WordPress Multisite Mapping
 WordPress routing depends on the origin layer, so validation inspects the multisite state and mapping data without updating them.
