@@ -106,8 +106,13 @@ multiwp/
 | `install-site.sh` | Add site to WordPress multisite, map to apex domain | Exercised |
 | `install-cert.sh` | Validate or install Cloudflare Origin cert/key | Exercised |
 | `cloud-dns.sh` | Create Cloudflare zone + DNS records via API | Not exercised |
-| `cloud-cert.sh` | Issue Cloudflare Origin cert via API | Not exercised |
+| `get-cert.sh` | Issue or install Cloudflare Origin cert/key (API or manual) | Not exercised |
 | `common.sh` | Shared library functions (sourced by other scripts) | Library |
+| `check-edge.sh` | Validate Cloudflare edge behavior and headers | Exercised |
+| `check-origin.sh` | Validate origin certs, vhosts, and Apache health | Exercised |
+| `check-wp.sh` | Validate multisite mappings and site URLs | Exercised |
+| `verify-domain.sh` | End-to-end validation (edge, origin, WP) | Exercised |
+| `verify-cf-auth.sh` | Validate Cloudflare credentials (token/key) | Exercised |
 
 #### Test scripts syntax
 `bash -n scripts/*.sh`

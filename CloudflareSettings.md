@@ -17,6 +17,7 @@ Cloudflare edge configuration for the multisite network, covering the preferred 
    5.1. [Create Zone + DNS](#31-create-zone--dns)
    5.2. [Origin Cert Placement](#32-origin-cert-placement)
    5.3. [Vhost Generation](#33-vhost-generation)
+   5.4. [API Authentication](#34-api-authentication)
 6. [Hybrid Execution (UI + Automation)](#hybrid-execution-ui--automation)
 7. [Domain Registration & Transfer to Cloudflare](#domain-registration--transfer-to-cloudflare)
    7.1. [Manual Transfer Steps (Namecheap, NameSilo)](#51-manual-transfer-steps-namecheap-namesilo)
@@ -77,13 +78,40 @@ Cloudflare UI is authoritative for SSL mode, redirects, and headers. Automation 
 - Does: creates the zone (full setup) and adds proxied A/AAAA for apex+www. Env or flags: `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `--token`, `--account`.
 
 ### Origin Cert Placement
-- Script: `scripts/install-cert.sh <domain>`
+For most workflows, use the unified cert helper so the same command works whether you prefer the Cloudflare API or manual paste. Keep `install-cert.sh` available when you already have a cert/key block and want a focused install/validation step.
+
+- Primary script: `scripts/get-cert.sh <domain>` (supports `--api`, `--manual`, or `--auto`)
+- Alternative/manual-only: `scripts/install-cert.sh <domain>`
 - Does: validate/install Cloudflare Origin cert/key into `/etc/ssl/cloudflare-origin/{certs,keys}/<safe>.{crt,key}` with perms root:ssl-cert 640; prints SANs.
 - Paths: defaults align with the origin cert locations defined in `ConfigServers.md`; update that runbook first if you need non-default storage and keep templates/scripts in sync.
 
 ### Vhost Generation
 - Script: `scripts/apache-vhost.sh <domain>`
 - Uses templates pointing at origin cert paths; enables HTTP/SSL vhosts. Add origin certs first, then run; script runs `apache2ctl configtest`.
+
+### API Authentication
+Cloudflare API access is needed only when you run the API-backed scripts or optional API checks. Keep authentication configuration centralized and local to the operator’s host to avoid hardcoding secrets into the repository.
+
+Recommended approach:
+- Store credentials in a local auth file, referenced by `CF_AUTH_FILE` (default: `~/.config/cloudflare/auth`).
+- Keep the file permissions tight (`chmod 700 ~/.config/cloudflare` and `chmod 600 ~/.config/cloudflare/auth`).
+- Prefer scoped API tokens over the Global API Key whenever the required permissions are available.
+
+Expected variables in the auth file or environment:
+- `CF_API_TOKEN` (preferred) or `CF_API_KEY` + `CF_API_EMAIL`
+- `CF_ACCOUNT_ID` (required for zone creation)
+- `CF_ZONE_ID` (required for optional API validation checks)
+
+Optional metadata fields:
+- `CF_ACCOUNT` (human-readable account name)
+- `CF_ZONE` (primary zone/domain for the account)
+- `CF_ZONE_MAIN` (preferred primary zone/domain when multiple zones exist)
+- `CF_KEY_SCOPE` (expected scope for the API key, default `account`)
+- `CF_TOKEN_SCOPE` (expected scope for the API token, default `account`)
+
+Environment variables always take precedence over the auth file, so one-off overrides can be provided safely at runtime without editing the file. If a token or key is rotated, update the local auth file and re-run the verification checks.
+
+Account-scoped tokens must be verified against the account endpoint rather than the user endpoint. For a quick sanity check, use `scripts/verify-cf-auth.sh`, which prefers the account endpoint when `CF_ACCOUNT_ID` is present and falls back to the user endpoint if the token is user-scoped.
 
 ## Hybrid Execution (UI + Automation)
 - Sequence (per domain):

@@ -8,7 +8,6 @@ SSL_BASE="${SSL_BASE:-/etc/ssl/cloudflare-origin}"
 SSL_CERT_DIR="${SSL_CERT_DIR:-$SSL_BASE/certs}"
 SSL_KEY_DIR="${SSL_KEY_DIR:-$SSL_BASE/keys}"
 APACHE_SITES_DIR="${APACHE_SITES_DIR:-/etc/apache2/sites-available}"
-CF_API_BASE="https://api.cloudflare.com/client/v4"
 WORDPRESS_ROOT="${WORDPRESS_ROOT:-/var/www/html/wordpress}"
 TEMPLATE_DIR="${TEMPLATE_DIR:-$ROOT_DIR/templates}"
 

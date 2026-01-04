@@ -516,7 +516,7 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 
 ### 7. API-Driven Onboarding (Not Yet Exercised)
 
-**Implemented but Not Used**: Scripts exist for Cloudflare API automation (cloud-dns.sh, cloud-cert.sh).
+**Implemented but Not Used**: Scripts exist for Cloudflare API automation (cloud-dns.sh, get-cert.sh).
 
 **Why Not Used Yet:**
 - Manual UI workflow is well-documented and tested
@@ -536,7 +536,7 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 
 **Investigation Needed:**
 - Test cloud-dns.sh for zone creation and DNS record management
-- Test cloud-cert.sh for automated origin certificate issuance
+- Test get-cert.sh for automated origin certificate issuance
 - Standardize API token management (environment variables vs credential store)
 - Document failure modes and recovery procedures
 - Compare reliability of API vs UI workflows
