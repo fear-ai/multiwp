@@ -1,7 +1,8 @@
 # Server & Web Configuration
+Date: January 5, 2026
 
 ## Introduction
-Operational runbook for the origin layer: provisioning, permissions, Apache vhosts, certificates, multisite routing, and validation workflows. Use alongside CloudflareSettings.md for edge policy.
+Operational runbook for the origin server, which hosts WordPress: provisioning, permissions, Apache vhosts, certificates, multisite routing, and validation checks. Use alongside CloudflareSettings.md for edge policy. In this document, "origin" refers to the origin server from Cloudflare's perspective.
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -12,8 +13,8 @@ Operational runbook for the origin layer: provisioning, permissions, Apache vhos
 6. [PHP & Database](#php--database)
 7. [WordPress Files & Permissions](#wordpress-files--permissions)
 8. [wp-config.php & .htaccess](#wp-configphp--htaccess)
-9. [Validation & Debug Workflows](#validation--debug-workflows)
-10. [Site Onboarding Workflow & Troubleshooting](#site-onboarding-workflow--troubleshooting)
+9. [Validation & Debug Checks](#validation--debug-checks)
+10. [Site Onboarding & Troubleshooting](#site-onboarding--troubleshooting)
 11. [Target Audience](#target-audience)
 
 ## Host & Services
@@ -52,7 +53,7 @@ HTTPS vhosts reference these paths per template.
 - Multisite `.htaccess`: standard subdirectory rules from WordPress docs; `AllowOverride All` on docroot; avoid custom rewrites that bypass multisite routing.
 - Single-site [standalone] `.htaccess`: standard single-site rules; typically 640, owned by deployer, readable by web server.
 
-## Validation & Debug Workflows
+## Validation & Debug Checks
 - Vhosts present/enabled: `sudo ls /etc/apache2/sites-available`, `sudo ls /etc/apache2/sites-enabled`.
 - SSL/TLS cert validation: `sudo openssl x509 -in /etc/ssl/cloudflare-origin/certs/<safe>.crt -noout -subject -issuer -dates -ext subjectAltName`.
 - DNS reachability: `dig A <domain> +short`, `dig AAAA <domain> +short`.
@@ -75,7 +76,7 @@ HTTPS vhosts reference these paths per template.
 
 *Terminology in DNSTerms.md.*
 
-## Site Onboarding Workflow & Troubleshooting
+## Site Onboarding & Troubleshooting
 Authoritative sequence for adding a mapped-apex site; mirrors `scripts/install-site.sh` and provides the full detail beyond the quick summary.
 
 1) Create the site in subdirectory form to obtain a blog_id.
@@ -103,6 +104,19 @@ Pitfalls and expectations:
 - WP-CLI has no `wp site update` subcommand; direct DB updates above are the supported method.
 - Order matters: update `wp_blogs` before using `--url=https://<domain>` with wp-cli, otherwise the site is “not found.”
 - `sh: 1: /usr/sbin/sendmail: not found` during site create is expected on hosts without an MTA; site creation still succeeds. Use an SMTP plugin later if email delivery is required.
+
+### Site Troubleshooting
+When a mapped apex domain serves the primary multisite site instead of the intended site, the cause is almost always a mismatch in routing data or vhost selection. In a multisite network, WordPress routes requests by matching the incoming host and path against `wp_blogs`, and Apache must first map the request to the correct vhost via `ServerName`. If any of these pieces are out of sync, the request falls back to the primary domain and appears as the main site.
+
+Authoritative checks, in the order they affect routing:
+- **WordPress mapping (`wp_blogs`)**: Confirm the domain and path are correct for the target blog ID. The mapping must be the apex domain and `/`, otherwise WordPress will not route to the intended site.  
+  Example query: `SELECT blog_id, domain, path FROM wp_blogs;`
+- **Site URLs (`wp_<blog_id>_options`)**: Confirm `siteurl` and `home` are set to `https://<domain>`. If they still point at the primary domain, generated links and canonical redirects will pull visitors back to the main site.  
+  Example query: `SELECT option_name, option_value FROM wp_<id>_options WHERE option_name IN ('siteurl','home');`
+- **Apache vhost (`ServerName`)**: Confirm the SSL vhost for the domain has a matching `ServerName` and that the vhost is enabled. If the `ServerName` does not match the request, Apache selects a different vhost and WordPress never sees the correct host.  
+  Example check: `grep -R "ServerName <domain>" /etc/apache2/sites-available` and confirm the file is enabled in `/etc/apache2/sites-enabled`.
+
+Use the mapping steps in this section to correct data first, then reload Apache if you update vhost files so the routing change takes effect.
 
 Refer to CloudflareSettings.md for edge steps (proxy, certificates, HTTPS enforcement) that must precede public cutover.
 

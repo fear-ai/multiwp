@@ -19,14 +19,14 @@ usage() {
 Usage: script-name.sh [OPTIONS] <domain>
 Description of what this does.
 Options:
-  -h, --help    Show this help
+  --help        Show this help
 EOF
 }
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -h|--help) usage; exit 0 ;;
+        --help) usage; exit 0 ;;
         -*) err "Unknown option: $1" ;;
         *) break ;;
     esac

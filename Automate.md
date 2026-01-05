@@ -1,4 +1,5 @@
 # Automation for Evaluation and Compliance
+Date: January 5, 2026
 
 ## Introduction
 This document proposes automation to evaluate the multisite environment against the instructions and recommendations documented in this repository. The intent is verification, not provisioning, so each script is designed to read and validate state without changing production settings. This keeps automation aligned with the operational runbooks while reducing the time needed to confirm a domain is compliant.
@@ -113,12 +114,12 @@ Recommended manual checks include:
 ## Implementation Notes
 These scripts are implemented as read-only validation helpers and should not modify production configurations, DNS, or database state. Any optional API usage is gated behind explicit environment variables and should fail gracefully when unavailable. This approach keeps the automation aligned with the documented workflows and minimizes operational risk.
 
-Cloudflare API credentials can be loaded from a local auth file via `scripts/auth.sh`. The loader respects pre-existing environment variables, so a user can override values per run while still keeping a secure default file. Set `CF_AUTH_FILE` to point at the auth file path (for example, `~/.config/cloudflare/auth`) when you want the scripts to load credentials from disk instead of the current environment.
+Cloudflare API credentials can be loaded from a local auth file via `scripts/auth.sh`. The loader respects pre-existing environment variables, so a user can override values per run while still keeping a secure default file. Set `CF_AUTH_FILE` to point at the auth file path (for example, `~/.config/cloudflare/default.auth`) when you want the scripts to load credentials from disk instead of the current environment.
 
 ## Placement Recommendations
 Some topics in this document could be relocated or summarized in other files to keep the runbooks focused while avoiding duplication. The list below identifies where each topic naturally fits and why, without changing the existing sources of truth.
 
 - **Cloudflare edge validation details** could be summarized in CloudflareSettings.md under the Automation section, because that runbook already owns edge policy and UI workflows. A brief pointer to `scripts/check-edge.sh` would keep readers in the same context while avoiding duplication of the full validation narrative.
-- **Origin validation details** could be summarized in ConfigServers.md under Validation & Debug Workflows, since it already enumerates command-line checks for certificates, Apache, and vhosts. A single paragraph referencing `scripts/check-origin.sh` and `scripts/check-wp.sh` would align with existing verification guidance.
+- **Origin validation details** could be summarized in ConfigServers.md under Validation & Debug Checks, since it already enumerates command-line checks for certificates, Apache, and vhosts. A single paragraph referencing `scripts/check-origin.sh` and `scripts/check-wp.sh` would align with existing verification guidance.
 - **High-level automation overview** could be referenced in README.md as a short “Validation Automation” subsection, because README.md is the entry point and should expose the existence of evaluation tooling without restating the full process.
 - **Strategic rationale for read-only automation** belongs in MULTI.md if you want a durable explanation of tradeoffs; this would keep operational files focused on steps and keep strategic reasoning in the architecture document.

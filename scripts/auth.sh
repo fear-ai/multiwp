@@ -4,7 +4,7 @@
 CF_API_BASE="${CF_API_BASE:-https://api.cloudflare.com/client/v4}"
 
 load_cloudflare_auth() {
-    local auth_file="${1:-${CF_AUTH_FILE:-$HOME/.config/cloudflare/auth}}"
+    local auth_file="${1:-${CF_AUTH_FILE:-$HOME/.config/cloudflare/default.auth}}"
     local prev_account_id="${CF_ACCOUNT_ID-}"
     local prev_api_token="${CF_API_TOKEN-}"
     local prev_api_email="${CF_API_EMAIL-}"

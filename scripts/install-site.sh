@@ -33,7 +33,7 @@ Arguments:
   email     Admin email (default: alphaeosnet@gmail.com)
 
 Options:
-  -h, --help    Show this help message
+  --help    Show this help message
 
 Examples:
   ./install-site.sh example.com
@@ -50,7 +50,7 @@ EOF
 # Parse options
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -h|--help)
+        --help)
             usage
             exit 0
             ;;

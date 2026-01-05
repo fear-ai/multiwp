@@ -1,8 +1,13 @@
 # WordPress Multisite Tools
+Date: January 5, 2026
 
 ## Introduction
 This project implements a WordPress multisite network in subdirectory mode with apex domain mapping. Each client site uses its own domain while sharing WordPress core, themes, and plugins for operational efficiency. Cloudflare provides DNS, CDN, and edge security.
-Included are shared VPS server and WordPress multisite installation instructions, tooling, and templates to host many domains via Cloudflare and Apache, with per-domain SSL. Operators and developers will find strategy in MULTI.md, with authoritative runbooks CloudflareSettings.md for edge policy and ConfigServers.md for origin/server steps.
+Included are shared VPS server and WordPress multisite installation instructions, tooling, and templates to host many domains via Cloudflare and Apache, with per-domain SSL. See the Documentation Map below for the authoritative runbooks and strategic context.
+
+## Target Audience
+Likely system configuration scenarios include onboarding a new client domain, validating TLS/vhost health after changes, adapting scripts to the local environment.
+Recommended skills: Bash scripting, WP-CLI, Apache vhost, Cloudflare dashboard (SSL/TLS, DNS).
 
 ## Key Concepts
 
@@ -22,13 +27,15 @@ Included are shared VPS server and WordPress multisite installation instructions
 - **Web**: Apache 2.4.58
 - **PHP**: 8.3.11
 - **Database**: MySQL 8.0.43
-- **WordPress**: 6.8.3 multisite (subdirectory mode)
+- **WordPress**: 6.9 multisite (subdirectory mode)
 
 ---
 
 ## Quick Start: Administrator
 
-For the canonical, step-by-step onboarding workflow and troubleshooting guidance, reference the "Site Onboarding Workflow" section in ConfigServers.md; this is a condensed starter.
+Required commands for the quick-start scripts and checks: `curl`, `dig`, `jq`, `wp`, `apache2ctl`, `openssl`.
+
+For the canonical, step-by-step onboarding and troubleshooting guidance, reference the "Site Onboarding & Troubleshooting" section in ConfigServers.md; this is a condensed starter.
 
 ### Add Site to the Network
 
@@ -41,6 +48,7 @@ For the canonical, step-by-step onboarding workflow and troubleshooting guidance
 - Rules → Transform Rules → Managed Transforms → "Add security headers"
 
 #### Issue Cloudflare origin certificate
+Choose one path: UI issuance with manual install, or API issuance with `get-cert.sh --api`.
 If you are using the Cloudflare UI, create the certificate and download the cert/key pair.
 - SSL/TLS → Origin Server → Create Certificate
   [Download or Copy cert and key]
@@ -82,11 +90,21 @@ Use the unified helper so the same command supports manual paste and API issuanc
 
 ## Quick Start: Developer
 
+### Documentation Map
+The documents below describe different layers of the system and are intended to be read in this order so the operational dependencies remain clear.
+
+- `README.md`: Entry point and quick start with the script index.
+- `CloudflareSettings.md`: Cloudflare edge policy, API auth expectations, and when to use Cloudflare-facing scripts.
+- `ConfigServers.md`: Origin/server runbook for certificates, Apache vhosts, and WordPress multisite operations.
+- `MULTI.md`: Strategic architecture decisions, tradeoffs, and future work.
+- `Automate.md`: Evaluation and compliance automation overview for the check/verify scripts.
+- `scripts/Shell.md`: Conventions for writing scripts in this repository and using shared helpers.
+
 ### Repository Structure
 
 ```
 multiwp/
-├── AGENTS.md                      # AI assistant guidelines
+├── AGENTS.md                      # AI assistant guardrails and repo-specific instructions
 ├── README.md                      # This file
 ├── MULTI.md                       # Architecture & strategic decisions
 ├── CloudflareSettings.md          # Cloudflare operational guide
@@ -97,7 +115,6 @@ multiwp/
 ├── templates/
 │   ├── apache-http.conf           # Apache HTTP vhost template
 │   ├── apache-ssl.conf            # Apache HTTPS vhost template
-│   ├── wp-config-multisite.php    # WordPress config template
 │   └── .htaccess                  # WordPress multisite rewrite rules
 ```
 
@@ -109,19 +126,21 @@ multiwp/
 | `install-site.sh` | Add site to WordPress multisite, map to apex domain | Exercised |
 | `cloud-dns.sh` | Create Cloudflare zone + DNS records via API | Not exercised |
 | `get-cert.sh` | Issue or install Cloudflare Origin cert/key (API or manual) | Not exercised |
-| `common.sh` | Shared library functions (sourced by other scripts) | Library |
+| `cf-check.sh` | Inspect Cloudflare zone settings via API | Not exercised |
 | `check-edge.sh` | Validate Cloudflare edge behavior and headers | Exercised |
 | `check-origin.sh` | Validate origin certs, vhosts, and Apache health | Exercised |
 | `check-wp.sh` | Validate multisite mappings and site URLs | Exercised |
 | `verify-domain.sh` | End-to-end validation (edge, origin, WP) | Exercised |
 | `verify-cf-auth.sh` | Validate Cloudflare credentials (token/key) | Exercised |
+| `auth.sh` | Cloudflare auth helpers and API request utilities | Library |
+| `common.sh` | Shared library functions (sourced by other scripts) | Library |
 
 #### Test scripts syntax
 `bash -n scripts/*.sh`
 
 #### Permissions
 - Run as user with sudo permissions and in ssl-cert group, not as root
-`sudo usermod -aG ssl-cert {user} && sudo newgrp ssl-cert
+`sudo usermod -aG ssl-cert {user} && sudo newgrp ssl-cert`
 
 #### Verify commands
 WP-CLI, JSON processor, HTTP client
@@ -131,19 +150,16 @@ WP-CLI, JSON processor, HTTP client
 
 ### Contributing
 
-See [AGENTS.md](AGENTS.md) for:
-- Coding conventions
-- Commit message format
-- Documentation guidelines
+See the following references for implementation details:
+- `scripts/Shell.md` for scripting conventions and shared helpers
+- `AGENTS.md` for AI assistant guidelines specific to this repository
 
 ---
 
 ### Troubleshooting
 
 **Site shows primary domain content:**
-- Verify domain mapping in wp_blogs table
-- Check siteurl/home in wp_<blog_id>_options table
-- Verify Apache vhost ServerName matches domain
+See the "Site Onboarding & Troubleshooting" section in ConfigServers.md for the authoritative mapping checks.
 
 **Certificate errors:**
 - Check cert path in Apache vhost config
@@ -164,9 +180,3 @@ See [AGENTS.md](AGENTS.md) for:
 - [Cloudflare Origin Certificates](https://developers.cloudflare.com/ssl/origin-configuration/origin-ca/)
 
 ---
-
-## Target Audience
-This document is for system administrators and for developers. Likely system configuration scenarios include onboarding a new client domain, validating TLS/vhost health after changes, adapting scripts to the local environment.
-Recommended skills: Bash scripting, WP-CLI, Apache vhost, Cloudflare dashboard (SSL/TLS, DNS).
-
-Date: December 5, 2025

@@ -28,8 +28,8 @@ usage() {
 Usage: verify-cf-auth.sh [OPTIONS]
 Validates Cloudflare API credentials (token and/or global API key).
 Options:
-  -h, --help         Show this help
-  --auth-file PATH   Auth file to load (default: ~/.config/cloudflare/auth)
+  --help             Show this help
+  --auth-file PATH   Auth file to load (default: ~/.config/cloudflare/default.auth)
   --account ID       Override CF_ACCOUNT_ID for account-scoped token verification
   --token TOKEN      Override CF_API_TOKEN
   --email EMAIL      Override CF_API_EMAIL
@@ -37,9 +37,8 @@ Options:
 EOF
 }
 
-while getopts ":h-:" opt; do
+while getopts ":-:" opt; do
     case "$opt" in
-        h) usage; exit 0 ;;
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;

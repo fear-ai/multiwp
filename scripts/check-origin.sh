@@ -15,16 +15,15 @@ usage() {
 Usage: check-origin.sh [OPTIONS] domain1 [domain2...]
 Validates origin certificates, Apache configuration, and vhost wiring.
 Options:
-  -h, --help            Show this help
+  --help                Show this help
   --ssl-dir DIR         Base SSL dir (default: /etc/ssl/cloudflare-origin)
   --apache-dir DIR      Apache sites-available dir (default: /etc/apache2/sites-available)
   --root PATH           WordPress root (default: /var/www/html/wordpress)
 USAGE
 }
 
-while getopts ":h-:" opt; do
+while getopts ":-:" opt; do
     case "$opt" in
-        h) usage; exit 0 ;;
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;

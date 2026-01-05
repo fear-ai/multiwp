@@ -1,4 +1,5 @@
 # AI Assistant Guidelines
+Date: January 5, 2026
 
 *Instructions for AI assistants working with this repository.*
 

@@ -14,16 +14,15 @@ usage() {
 Usage: check-edge.sh [OPTIONS] domain1 [domain2...]
 Validates Cloudflare edge behavior (redirects, proxy headers, security headers).
 Options:
-  -h, --help         Show this help
+  --help             Show this help
   --timeout SECONDS  HTTP timeout for curl (default: 10)
   --api              Enable optional Cloudflare API checks (requires CF_ZONE_ID and either CF_API_TOKEN or CF_API_KEY+CF_API_EMAIL)
-  --auth-file PATH   Auth file to load (default: ~/.config/cloudflare/auth)
+  --auth-file PATH   Auth file to load (default: ~/.config/cloudflare/default.auth)
 USAGE
 }
 
-while getopts ":h-:" opt; do
+while getopts ":-:" opt; do
     case "$opt" in
-        h) usage; exit 0 ;;
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;

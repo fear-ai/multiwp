@@ -26,18 +26,17 @@ Auth options (choose one):
   - API Token (recommended): CF_API_TOKEN=... [--token TOKEN]
   - Global API Key + email : CF_API_KEY=... CF_API_EMAIL=...
 Options:
-  -h, --help             Show this help
+  --help                 Show this help
   --account ACCOUNT_ID   Cloudflare account ID (overrides CF_ACCOUNT_ID env)
   --token TOKEN          Cloudflare API token (overrides CF_API_TOKEN env)
-  --auth-file PATH       Auth file to load (default: ~/.config/cloudflare/auth)
+  --auth-file PATH       Auth file to load (default: ~/.config/cloudflare/default.auth)
 Notes:
   You may hardcode defaults in CF_API_TOKEN_DEFAULT / CF_API_KEY_DEFAULT / CF_API_EMAIL_DEFAULT / CF_ACCOUNT_ID_DEFAULT near the top of the script; env vars or flags override them.
 EOF
 }
 
-while getopts ":h-:" opt; do
+while getopts ":-:" opt; do
   case "$opt" in
-    h) usage; exit 0 ;;
     -)
       case "${OPTARG}" in
         help) usage; exit 0 ;;

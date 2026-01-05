@@ -13,7 +13,7 @@ usage() {
 Usage: verify-domain.sh [OPTIONS] domain1 [domain2...]
 Runs edge, origin, and WordPress validation for each domain.
 Options:
-  -h, --help            Show this help
+  --help                Show this help
   --api                 Enable Cloudflare API checks in check-edge.sh
   --ssl-dir DIR         Base SSL dir (default: /etc/ssl/cloudflare-origin)
   --apache-dir DIR      Apache sites-available dir (default: /etc/apache2/sites-available)
@@ -22,9 +22,8 @@ Options:
 USAGE
 }
 
-while getopts ":h-:" opt; do
+while getopts ":-:" opt; do
     case "$opt" in
-        h) usage; exit 0 ;;
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;

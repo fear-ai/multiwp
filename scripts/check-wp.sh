@@ -11,14 +11,13 @@ usage() {
 Usage: check-wp.sh [OPTIONS] domain1 [domain2...]
 Validates WordPress multisite mapping and site URLs for apex domains.
 Options:
-  -h, --help     Show this help
+  --help         Show this help
   --root PATH    WordPress root (default: /var/www/html/wordpress)
 USAGE
 }
 
-while getopts ":h-:" opt; do
+while getopts ":-:" opt; do
     case "$opt" in
-        h) usage; exit 0 ;;
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;

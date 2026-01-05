@@ -12,7 +12,7 @@
 # Options:
 #   --ssl-dir DIR   Base SSL dir (default: /etc/ssl/cloudflare-origin)
 #   --force         Overwrite existing files without prompt
-#   -h, --help      Show help
+#   --help          Show help
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,15 +34,14 @@ Modes:
 
 Options:
   --ssl-dir DIR   Base SSL dir (default: /etc/ssl/cloudflare-origin)
-  --auth-file PATH Auth file to load (default: ~/.config/cloudflare/auth)
+  --auth-file PATH Auth file to load (default: ~/.config/cloudflare/default.auth)
   --force         Overwrite existing files without prompt
-  -h, --help      Show this help
+  --help          Show this help
 EOF
 }
 
-while getopts ":h-:" opt; do
+while getopts ":-:" opt; do
     case "$opt" in
-        h) usage; exit 0 ;;
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;

@@ -243,9 +243,8 @@ process_domain() {
     return 1
 }
 
-while getopts ":h-:" opt; do
+while getopts ":-:" opt; do
     case "$opt" in
-        h) show_help ;;
         -)
             case "${OPTARG}" in
                 http) HTTP_ONLY=true ;;
