@@ -96,7 +96,7 @@ Recommended approach:
 - Store credentials in a local auth file, referenced by `CF_AUTH_FILE` (default: `~/.config/cloudflare/default.auth`).
 - Keep the file permissions tight (`chmod 700 ~/.config/cloudflare` and `chmod 600 ~/.config/cloudflare/default.auth`).
 - Prefer scoped API tokens over the Global API Key whenever the required permissions are available.
-Using a `.auth` extension keeps account files easy to identify. The default file is `default.auth`, and additional account-specific files can follow the same pattern (for example, `alphaeosnet.auth`).
+Using a `.auth` extension keeps account files easy to identify. The default file is `default.auth`, and additional account-specific files can follow the same pattern (for example, `account-name.auth`). A template is available at `scripts/example.auth`, and `~/.config/cloudflare` is an example location for storing local auth files.
 
 Expected variables in the auth file or environment:
 - `CF_API_TOKEN` (preferred) or `CF_API_KEY` + `CF_API_EMAIL`

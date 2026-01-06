@@ -12,6 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
 . "$SCRIPT_DIR/auth.sh"
+. "$SCRIPT_DIR/cli.sh"
 
 ACCOUNT_OVERRIDE=""
 TOKEN_OVERRIDE=""
@@ -43,10 +44,10 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 *)
-                    if cf_auth_file "${OPTARG}"; then
-                        AUTH_FILE_OVERRIDE="$CF_AUTH_FILE"
-                    elif cf_auth_opt "${OPTARG}"; then
-                        :
+                    if cli_handle_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
+                        if [ -n "${CF_AUTH_FILE:-}" ]; then
+                            AUTH_FILE_OVERRIDE="$CF_AUTH_FILE"
+                        fi
                     else
                         usage; exit 1
                     fi

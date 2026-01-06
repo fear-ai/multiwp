@@ -6,9 +6,9 @@
 # Options:
 #   --http            Create only HTTP virtual hosts
 #   --ssl             Create only SSL virtual hosts (requires certificates)
-#   --root PATH       Set WordPress root directory (override docroot from template; default: /var/www/html/wordpress)
+#   --root PATH       WordPress root (default: /var/www/html/wordpress)
 #   --temp PATH       Set templates directory (default: ../templates)
-#   --ssl-dir PATH    Set base SSL directory (default: /etc/ssl/cloudflare-origin)
+#   --ssl-dir PATH    Base SSL dir (default: /etc/ssl/cloudflare-origin)
 #   --help            Show this help message
 #
 # Examples:
@@ -20,6 +20,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
+. "$SCRIPT_DIR/cli.sh"
 require_cmd a2ensite
 require_cmd apache2ctl
 require_cmd systemctl
@@ -46,9 +47,9 @@ show_help() {
     echo "Options:"
     echo "  --http            Create only HTTP virtual hosts"
     echo "  --ssl             Create only SSL virtual hosts"
-    echo "  --root PATH       Set WordPress root directory (override docroot from template; default: /var/www/html/wordpress)"
+    cli_usage_root
     echo "  --temp PATH       Set templates directory (default: ../templates)"
-    echo "  --ssl-dir PATH    Set base SSL directory (default: /etc/ssl/cloudflare-origin)"
+    cli_usage_ssl_dir
     echo "  --help            Show this help message"
     echo ""
     echo "Examples:"
@@ -249,9 +250,21 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 http) HTTP_ONLY=true ;;
                 ssl) SSL_ONLY=true ;;
-                root=*) WORDPRESS_ROOT="${OPTARG#*=}" ;;
+                root|root=*)
+                    if cli_handle_root_opt "${OPTARG}" WORDPRESS_ROOT "${!OPTIND-}"; then
+                        :
+                    else
+                        show_help
+                    fi
+                    ;;
                 temp=*) TEMPLATE_DIR="${OPTARG#*=}" ;;
-                ssl-dir=*) SSL_BASE="${OPTARG#*=}"; SSL_CERT_DIR="$SSL_BASE/certs"; SSL_KEY_DIR="$SSL_BASE/keys" ;;
+                ssl-dir|ssl-dir=*)
+                    if cli_handle_ssl_dir_opt "${OPTARG}" SSL_BASE SSL_CERT_DIR SSL_KEY_DIR "${!OPTIND-}"; then
+                        :
+                    else
+                        show_help
+                    fi
+                    ;;
                 help) show_help ;;
                 *) show_help ;;
             esac

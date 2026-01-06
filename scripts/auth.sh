@@ -68,24 +68,46 @@ cf_parse_auth_file() {
 
 cf_auth_file() {
     local opt="$1"
+    local val="${2-}"
     case "$opt" in
         auth-file=*) cf_parse_auth_file "${opt#*=}"; return 0 ;;
-        auth-file) cf_parse_auth_file "${!OPTIND}"; OPTIND=$((OPTIND+1)); return 0 ;;
+        auth-file)
+            [ -n "$val" ] || err "auth-file requires a path"
+            cf_parse_auth_file "$val"
+            return 0
+            ;;
     esac
     return 1
 }
 
 cf_auth_opt() {
     local opt="$1"
+    local val="${2-}"
     case "$opt" in
         account=*) CF_ACCOUNT_ID_OVERRIDE="${opt#*=}"; return 0 ;;
-        account) CF_ACCOUNT_ID_OVERRIDE="${!OPTIND}"; OPTIND=$((OPTIND+1)); return 0 ;;
+        account)
+            [ -n "$val" ] || err "account requires a value"
+            CF_ACCOUNT_ID_OVERRIDE="$val"
+            return 0
+            ;;
         token=*) CF_API_TOKEN_OVERRIDE="${opt#*=}"; return 0 ;;
-        token) CF_API_TOKEN_OVERRIDE="${!OPTIND}"; OPTIND=$((OPTIND+1)); return 0 ;;
+        token)
+            [ -n "$val" ] || err "token requires a value"
+            CF_API_TOKEN_OVERRIDE="$val"
+            return 0
+            ;;
         email=*) CF_API_EMAIL_OVERRIDE="${opt#*=}"; return 0 ;;
-        email) CF_API_EMAIL_OVERRIDE="${!OPTIND}"; OPTIND=$((OPTIND+1)); return 0 ;;
+        email)
+            [ -n "$val" ] || err "email requires a value"
+            CF_API_EMAIL_OVERRIDE="$val"
+            return 0
+            ;;
         key=*) CF_API_KEY_OVERRIDE="${opt#*=}"; return 0 ;;
-        key) CF_API_KEY_OVERRIDE="${!OPTIND}"; OPTIND=$((OPTIND+1)); return 0 ;;
+        key)
+            [ -n "$val" ] || err "key requires a value"
+            CF_API_KEY_OVERRIDE="$val"
+            return 0
+            ;;
     esac
     return 1
 }
@@ -130,7 +152,7 @@ cf_api_request() {
 cf_api_success() {
     local response="$1"
     if command -v jq >/dev/null 2>&1; then
-        echo "$response" | jq -r '.success // empty'
+        echo "$response" | jq -r 'if .success == true then "true" elif .success == false then "false" else "" end'
         return
     fi
     echo "$response" | tr -d '\n' | sed -n 's/.*"success":\(true\|false\).*/\1/p'

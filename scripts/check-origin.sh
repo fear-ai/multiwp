@@ -3,6 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
+. "$SCRIPT_DIR/cli.sh"
+
+ALLOW_ROOT=false
 
 SSL_BASE_LOCAL="$SSL_BASE"
 SSL_CERT_DIR_LOCAL="$SSL_CERT_DIR"
@@ -16,10 +19,11 @@ Usage: check-origin.sh [OPTIONS] domain1 [domain2...]
 Validates origin certificates, Apache configuration, and vhost wiring.
 Options:
   --help                Show this help
-  --ssl-dir DIR         Base SSL dir (default: /etc/ssl/cloudflare-origin)
   --apache-dir DIR      Apache sites-available dir (default: /etc/apache2/sites-available)
-  --root PATH           WordPress root (default: /var/www/html/wordpress)
 USAGE
+    cli_usage_common_priv
+    cli_usage_ssl_dir
+    cli_usage_root
 }
 
 while getopts ":-:" opt; do
@@ -27,14 +31,36 @@ while getopts ":-:" opt; do
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
-                ssl-dir=*)
-                    SSL_BASE_LOCAL="${OPTARG#*=}"
-                    SSL_CERT_DIR_LOCAL="$SSL_BASE_LOCAL/certs"
-                    SSL_KEY_DIR_LOCAL="$SSL_BASE_LOCAL/keys"
+                ssl-dir|ssl-dir=*)
+                    if cli_handle_ssl_dir_opt "${OPTARG}" SSL_BASE_LOCAL SSL_CERT_DIR_LOCAL SSL_KEY_DIR_LOCAL "${!OPTIND-}"; then
+                        :
+                    else
+                        usage; exit 1
+                    fi
                     ;;
-                apache-dir=*) APACHE_SITES_DIR_LOCAL="${OPTARG#*=}" ;;
-                root=*) WORDPRESS_ROOT_LOCAL="${OPTARG#*=}" ;;
-                *) usage; exit 1 ;;
+                apache-dir|apache-dir=*)
+                    if [ "${OPTARG}" = "apache-dir" ]; then
+                        [ -n "${!OPTIND-}" ] || err "--apache-dir requires a value"
+                        APACHE_SITES_DIR_LOCAL="${!OPTIND}"
+                        OPTIND=$((OPTIND+1))
+                    else
+                        APACHE_SITES_DIR_LOCAL="${OPTARG#*=}"
+                    fi
+                    ;;
+                root|root=*)
+                    if cli_handle_root_opt "${OPTARG}" WORDPRESS_ROOT_LOCAL "${!OPTIND-}"; then
+                        :
+                    else
+                        usage; exit 1
+                    fi
+                    ;;
+                *)
+                    if cli_handle_common_opt "${OPTARG}"; then
+                        :
+                    else
+                        usage; exit 1
+                    fi
+                    ;;
             esac
             ;;
         \?) usage; exit 1 ;;
@@ -44,9 +70,7 @@ shift $((OPTIND-1))
 
 [ $# -ge 1 ] || { usage; exit 1; }
 
-if [ "${USER:-}" = "root" ]; then
-    err "Do not run as root. Run as an Ubuntu user with sudo privileges."
-fi
+cli_require_non_root
 
 require_cmd openssl
 require_cmd apache2ctl

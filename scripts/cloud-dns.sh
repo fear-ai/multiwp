@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
 . "$SCRIPT_DIR/auth.sh"
+. "$SCRIPT_DIR/cli.sh"
 
 # Optional built-in defaults (use for non-sensitive test environments; prefer env/flags otherwise)
 CF_ACCOUNT_ID_DEFAULT=""
@@ -29,6 +30,8 @@ Options:
   --help                 Show this help
   --account ACCOUNT_ID   Cloudflare account ID (overrides CF_ACCOUNT_ID env)
   --token TOKEN          Cloudflare API token (overrides CF_API_TOKEN env)
+  --key KEY              Cloudflare global API key (overrides CF_API_KEY env)
+  --email EMAIL          Cloudflare account email (overrides CF_API_EMAIL env)
   --auth-file PATH       Auth file to load (default: ~/.config/cloudflare/default.auth)
 Notes:
   You may hardcode defaults in CF_API_TOKEN_DEFAULT / CF_API_KEY_DEFAULT / CF_API_EMAIL_DEFAULT / CF_ACCOUNT_ID_DEFAULT near the top of the script; env vars or flags override them.
@@ -41,9 +44,7 @@ while getopts ":-:" opt; do
       case "${OPTARG}" in
         help) usage; exit 0 ;;
         *)
-          if cf_auth_file "${OPTARG}"; then
-            :
-          elif cf_auth_opt "${OPTARG}"; then
+          if cli_handle_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
             :
           else
             usage; exit 1

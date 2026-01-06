@@ -60,10 +60,12 @@ log "Completed successfully"
 
 ## Security
 
-- Run as ubuntu with sudo, never as root
+- Run as a user with sudo privileges, never as root
 - Use `priv()` wrapper from common.sh
 - Validate hostnames and paths
 - Never hardcode credentials
+
+Some validation scripts accept `--allow-root` (skip the root guard) and `--no-sudo` (disable sudo usage). Use these only in constrained environments where sudo is unavailable or you are intentionally running as root, and understand that `priv()` will then run commands as the current user.
 
 ## Project Idioms
 
@@ -72,10 +74,30 @@ log "Completed successfully"
 safe=$(safe_name "example.com")  # Returns "examplecom"
 ```
 
+**cli.sh helpers**: Shared option parsing and usage lines for common flags.
+Use these helpers so `--root`, `--ssl-dir`, `--allow-root`, `--no-sudo`, and Cloudflare auth flags behave consistently across scripts.
+```bash
+if cli_handle_root_opt "${OPTARG}" WORDPRESS_ROOT_LOCAL "${!OPTIND-}"; then
+    :
+fi
+```
+```bash
+cli_usage_root
+cli_usage_ssl_dir
+```
+
 **priv()**: Sudo wrapper
 ```bash
 priv mkdir -p /etc/ssl/certs
 ```
+`priv()` is a thin wrapper around `sudo` that centralizes privilege escalation. The intent is to run scripts as a sudo-capable operator (for example, `ubuntu`) and elevate only for the specific filesystem or service actions that require it. This reduces blast radius while keeping operational commands consistent across scripts.
+
+Example: run a command as the web user while keeping the script itself under the operator account. This is the intended pattern for WP-CLI so file ownership and permissions match the web server user.
+```bash
+priv -u www-data wp --path=/var/www/html/wordpress option get home
+```
+
+Reference: the implementation lives in `scripts/common.sh` and can be switched off for constrained environments by setting `SUDO_BIN` to an empty string in that file. Keep the wrapper in place even when disabling sudo so the calling pattern remains consistent.
 
 **WordPress operations**: Always run as www-data
 ```bash

@@ -57,7 +57,7 @@ HTTPS vhosts reference these paths per template.
 - Vhosts present/enabled: `sudo ls /etc/apache2/sites-available`, `sudo ls /etc/apache2/sites-enabled`.
 - SSL/TLS cert validation: `sudo openssl x509 -in /etc/ssl/cloudflare-origin/certs/<safe>.crt -noout -subject -issuer -dates -ext subjectAltName`.
 - DNS reachability: `dig A <domain> +short`, `dig AAAA <domain> +short`.
-- WordPress state: `sudo -u www-data wp --path=<wp_root> core version`, `wp site list`.
+- WordPress state: `sudo -u www-data wp --path=<wp_root> core version`, `wp site list` (example: `/var/www/html/wordpress` on Ubuntu, with `wordpress` as the chosen subdirectory).
 - DB routing tables: `mysql -u <db_user> -p -D <db_name> -e "SELECT blog_id, domain, path FROM wp_blogs;"`.
 - Functional check: browse domain → confirm HTTPS and admin login; create a test site in Network Admin and verify routing; confirm Cloudflare Full (strict) and DNS after each addition (per CloudflareSettings.md).
 - WordPress domain mapping: Map a site to an apex domain using database updates:

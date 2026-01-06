@@ -114,7 +114,7 @@ Recommended manual checks include:
 ## Implementation Notes
 These scripts are implemented as read-only validation helpers and should not modify production configurations, DNS, or database state. Any optional API usage is gated behind explicit environment variables and should fail gracefully when unavailable. This approach keeps the automation aligned with the documented workflows and minimizes operational risk.
 
-Cloudflare API credentials can be loaded from a local auth file via `scripts/auth.sh`. The loader respects pre-existing environment variables, so a user can override values per run while still keeping a secure default file. Set `CF_AUTH_FILE` to point at the auth file path (for example, `~/.config/cloudflare/default.auth`) when you want the scripts to load credentials from disk instead of the current environment.
+Cloudflare API credentials can be loaded from a local auth file via `scripts/auth.sh`. The loader respects pre-existing environment variables, so a user can override values per run while still keeping a secure default file. Set `CF_AUTH_FILE` to point at the auth file path (for example, `~/.config/cloudflare/default.auth`) when you want the scripts to load credentials from disk instead of the current environment. The `~/.config/cloudflare` path is an example location; store auth files anywhere and rely on `CF_AUTH_FILE` to point at them.
 
 ## Placement Recommendations
 Some topics in this document could be relocated or summarized in other files to keep the runbooks focused while avoiding duplication. The list below identifies where each topic naturally fits and why, without changing the existing sources of truth.

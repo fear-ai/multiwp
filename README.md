@@ -71,7 +71,8 @@ Use the unified helper so the same command supports manual paste and API issuanc
 ### Query Multisite Setup
 
 #### List sites in multisite network
-`sudo -u www-data wp --path={HTTP_PATH} site list`
+`sudo -u www-data wp --path=<wp_root> site list`
+Default example: `/var/www/html/wordpress` (Ubuntu default is `/var/www/html`, with `wordpress` as the chosen subdirectory).
 
 #### Check Apache vhosts
 `ls /etc/apache2/sites-enabled/`

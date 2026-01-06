@@ -1,0 +1,25 @@
+# Cloudflare auth file example
+# Copy to a local path (for example in ~/.config) and fill in values.
+# Keep permissions tight: chmod 600 <auth-file>
+
+# API base (override)
+CF_API_BASE=""
+
+# Account ID and optional name
+CF_ACCOUNT_ID=""
+CF_ACCOUNT=""
+
+# Authentication 
+CF_API_KEY=""
+CF_API_TOKEN=""
+CF_API_EMAIL=""
+
+# Scope hints
+CF_KEY_SCOPE="account"
+CF_TOKEN_SCOPE="account"
+
+# Zone domain name and ID
+CF_ZONE_MAIN=""
+CF_ZONE=""
+CF_ZONE_ID=""
+

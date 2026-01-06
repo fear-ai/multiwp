@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
 . "$SCRIPT_DIR/auth.sh"
+. "$SCRIPT_DIR/cli.sh"
 
 CF_ZONE_NAME_OVERRIDE=""
 CF_ZONE_ID_OVERRIDE=""
@@ -67,9 +68,7 @@ while getopts ":e:s-:" opt; do
                     OPTIND=$((OPTIND+1))
                     ;;
                 *)
-                    if cf_auth_file "${OPTARG}"; then
-                        :
-                    elif cf_auth_opt "${OPTARG}"; then
+                    if cli_handle_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1

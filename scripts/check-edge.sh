@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
 . "$SCRIPT_DIR/auth.sh"
+. "$SCRIPT_DIR/cli.sh"
 
 HTTP_TIMEOUT="${HTTP_TIMEOUT:-10}"
 API_CHECKS=false
@@ -18,6 +19,9 @@ Options:
   --timeout SECONDS  HTTP timeout for curl (default: 10)
   --api              Enable optional Cloudflare API checks (requires CF_ZONE_ID and either CF_API_TOKEN or CF_API_KEY+CF_API_EMAIL)
   --auth-file PATH   Auth file to load (default: ~/.config/cloudflare/default.auth)
+  --token TOKEN      Override CF_API_TOKEN
+  --key KEY          Override CF_API_KEY
+  --email EMAIL      Override CF_API_EMAIL
 USAGE
 }
 
@@ -29,7 +33,7 @@ while getopts ":-:" opt; do
                 api) API_CHECKS=true ;;
                 timeout=*) HTTP_TIMEOUT="${OPTARG#*=}" ;;
                 *)
-                    if cf_auth_file "${OPTARG}"; then
+                    if cli_handle_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1

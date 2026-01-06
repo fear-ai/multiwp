@@ -33,29 +33,38 @@
 #
 # IMPORTANT: Record all database names, usernames, and passwords for WordPress configuration
 #
-# Usage: Run as an Ubuntu user: sudo ./setup-wp.sh
+# Usage: Run as a user with sudo privileges: ./setup-wp.sh
 
-set -e
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/common.sh"
 
 # Check if running as correct user
 if [ "$USER" = "root" ]; then
-    echo "Error: Do not run as root. Run as an Ubuntu user with sudo privileges"
-    exit 1
+    err "Do not run as root. Run as a user with sudo privileges."
 fi
 
+require_cmd grep
+require_cmd tee
+require_cmd a2enmod
+require_cmd apache2ctl
+require_cmd systemctl
+require_cmd wget
+require_cmd tar
+require_cmd sed
 
 ## Apache Configuratione
 echo "Step 2: Configuring Apache prerequisites"
 if ! grep -q "ServerName localhost" /etc/apache2/apache2.conf; then
-    echo "ServerName localhost" | sudo tee -a /etc/apache2/apache2.conf
+    echo "ServerName localhost" | priv tee -a /etc/apache2/apache2.conf >/dev/null
     echo "Added ServerName to Apache configuration"
 fi
 
 # Enable Apache modules
 echo "Enabling required Apache modules"
-sudo a2enmod rewrite ssl headers
-sudo apache2ctl configtest
-sudo systemctl reload apache2
+priv a2enmod rewrite ssl headers
+priv apache2ctl configtest
+priv systemctl reload apache2
 
 
 ## WordPress Configuration
@@ -71,14 +80,14 @@ echo ""
 # Create WordPress root directory if it doesn't exist
 if [ ! -d "$WORDPRESS_ROOT" ]; then
     echo "WordPress directory not found. Creating: $WORDPRESS_ROOT"
-    sudo mkdir -p "$WORDPRESS_ROOT"
+    priv mkdir -p "$WORDPRESS_ROOT"
     
     echo "Downloading and installing WordPress..."
     cd /tmp
     wget https://wordpress.org/latest.tar.gz
     tar -xzf latest.tar.gz
-    sudo cp -r wordpress/* "$WORDPRESS_ROOT/"
-    sudo chown -R www-data:www-data "$WORDPRESS_ROOT"
+    priv cp -r wordpress/* "$WORDPRESS_ROOT/"
+    priv chown -R www-data:www-data "$WORDPRESS_ROOT"
     echo "WordPress installed to $WORDPRESS_ROOT"
 fi
 
@@ -86,7 +95,7 @@ fi
 if [ ! -f "$WP_CONFIG_PATH" ]; then
     if [ -f "$WORDPRESS_ROOT/wp-config-sample.php" ]; then
         echo "Creating wp-config.php from sample"
-        sudo cp "$WORDPRESS_ROOT/wp-config-sample.php" "$WP_CONFIG_PATH"
+        priv cp "$WORDPRESS_ROOT/wp-config-sample.php" "$WP_CONFIG_PATH"
         
         echo ""
         echo "wp-config.php created from sample."
@@ -114,12 +123,12 @@ else
     echo "Step 1: Enabling multisite in wp-config.php"
     # Add WP_ALLOW_MULTISITE before "That's all" comment or before "Absolute path" comment
     if grep -q "/\* That's all" "$WP_CONFIG_PATH"; then
-        sudo sed -i '/\/\* That'\''s all/i\\n/* Enable WordPress Multisite */\ndefine( '\''WP_ALLOW_MULTISITE'\'', true );' "$WP_CONFIG_PATH"
+        priv sed -i '/\/\* That'\''s all/i\\n/* Enable WordPress Multisite */\ndefine( '\''WP_ALLOW_MULTISITE'\'', true );' "$WP_CONFIG_PATH"
     elif grep -q "/\*\* Absolute path" "$WP_CONFIG_PATH"; then
-        sudo sed -i '/\/\*\* Absolute path/i\\n/* Enable WordPress Multisite */\ndefine( '\''WP_ALLOW_MULTISITE'\'', true );' "$WP_CONFIG_PATH"
+        priv sed -i '/\/\*\* Absolute path/i\\n/* Enable WordPress Multisite */\ndefine( '\''WP_ALLOW_MULTISITE'\'', true );' "$WP_CONFIG_PATH"
     else
         # Fallback - add before wp-settings.php
-        sudo sed -i '/wp-settings.php/i\\n/* Enable WordPress Multisite */\ndefine( '\''WP_ALLOW_MULTISITE'\'', true );' "$WP_CONFIG_PATH"
+        priv sed -i '/wp-settings.php/i\\n/* Enable WordPress Multisite */\ndefine( '\''WP_ALLOW_MULTISITE'\'', true );' "$WP_CONFIG_PATH"
     fi
     echo "Added WP_ALLOW_MULTISITE to wp-config.php"
 fi

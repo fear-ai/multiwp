@@ -15,10 +15,19 @@ log() { echo "[$(date +%H:%M:%S)] $*"; }
 err() { echo "[$(date +%H:%M:%S)] ERROR: $*" >&2; exit 1; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || err "Missing command: $1"; }
 
-SUDO_BIN="sudo"
+# priv() is a thin wrapper for running commands with sudo.
+# Set SUDO_BIN to an empty string to disable sudo while keeping the call pattern.
+SUDO_BIN="${SUDO_BIN-sudo}"
 #SUDO_BIN=""
 priv() {
-    $SUDO_BIN "$@"
+    if [ -n "$SUDO_BIN" ]; then
+        $SUDO_BIN "$@"
+        return
+    fi
+    if [ "${1:-}" = "-u" ]; then
+        shift 2
+    fi
+    "$@"
 }
 
 tolower() { echo "$1" | tr '[:upper:]' '[:lower:]'; }

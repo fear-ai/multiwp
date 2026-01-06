@@ -10,14 +10,19 @@
 #   --auto     Use API if credentials exist, otherwise manual (default)
 #
 # Options:
-#   --ssl-dir DIR   Base SSL dir (default: /etc/ssl/cloudflare-origin)
-#   --force         Overwrite existing files without prompt
-#   --help          Show help
+#   --ssl-dir DIR     Base SSL dir (default: /etc/ssl/cloudflare-origin)
+#   --auth-file PATH  Auth file to load (default: ~/.config/cloudflare/default.auth)
+#   --token TOKEN     Override CF_API_TOKEN
+#   --key KEY         Override CF_API_KEY
+#   --email EMAIL     Override CF_API_EMAIL
+#   --force           Overwrite existing files without prompt
+#   --help            Show help
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
 . "$SCRIPT_DIR/auth.sh"
+. "$SCRIPT_DIR/cli.sh"
 
 MODE="auto"
 FORCE=false
@@ -33,11 +38,14 @@ Modes:
   --auto      Use API if credentials exist, otherwise manual (default)
 
 Options:
-  --ssl-dir DIR   Base SSL dir (default: /etc/ssl/cloudflare-origin)
   --auth-file PATH Auth file to load (default: ~/.config/cloudflare/default.auth)
+  --token TOKEN      Override CF_API_TOKEN
+  --key KEY          Override CF_API_KEY
+  --email EMAIL      Override CF_API_EMAIL
   --force         Overwrite existing files without prompt
   --help          Show this help
 EOF
+    cli_usage_ssl_dir
 }
 
 while getopts ":-:" opt; do
@@ -48,10 +56,16 @@ while getopts ":-:" opt; do
                 api) MODE="api" ;;
                 manual) MODE="manual" ;;
                 auto) MODE="auto" ;;
-                ssl-dir=*) SSL_BASE="${OPTARG#*=}"; SSL_CERT_DIR="$SSL_BASE/certs"; SSL_KEY_DIR="$SSL_BASE/keys" ;;
+                ssl-dir|ssl-dir=*)
+                    if cli_handle_ssl_dir_opt "${OPTARG}" SSL_BASE SSL_CERT_DIR SSL_KEY_DIR "${!OPTIND-}"; then
+                        :
+                    else
+                        usage; exit 1
+                    fi
+                    ;;
                 force) FORCE=true ;;
                 *)
-                    if cf_auth_file "${OPTARG}"; then
+                    if cli_handle_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1

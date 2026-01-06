@@ -3,17 +3,24 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
+. "$SCRIPT_DIR/cli.sh"
 
 WORDPRESS_ROOT_LOCAL="$WORDPRESS_ROOT"
+MODE="auto"
+ALLOW_ROOT=false
 
 usage() {
     cat <<'USAGE'
 Usage: check-wp.sh [OPTIONS] domain1 [domain2...]
-Validates WordPress multisite mapping and site URLs for apex domains.
+Validates WordPress site URLs for apex domains, with multisite-aware checks by default.
 Options:
   --help         Show this help
-  --root PATH    WordPress root (default: /var/www/html/wordpress)
+  --single       Validate a single-site WordPress install (no multisite tables)
+  --multisite    Validate a multisite network
+  --auto         Auto-detect single-site vs multisite (default)
 USAGE
+    cli_usage_common_priv
+    cli_usage_root
 }
 
 while getopts ":-:" opt; do
@@ -21,8 +28,23 @@ while getopts ":-:" opt; do
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
-                root=*) WORDPRESS_ROOT_LOCAL="${OPTARG#*=}" ;;
-                *) usage; exit 1 ;;
+                single) MODE="single" ;;
+                multisite) MODE="multisite" ;;
+                auto) MODE="auto" ;;
+                root|root=*)
+                    if cli_handle_root_opt "${OPTARG}" WORDPRESS_ROOT_LOCAL "${!OPTIND-}"; then
+                        :
+                    else
+                        usage; exit 1
+                    fi
+                    ;;
+                *)
+                    if cli_handle_common_opt "${OPTARG}"; then
+                        :
+                    else
+                        usage; exit 1
+                    fi
+                    ;;
             esac
             ;;
         \?) usage; exit 1 ;;
@@ -32,15 +54,29 @@ shift $((OPTIND-1))
 
 [ $# -ge 1 ] || { usage; exit 1; }
 
-if [ "${USER:-}" = "root" ]; then
-    err "Do not run as root. Run as an Ubuntu user with sudo privileges."
-fi
+cli_require_non_root
 
 require_cmd wp
 require_cmd awk
 
-if ! priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" core is-installed --network 2>/dev/null; then
-    err "WordPress multisite not found or not installed at $WORDPRESS_ROOT_LOCAL"
+if [ "$MODE" = "auto" ]; then
+    if priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" core is-installed --network 2>/dev/null; then
+        MODE="multisite"
+    elif priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" core is-installed 2>/dev/null; then
+        MODE="single"
+    else
+        err "WordPress not installed at $WORDPRESS_ROOT_LOCAL"
+    fi
+fi
+
+if [ "$MODE" = "multisite" ]; then
+    if ! priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" core is-installed --network 2>/dev/null; then
+        err "WordPress multisite not found or not installed at $WORDPRESS_ROOT_LOCAL"
+    fi
+else
+    if ! priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" core is-installed 2>/dev/null; then
+        err "WordPress not installed at $WORDPRESS_ROOT_LOCAL"
+    fi
 fi
 
 TABLE_PREFIX=$(priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" config get table_prefix 2>/dev/null || true)
@@ -48,7 +84,7 @@ if [ -z "$TABLE_PREFIX" ]; then
     TABLE_PREFIX="wp_"
 fi
 
-check_domain() {
+check_domain_multisite() {
     local domain
     domain=$(tolower "$1")
     local ok=true
@@ -154,10 +190,59 @@ check_domain() {
     return 1
 }
 
+check_domain_single() {
+    local domain
+    domain=$(tolower "$1")
+    local ok=true
+
+    echo ""
+    log "WordPress checks for: $domain"
+
+    local siteurl home
+    siteurl=$(priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" option get siteurl 2>/dev/null || true)
+    home=$(priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" option get home 2>/dev/null || true)
+
+    if [ -z "$siteurl" ] || [ -z "$home" ]; then
+        echo "Error: Unable to read siteurl/home options"
+        ok=false
+    else
+        echo "siteurl: $siteurl"
+        echo "home: $home"
+    fi
+
+    if [ "$siteurl" != "https://$domain" ] && [ "$siteurl" != "https://$domain/" ]; then
+        echo "Error: siteurl is '$siteurl' (expected 'https://$domain')"
+        ok=false
+    else
+        echo "siteurl ok"
+    fi
+
+    if [ "$home" != "https://$domain" ] && [ "$home" != "https://$domain/" ]; then
+        echo "Error: home is '$home' (expected 'https://$domain')"
+        ok=false
+    else
+        echo "home ok"
+    fi
+
+    if [ "$ok" = true ]; then
+        echo "WordPress checks passed for $domain"
+        return 0
+    fi
+
+    echo "WordPress checks failed for $domain"
+    return 1
+}
+
 overall_ok=true
 for domain in "$@"; do
-    if ! check_domain "$domain"; then
-        overall_ok=false
+    if [ "$MODE" = "multisite" ]; then
+        if ! check_domain_multisite "$domain"; then
+            overall_ok=false
+        fi
+    else
+        if ! check_domain_single "$domain"; then
+            overall_ok=false
+        fi
     fi
 done
 

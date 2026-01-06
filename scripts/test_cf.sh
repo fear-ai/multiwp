@@ -2,11 +2,11 @@
 # test_cf.sh - Unit tests for Cloudflare helpers in auth.sh
 #
 # Usage:
-#   ./scripts/tests/test_cf.sh
+#   ./scripts/test_cf.sh
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 . "$ROOT_DIR/scripts/common.sh"
 . "$ROOT_DIR/scripts/auth.sh"
@@ -39,7 +39,7 @@ assert_contains() {
     local haystack="$1"
     local needle="$2"
     local label="$3"
-    if echo "$haystack" | grep -Fq "$needle"; then
+    if echo "$haystack" | grep -Fq -- "$needle"; then
         pass "$label"
     else
         fail "$label (missing '$needle')"
@@ -117,33 +117,23 @@ assert_equal "filezone" "$CF_ZONE_ID" "load_cloudflare_auth still loads unset va
 
 echo "== cf_auth_file / cf_auth_opt =="
 reset_auth_env
-OPTIND=1
-set -- "$auth_file"
-cf_auth_file "auth-file"
+cf_auth_file "auth-file" "$auth_file"
 assert_equal "$auth_file" "$CF_AUTH_FILE" "cf_auth_file parses --auth-file value"
 
 reset_auth_env
-OPTIND=1
-set -- "acct123"
-cf_auth_opt "account"
+cf_auth_opt "account" "acct123"
 assert_equal "acct123" "$CF_ACCOUNT_ID_OVERRIDE" "cf_auth_opt parses --account"
 
 reset_auth_env
-OPTIND=1
-set -- "tok123"
-cf_auth_opt "token"
+cf_auth_opt "token" "tok123"
 assert_equal "tok123" "$CF_API_TOKEN_OVERRIDE" "cf_auth_opt parses --token"
 
 reset_auth_env
-OPTIND=1
-set -- "user@example.com"
-cf_auth_opt "email"
+cf_auth_opt "email" "user@example.com"
 assert_equal "user@example.com" "$CF_API_EMAIL_OVERRIDE" "cf_auth_opt parses --email"
 
 reset_auth_env
-OPTIND=1
-set -- "key456"
-cf_auth_opt "key"
+cf_auth_opt "key" "key456"
 assert_equal "key456" "$CF_API_KEY_OVERRIDE" "cf_auth_opt parses --key"
 
 
