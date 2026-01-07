@@ -74,8 +74,11 @@ Use separate origin cert per domain (apex+www pair) to avoid exposing tenant lis
 
 ### Security Settings
 - Path: `Security` → `Settings`.
-In addition to the *always on* settings, we are testing with the following ON:
+In addition to the *always on* settings, the following are ON:
 - Browser integrity check.
+- Replace insecure JavaScript libraries
+Under consideration for inclusion:
+- Leaked credentials detection
 
 ### Security Headers
 - Path: `Rules` → `Settings` → `Managed Transforms` → `HTTP Response Headers` → “Add security headers.” [Cloudflare add security headers](https://developers.cloudflare.com/rules/transform/managed-transforms/reference/#add-security-headers).
@@ -123,7 +126,7 @@ Optional variables:
 - `CF_ACCOUNT` (human-readable account name)
 - `CF_ZONE` (zone [domain] for the account)
 - `CF_ZONE_MAIN` (primary zone/domain when multiple zones exist)
-- `CF_KEY_SCOPE` (scope for the API key, default `account` rather than `zone`)
+- `CF_KEY_SCOPE` (scope for the API key, default `account`, not `user` or `zone`)
 - `CF_TOKEN_SCOPE` (expected scope for the API token)
 
 Environment variables always take precedence over the auth file, so one-off overrides can be provided safely at runtime without editing the file. Account-scoped tokens are verified against the account endpoint rather than the user endpoint. For a quick sanity check, use `scripts/verify-cf-auth.sh`, which tries the account endpoint when `CF_ACCOUNT_ID` is present and falls back to the user endpoint if it fails.
@@ -170,11 +173,15 @@ Environment variables always take precedence over the auth file, so one-off over
 - Safeguards: verify 60-day window, confirm zone exists and nameservers point to Cloudflare, rate-limit calls, and handle registrant approval emails manually.
 
 ### HSTS
+"instruct web browsers that the site should only be accessed over HTTPS" https://hstspreload.org
 - HSTS pros: enforces HTTPS at the browser; prevents downgrade/mixed-mode requests after first load.
 - HSTS cons: can lock you out if HTTPS breaks; preload is a long-term commitment. At this time we do **NOT** configure HSTS.
 * If chosing HSTS, validate first: confirm apex and www redirect to HTTPS, no mixed content, certs valid (Full strict), admin/login works over HTTPS.
 * Rollout: start with short max-age (e.g., 300) if testing; raise to 31536000 with includeSubDomains when confident. Preload only when certain that HTTPS is permanent.
-* Cloudflare configuration per domain under SSL/TLS -> Edge Certificates [HTTP Strict Transport Security (HSTS)], right after [Always Use HTTPS]
+[Cloudflare HSTS](https://developers.cloudflare.com/ssl/edge-certificates/additional-options/http-strict-transport-security/#configuration-settings)
+* Cloudflare configuration under SSL/TLS -> Edge Certificates [HTTP Strict Transport Security (HSTS)], after [Always Use HTTPS]
+* WordPress [HSTS plugin](https://wordpress.com/plugins/headers-security-advanced-hsts-wp)
+
 
 ## Target Audience
 For operators managing Cloudflare zones and edge security for this multisite network. Common scenarios: onboarding a new domain (proxy, origin cert, HTTPS enforcement), validating TLS after origin changes, and tuning headers without creating redirect loops. Expected skills: navigating Cloudflare DNS/SSL/RULES, reading certificate SANs.
