@@ -29,11 +29,18 @@ Cloudflare edge configuration for the multisite network, covering the preferred 
 
 ## Overview
 Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HTTP is redirected to HTTPS at the edge, and security headers are applied consistently. Origin servers use per-domain Cloudflare Origin certificates; Cloudflare presents edge certificates to visitors. Use the UI for clarity; layer scripts where it saves time. For terminology, see `DNSTerms.md`.
+NOTE: Listed settings reflect our best understanding of preferred configuration for our use case, based on tests of this specific setup. They are likely to evolve as we continue validation and tools or services mutate.
 
 ## Proxy Model (Cloudflare Edge)
 - Cloudflare’s orange cloud behaves as a reverse proxy: clients connect to Cloudflare; Cloudflare connects to our origin. References: [Cloudflare reverse proxy overview](https://www.cloudflare.com/learning/cdn/glossary/reverse-proxy/), [MDN reverse proxy](https://developer.mozilla.org/en-US/docs/Glossary/Reverse_proxy).
 - Benefits: hides origin addresses, offloads TLS, enables caching and WAF features.
 - Our usage: proxy apex and `www`, issue origin certs per apex+www pair, and let Cloudflare enforce HTTPS and headers at the edge.
+
+## HTTPS Responsiblity
+- Edge HTTPS and headers belong at Cloudflare; do not add [redundant] Apache redirects to avoid loops and extra hops.
+- On Cloudflare use Force HTTPS via Edge Certificates rather than Redirect Rules. “Always Use HTTPS” ON is simple and avoids custom rule errors.
+- Redirect Rules give more control but at a higher risk: `Rules` → `Redirect Rules`; Condition `Hostname equals apex OR www`; Action: 301 to `https://{host}{uri}`. Turn “Always Use HTTPS” OFF if using Rules.
+**Warning:** misconfigured Rules or overlapping redirects can create loops; use only when needed and have a solid test plan and a recovery procedure.
 
 ## UI Flow: HTTPS & Certs
 
@@ -49,16 +56,26 @@ Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HT
 - Path: `SSL/TLS` → `Overview`.
 - Setting: “SSL/TLS encryption mode” → select `Full (strict)`.
 
+### Use HTTPS and TLS 1.2
+- Path: `SSL/TLS` → `Edge Certificates`.
+We configure ON the following settings available under the Free tier. Several may be ON by default or always ON.
+- Always Use HTTPS.
+- Minimum TLS: TLS 1.2 (from default 1.0).
+- Opportunistic Encryption.
+- TLS 1.3 [though Apache does not support it as of December 2025].
+- Automatic HTTPS Rewrites
+NOTE: For HSTS see a dedicated section below.
+
 ### Issue Origin Certificate
 Use separate origin cert per domain (apex+www pair) to avoid exposing tenant lists and to keep trust scoped. The certs are used between Cloudflare and origin, not publicly trusted.
 - Path: `SSL/TLS` → `Origin Server` → `Create Certificate`.
 - Options: “Let Cloudflare generate a private key and CSR”; Hostnames: apex + www; Key type: RSA; Validity: default.
 - Download cert/key in PEM format; install on origin at `/etc/ssl/cloudflare-origin/certs|keys/<safe>.{crt,key}` (safe = domain without dots/hyphens).
 
-### Use HTTPS and TLS 1.2
-- Path: `SSL/TLS` → `Edge Certificates`.
-- Minimum TLS: TLS 1.2 (from 1.0 default).
-- “Always Use HTTPS” ON.
+### Security Settings
+- Path: `Security` → `Settings`.
+In addition to the *always on* settings, we are testing with the following ON:
+- Browser integrity check.
 
 ### Security Headers
 - Path: `Rules` → `Settings` → `Managed Transforms` → `HTTP Response Headers` → “Add security headers.” [Cloudflare add security headers](https://developers.cloudflare.com/rules/transform/managed-transforms/reference/#add-security-headers).
@@ -67,10 +84,10 @@ Use separate origin cert per domain (apex+www pair) to avoid exposing tenant lis
   - `X-Content-Type-Options: nosniff`
   - `X-XSS-Protection: 1; mode=block`
   - `X-Frame-Options: SAMEORIGIN`
-  - `Referrer-Policy: same-origin`
   - `Expect-CT: max-age=86400, enforce`
+  - `Referrer-Policy: same-origin`
 
-## Automation
+## Configuration Automation
 Cloudflare UI is authoritative for SSL mode, redirects, and headers. Automation scripts can help with DNS, origin cert placement, and vhost generation.
 
 ### Create Zone + DNS
@@ -91,28 +108,25 @@ Use the unified cert helper so the same command supports manual paste, API issua
 
 ### API Authentication
 Cloudflare API access is needed only when you run the API-backed scripts or optional API checks. Keep authentication configuration centralized and local to the operator’s host to avoid hardcoding secrets into the repository.
+Prefer scoped API tokens over the Global API Key whenever the required permissions are available.
 
 Recommended approach:
-- Store credentials in a local auth file, referenced by `CF_AUTH_FILE` (default: `~/.config/cloudflare/default.auth`).
-- Keep the file permissions tight (`chmod 700 ~/.config/cloudflare` and `chmod 600 ~/.config/cloudflare/default.auth`).
-- Prefer scoped API tokens over the Global API Key whenever the required permissions are available.
-Using a `.auth` extension keeps account files easy to identify. The default file is `default.auth`, and additional account-specific files can follow the same pattern (for example, `account-name.auth`). A template is available at `scripts/example.auth`, and `~/.config/cloudflare` is an example location for storing local auth files.
+- Store credentials in a local auth file and away from code repo or the execution environment.
+- Scripts look-up `CF_AUTH_FILE` (default: `~/.config/cloudflare/default.auth`). Keep the auth file permissions tight (`chmod 700 ~/.config/cloudflare` and `chmod 600 ~/.config/cloudflare/default.auth`). A template is available at `scripts/example.auth`. We use .auth extention for easy identification, though it is not required.
 
 Expected variables in the auth file or environment:
 - `CF_API_TOKEN` (preferred) or `CF_API_KEY` + `CF_API_EMAIL`
 - `CF_ACCOUNT_ID` (required for zone creation)
 - `CF_ZONE_ID` (required for optional API validation checks)
 
-Optional metadata fields:
+Optional variables:
 - `CF_ACCOUNT` (human-readable account name)
-- `CF_ZONE` (primary zone/domain for the account)
-- `CF_ZONE_MAIN` (preferred primary zone/domain when multiple zones exist)
-- `CF_KEY_SCOPE` (expected scope for the API key, default `account`)
-- `CF_TOKEN_SCOPE` (expected scope for the API token, default `account`)
+- `CF_ZONE` (zone [domain] for the account)
+- `CF_ZONE_MAIN` (primary zone/domain when multiple zones exist)
+- `CF_KEY_SCOPE` (scope for the API key, default `account` rather than `zone`)
+- `CF_TOKEN_SCOPE` (expected scope for the API token)
 
-Environment variables always take precedence over the auth file, so one-off overrides can be provided safely at runtime without editing the file. If a token or key is rotated, update the local auth file and re-run the verification checks.
-
-Account-scoped tokens must be verified against the account endpoint rather than the user endpoint. For a quick sanity check, use `scripts/verify-cf-auth.sh`, which prefers the account endpoint when `CF_ACCOUNT_ID` is present and falls back to the user endpoint if the token is user-scoped.
+Environment variables always take precedence over the auth file, so one-off overrides can be provided safely at runtime without editing the file. Account-scoped tokens are verified against the account endpoint rather than the user endpoint. For a quick sanity check, use `scripts/verify-cf-auth.sh`, which tries the account endpoint when `CF_ACCOUNT_ID` is present and falls back to the user endpoint if it fails.
 
 ## Hybrid Execution (UI + Automation)
 - Sequence (per domain):
@@ -155,20 +169,13 @@ Account-scoped tokens must be verified against the account endpoint rather than 
   - `transfer-to-cloudflare.sh`: unlock (API), submit transfer to CF, poll status, log outcomes.
 - Safeguards: verify 60-day window, confirm zone exists and nameservers point to Cloudflare, rate-limit calls, and handle registrant approval emails manually.
 
-## Notes & Rationale
-- Edge HTTPS and headers belong at Cloudflare; do not add [redundant] Apache redirects to prevent loops and extra hops.
-- IPv6 is optional; if you later add AAAA records, proxy them and keep apex/www explicit.
-
-###  Force HTTPS via Edge Certificates vs Redirect Rules
-“Always Use HTTPS” ON is simple and avoids custom rule errors.
-- Redirect Rules on Cloudflare give more control but at a higher risk: `Rules` → `Redirect Rules`; Condition `Hostname equals apex OR www`; Action: 301 to `https://{host}{uri}`. Turn “Always Use HTTPS” OFF if using Rules.
- **Warning:** misconfigured Rules or overlapping redirects can create loops; only use when needed and with a solid test plan.
-
 ### HSTS
 - HSTS pros: enforces HTTPS at the browser; prevents downgrade/mixed-mode requests after first load.
-- HSTS cons: can lock you out if HTTPS breaks; preload is a long-term commitment.
-- Validate first: confirm apex and www redirect to HTTPS, no mixed content, certs valid (Full strict), admin/login works over HTTPS.
-- Rollout: start with short max-age (e.g., 300) if testing; then raise to 31536000 with includeSubDomains when confident. Preload only when you are sure HTTPS is permanent.
+- HSTS cons: can lock you out if HTTPS breaks; preload is a long-term commitment. At this time we do **NOT** configure HSTS.
+* If chosing HSTS, validate first: confirm apex and www redirect to HTTPS, no mixed content, certs valid (Full strict), admin/login works over HTTPS.
+* Rollout: start with short max-age (e.g., 300) if testing; raise to 31536000 with includeSubDomains when confident. Preload only when certain that HTTPS is permanent.
+* Cloudflare configuration per domain under SSL/TLS -> Edge Certificates [HTTP Strict Transport Security (HSTS)], right after [Always Use HTTPS]
 
 ## Target Audience
-For operators managing Cloudflare zones and edge security for this multisite network. Common scenarios: onboarding a new domain (proxy, origin cert, HTTPS enforcement), validating TLS after origin changes, and tuning headers without creating redirect loops. Expected skills: navigating Cloudflare DNS/SSL/RULES, reading certificate SANs, and coordinating with origin changes in ConfigServers.md. Additional resources: ConfigServers.md (origin), MULTI.md (architecture), DNSTerms.md (terminology).
+For operators managing Cloudflare zones and edge security for this multisite network. Common scenarios: onboarding a new domain (proxy, origin cert, HTTPS enforcement), validating TLS after origin changes, and tuning headers without creating redirect loops. Expected skills: navigating Cloudflare DNS/SSL/RULES, reading certificate SANs.
+Coordinating origin changes is covered inn ConfigServers.md, architecture in MULTI.md, terminology in DNSTerms.md.
