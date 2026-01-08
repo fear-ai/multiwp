@@ -1,43 +1,62 @@
 #!/bin/bash
-# setup-wp.sh - WordPress Multisite Base Configuration
+# setup-wp.sh - WordPress multisite base configuration.
+# For options, environment variables, defaults see usage().
 #
-# Official WordPress Documentation:
-# https://developer.wordpress.org/advanced-administration/multisite/create-network
-# https://learn.wordpress.org/lesson/setting-up-a-wordpress-multisite-network
-#
-# Server Prerequisites - Configure before running this script:
-# MySQL: https://ubuntu.com/server/docs/databases-mysql (Installation and basic setup)
-#        https://dev.mysql.com/doc/mysql-installation-excerpt/8.0/en/linux-installation-ubuntu.html
-#        https://developer.wordpress.org/advanced-administration/before-install/creating-database/
-#
-#        WordPress Recommendations:
-#        - Use UTF-8 encoding (preferably "utf8mb4_general_ci")
-#        - Choose strong, complex passwords
-#        - Use unique database and username combinations
-#        - Write down credentials securely
-#        Run mysql_secure_installation first, then create WordPress database and user
-#
-#        WordPress MySQL Setup, per WordPress.org:
-#        mysql -u adminusername -p
-#        CREATE DATABASE databasename;
-#        CREATE USER "wordpressusername"@"hostname" IDENTIFIED BY "password";
-#        GRANT ALL PRIVILEGES ON databasename.* TO "wordpressusername"@"hostname";
-#        FLUSH PRIVILEGES;
-#        EXIT
-#
-# Apache: https://ubuntu.com/tutorials/install-and-configure-apache (Basic installation)
-#         https://httpd.apache.org/docs/2.4/getting-started.html (Configuration basics)
-#
-# PHP:    https://www.php.net/manual/en/install.unix.debian.php (PHP installation)
-#         https://developer.wordpress.org/advanced-administration/server/web-server/apache/ (WordPress-specific Apache config)
-#
-# IMPORTANT: Record all database names, usernames, and passwords for WordPress configuration
-#
-# Usage: Run as a user with sudo privileges: ./setup-wp.sh
+# Example: setup-wp.sh
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/common.sh"
+
+# Usage and prerequisites summary.
+usage() {
+    cat <<'EOF'
+setup-wp.sh - WordPress multisite base configuration.
+Example: setup-wp.sh
+
+Notes:
+  - Run as a user with sudo privileges, never as root.
+  - IMPORTANT: Record all database names, usernames, and passwords for WordPress configuration.
+
+Official WordPress Documentation:
+  https://developer.wordpress.org/advanced-administration/multisite/create-network
+  https://learn.wordpress.org/lesson/setting-up-a-wordpress-multisite-network
+
+Server prerequisites (configure before running this script):
+  MySQL:
+    https://ubuntu.com/server/docs/databases-mysql (Installation and basic setup)
+    https://dev.mysql.com/doc/mysql-installation-excerpt/8.0/en/linux-installation-ubuntu.html
+    https://developer.wordpress.org/advanced-administration/before-install/creating-database/
+
+    WordPress Recommendations:
+      - Use UTF-8 encoding (preferably "utf8mb4_general_ci")
+      - Choose strong, complex passwords
+      - Use unique database and username combinations
+      - Write down credentials securely
+    Run mysql_secure_installation first, then create WordPress database and user
+
+    WordPress MySQL Setup, per WordPress.org:
+      mysql -u adminusername -p
+      CREATE DATABASE databasename;
+      CREATE USER "wordpressusername"@"hostname" IDENTIFIED BY "password";
+      GRANT ALL PRIVILEGES ON databasename.* TO "wordpressusername"@"hostname";
+      FLUSH PRIVILEGES;
+      EXIT
+
+  Apache:
+    https://ubuntu.com/tutorials/install-and-configure-apache (Basic installation)
+    https://httpd.apache.org/docs/2.4/getting-started.html (Configuration basics)
+
+  PHP:
+    https://www.php.net/manual/en/install.unix.debian.php (PHP installation)
+    https://developer.wordpress.org/advanced-administration/server/web-server/apache/ (WordPress-specific Apache config)
+EOF
+}
+
+if [ "${1-}" = "--help" ]; then
+    usage
+    exit 0
+fi
 
 # Check if running as correct user
 if [ "$USER" = "root" ]; then

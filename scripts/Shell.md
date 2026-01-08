@@ -1,105 +1,41 @@
 # Shell Script Conventions
+Date: January 8, 2026
 
-## Script Structure
+This document defines Bash development conventions for the scripts in this repository. It focuses on technique and structure for the shared script infrastructure, and it points to other documents for the full catalog of script arguments and environment variables.
 
-```bash
-#!/bin/bash
-# script-name.sh - Brief description
-#
-# Usage: script-name.sh [OPTIONS] <required> [optional]
+## Baseline Bash Practices
 
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-. "$SCRIPT_DIR/common.sh"
+The scripts prioritize predictable behavior, explicit error handling, and clear input validation. These conventions are the foundation for the shared helpers and are expected in all program scripts.
 
-require_cmd dependency
+- Use `set -euo pipefail` near the top of each script to fail fast and prevent silent errors.
+- Quote variables (`"$var"`) and use `$(...)` instead of backticks for command substitution.
+- Use `lowercase_with_underscores` for functions, `UPPERCASE_WITH_UNDERSCORES` for constants, and kebab-case for filenames.
+- Validate inputs early and exit with `err()` for fatal issues.
 
-usage() {
-    cat <<'EOF'
-Usage: script-name.sh [OPTIONS] <domain>
-Description of what this does.
-Options:
-  --help        Show this help
-EOF
-}
+## Script Structure and Dependencies
 
-# Parse arguments
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --help) usage; exit 0 ;;
-        -*) err "Unknown option: $1" ;;
-        *) break ;;
-    esac
-    shift
-done
+Program scripts follow a consistent structure so shared helpers remain predictable. Most scripts should set `SCRIPT_DIR` and source helper libraries from there. Only source what you need.
 
-[ $# -ge 1 ] || { usage; exit 1; }
+- Always derive `SCRIPT_DIR` using `BASH_SOURCE[0]` so scripts run correctly from any working directory.
+- Source `common.sh` first, then `cli.sh` or `auth.sh` as needed.
+- Use `require_cmd` for external dependencies before running logic.
 
-DOMAIN="$1"
+## Options and Usage Formatting
 
-log "Starting operation for $DOMAIN"
-# Main logic here
-log "Completed successfully"
-```
+Option parsing is a contract with operators, so `usage()` must be accurate and stable. For canonical option lists and script-specific details, refer to `scripts/Arguments.md`. The `scripts/Options.csv` cross-reference lists which scripts implement each option.
 
-## Style
+The repository standard is a single heredoc for `usage()` and a short title plus single-line example at the top of usage. Ordering must be consistent: script-specific options first, then auth, then root/ssl paths, then common privilege flags, and `--help` last. The exact format and rules are captured in `scripts/Prompt.md`.
 
-- 4-space indentation
-- Quote variables: `"$var"`
-- Use `$()` not backticks
-- Functions: lowercase_with_underscores
-- Constants: UPPERCASE_WITH_UNDERSCORES
-- Files: kebab-case.sh
+## Shared Helpers and Common Flags
 
-## Error Handling
+The helper libraries provide common logic for privileges, argument parsing, and Cloudflare authentication. Use them to keep behavior consistent across scripts and to avoid duplicated logic. The definitive list of helper usage and script environments lives in `scripts/Arguments.md`, while `scripts/Helpers.csv` summarizes which scripts source each helper.
 
-- Use `err()` from common.sh for fatal errors
-- Use `log()` for informational messages
-- Validate inputs early
-- Check existence before operations
+Key helpers:
+- `priv()` in `common.sh` centralizes privilege escalation via `sudo`.
+- `safe_name()` in `common.sh` creates safe filenames from domains.
+- `cli_usage_*` and `cli_handle_*` in `cli.sh` standardize argument parsing and help output.
+- `auth.sh` centralizes Cloudflare auth handling and API request helpers.
 
-## Security
+## Security and Operational Discipline
 
-- Run as a user with sudo privileges, never as root
-- Use `priv()` wrapper from common.sh
-- Validate hostnames and paths
-- Never hardcode credentials
-
-Some validation scripts accept `--allow-root` (skip the root guard) and `--no-sudo` (disable sudo usage). Use these only in constrained environments where sudo is unavailable or you are intentionally running as root, and understand that `priv()` will then run commands as the current user.
-
-## Project Idioms
-
-**safe_name()**: Removes dots/hyphens from domain for filenames
-```bash
-safe=$(safe_name "example.com")  # Returns "examplecom"
-```
-
-**cli.sh helpers**: Shared option parsing and usage lines for common flags.
-Use these helpers so `--root`, `--ssl-dir`, `--allow-root`, `--no-sudo`, and Cloudflare auth flags behave consistently across scripts.
-```bash
-if cli_handle_root_opt "${OPTARG}" WORDPRESS_ROOT_LOCAL "${!OPTIND-}"; then
-    :
-fi
-```
-```bash
-cli_usage_root
-cli_usage_ssl_dir
-```
-
-**priv()**: Sudo wrapper
-```bash
-priv mkdir -p /etc/ssl/certs
-```
-`priv()` is a thin wrapper around `sudo` that centralizes privilege escalation. The intent is to run scripts as a sudo-capable operator (for example, `ubuntu`) and elevate only for the specific filesystem or service actions that require it. This reduces blast radius while keeping operational commands consistent across scripts.
-
-Example: run a command as the web user while keeping the script itself under the operator account. This is the intended pattern for WP-CLI so file ownership and permissions match the web server user.
-```bash
-priv -u www-data wp --path=/var/www/html/wordpress option get home
-```
-
-Reference: the implementation lives in `scripts/common.sh` and can be switched off for constrained environments by setting `SUDO_BIN` to an empty string in that file. Keep the wrapper in place even when disabling sudo so the calling pattern remains consistent.
-
-**WordPress operations**: Always run as www-data
-```bash
-priv -u www-data wp --path=/var/www/html/wordpress site list
-```
+Run scripts as a sudo-capable operator (for example, `ubuntu`) and use `priv()` for elevated actions. Avoid running as root. Only disable sudo with `--no-sudo` when the environment is constrained and you understand the impact. Never hardcode credentials; use environment variables or auth files as documented in `scripts/Arguments.md` and `scripts/example.auth`.
