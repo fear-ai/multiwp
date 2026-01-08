@@ -9,17 +9,22 @@ CF_API_BASE=""
 CF_ACCOUNT_ID=""
 CF_ACCOUNT=""
 
-# Authentication 
+# Authentication
+# CF_API_TOKEN: account API token
+# CF_API_KEY + CF_API_EMAIL: global API key (user-level)
+# CF_CA_KEY: Origin CA User Service Key (user-level)
 CF_API_KEY=""
 CF_API_TOKEN=""
 CF_API_EMAIL=""
+CF_CA_KEY=""
 
-# Scope hints
-CF_KEY_SCOPE="account"
+# Scope hints (informational only)
+CF_KEY_SCOPE="user"
 CF_TOKEN_SCOPE="account"
+CF_CA_SCOPE="user"
 
 # Zone domain name and ID
+# If multiple pairs are listed, scripts default to the first CF_ZONE_ID and use CF_ZONE_MAIN as the zone name.
 CF_ZONE_MAIN=""
 CF_ZONE=""
 CF_ZONE_ID=""
-

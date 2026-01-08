@@ -1,6 +1,8 @@
 #!/bin/bash
 # cli.sh - Shared CLI helpers for option parsing and guards
 
+set -euo pipefail
+
 cli_handle_common_opt() {
     local opt="$1"
     case "$opt" in
@@ -55,16 +57,16 @@ cli_handle_ssl_dir_opt() {
 }
 
 cli_usage_root() {
-    echo "  --root PATH    WordPress root (default: /var/www/html/wordpress)"
+    echo "  --root PATH [WORDPRESS_ROOT] (default: $WORDPRESS_ROOT)  WordPress root"
 }
 
 cli_usage_ssl_dir() {
-    echo "  --ssl-dir DIR  Base SSL dir (default: /etc/ssl/cloudflare-origin)"
+    echo "  --ssl-dir DIR [SSL_BASE] (default: $SSL_BASE)  Base SSL dir"
 }
 
 cli_usage_common_priv() {
-    echo "  --allow-root   Allow running as root (not recommended)"
-    echo "  --no-sudo      Disable sudo usage (run commands as current user)"
+    echo "  --allow-root  Allow running as root (not recommended)"
+    echo "  --no-sudo [SUDO_BIN] (default: sudo)  Disable sudo usage (run commands as current user)"
 }
 
 cli_require_non_root() {
@@ -82,7 +84,7 @@ cli_handle_cf_auth_opt() {
             OPTIND=$((OPTIND+1))
             return 0
             ;;
-        account|token|email|key)
+        account|token|email|key|ca-key)
             cf_auth_opt "$opt" "$next"
             OPTIND=$((OPTIND+1))
             return 0

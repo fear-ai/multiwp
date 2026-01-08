@@ -1,4 +1,9 @@
 #!/bin/bash
+# verify-domain.sh - Run edge, origin, and WordPress checks for domains.
+# For options, environment variables, defaults see usage().
+#
+# Example: verify-domain.sh [OPTIONS] domain1 [domain2...]
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,18 +16,19 @@ WP_ARGS=()
 ALLOW_ROOT=false
 
 usage() {
-    cat <<'USAGE'
-Usage: verify-domain.sh [OPTIONS] domain1 [domain2...]
-Runs edge, origin, and WordPress validation for each domain.
+    cat <<EOF
+verify-domain.sh - Run edge, origin, and WordPress checks for domains.
+Example: verify-domain.sh [OPTIONS] domain1 [domain2...]
+
 Options:
-  --help                Show this help
-  --api                 Enable Cloudflare API checks in check-edge.sh
-  --apache-dir DIR      Apache sites-available dir (default: /etc/apache2/sites-available)
-  --timeout SECONDS     HTTP timeout for edge checks
-USAGE
-    cli_usage_common_priv
-    cli_usage_ssl_dir
-    cli_usage_root
+  --api  Enable Cloudflare API checks in check-edge.sh
+  --apache-dir DIR [APACHE_SITES_DIR] (default: /etc/apache2/sites-available)  Apache sites-available dir
+  --http-timeout SECONDS [HTTP_TIMEOUT] (default: 10)  HTTP timeout for edge checks
+$(cli_usage_root)
+$(cli_usage_ssl_dir)
+$(cli_usage_common_priv)
+  --help  Show this help
+EOF
 }
 
 while getopts ":-:" opt; do
@@ -56,7 +62,12 @@ while getopts ":-:" opt; do
                         usage; exit 1
                     fi
                     ;;
-                timeout=*) EDGE_ARGS+=("--timeout=${OPTARG#*=}") ;;
+                http-timeout=*) EDGE_ARGS+=("--http-timeout=${OPTARG#*=}") ;;
+                http-timeout)
+                    [ -n "${!OPTIND-}" ] || err "--http-timeout requires a value"
+                    EDGE_ARGS+=("--http-timeout=${!OPTIND}")
+                    OPTIND=$((OPTIND+1))
+                    ;;
                 *)
                     if cli_handle_common_opt "${OPTARG}"; then
                         :

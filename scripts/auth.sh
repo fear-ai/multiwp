@@ -1,6 +1,8 @@
 #!/bin/bash
 # auth.sh - Cloudflare auth helpers and API request utilities
 
+set -euo pipefail
+
 CF_API_BASE="${CF_API_BASE:-https://api.cloudflare.com/client/v4}"
 
 load_cloudflare_auth() {
@@ -10,8 +12,16 @@ load_cloudflare_auth() {
     local prev_api_email="${CF_API_EMAIL-}"
     local prev_api_key="${CF_API_KEY-}"
     local prev_zone_id="${CF_ZONE_ID-}"
+    local prev_zone="${CF_ZONE-}"
+    local prev_ca_key="${CF_CA_KEY-}"
+
+    local first_zone_id=""
+    local first_zone=""
 
     if [ -f "$auth_file" ]; then
+        first_zone_id=$(awk -F= '/^[[:space:]]*CF_ZONE_ID=/{gsub(/^[[:space:]]*CF_ZONE_ID=|["'\'']/, "", $0); print $0; exit}' "$auth_file")
+        first_zone=$(awk -F= '/^[[:space:]]*CF_ZONE=/{gsub(/^[[:space:]]*CF_ZONE=|["'\'']/, "", $0); print $0; exit}' "$auth_file")
+
         set -a
         # shellcheck disable=SC1090
         . "$auth_file"
@@ -34,6 +44,18 @@ load_cloudflare_auth() {
     fi
     if [ -n "$prev_zone_id" ]; then
         CF_ZONE_ID="$prev_zone_id"
+    elif [ -n "$first_zone_id" ]; then
+        CF_ZONE_ID="$first_zone_id"
+    fi
+    if [ -n "$prev_zone" ]; then
+        CF_ZONE="$prev_zone"
+    elif [ -n "${CF_ZONE_MAIN:-}" ]; then
+        CF_ZONE="$CF_ZONE_MAIN"
+    elif [ -n "$first_zone" ]; then
+        CF_ZONE="$first_zone"
+    fi
+    if [ -n "$prev_ca_key" ]; then
+        CF_CA_KEY="$prev_ca_key"
     fi
 }
 
@@ -53,9 +75,9 @@ cf_require_auth() {
     local context="${1:-}"
     if ! cf_auth_mode; then
         if [ -n "$context" ]; then
-            err "CF_API_TOKEN or CF_API_KEY+CF_API_EMAIL required $context"
+            err "Account API token (CF_API_TOKEN) or Global API Key + email (CF_API_KEY+CF_API_EMAIL) required $context"
         else
-            err "CF_API_TOKEN or CF_API_KEY+CF_API_EMAIL required"
+            err "Account API token (CF_API_TOKEN) or Global API Key + email (CF_API_KEY+CF_API_EMAIL) required"
         fi
     fi
 }
@@ -108,6 +130,12 @@ cf_auth_opt() {
             CF_API_KEY_OVERRIDE="$val"
             return 0
             ;;
+        ca-key=*) CF_CA_KEY_OVERRIDE="${opt#*=}"; return 0 ;;
+        ca-key)
+            [ -n "$val" ] || err "ca-key requires a value"
+            CF_CA_KEY_OVERRIDE="$val"
+            return 0
+            ;;
     esac
     return 1
 }
@@ -116,12 +144,12 @@ cf_api_headers_for_mode() {
     local mode="$1"
     CF_API_HEADERS=("-H" "Content-Type: application/json")
     if [ "$mode" = "token" ]; then
-        [ -n "${CF_API_TOKEN:-}" ] || err "CF_API_TOKEN required for token auth"
+        [ -n "${CF_API_TOKEN:-}" ] || err "Account API token (CF_API_TOKEN) required for token auth"
         CF_API_HEADERS+=("-H" "Authorization: Bearer $CF_API_TOKEN")
         return 0
     fi
     if [ "$mode" = "key" ]; then
-        [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ] || err "CF_API_KEY and CF_API_EMAIL required for key auth"
+        [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ] || err "Global API Key + email (CF_API_KEY+CF_API_EMAIL) required for key auth"
         CF_API_HEADERS+=("-H" "X-Auth-Key: $CF_API_KEY" "-H" "X-Auth-Email: $CF_API_EMAIL")
         return 0
     fi
@@ -145,8 +173,30 @@ cf_api_request() {
     local method="$1"
     local path="$2"
     local data="${3-}"
-    cf_auth_mode || err "CF_API_TOKEN or CF_API_KEY+CF_API_EMAIL required"
+    cf_auth_mode || err "Account API token (CF_API_TOKEN) or Global API Key + email (CF_API_KEY+CF_API_EMAIL) required"
     cf_api_request_mode "$CF_AUTH_MODE" "$method" "$path" "$data"
+}
+
+cf_origin_ca_request() {
+    local method="$1"
+    local path="$2"
+    local data="${3-}"
+    CF_API_HEADERS=("-H" "Content-Type: application/json")
+    if [ -n "${CF_CA_KEY:-}" ]; then
+        CF_API_HEADERS+=("-H" "X-Auth-User-Service-Key: $CF_CA_KEY")
+    else
+        cf_auth_mode || err "Origin CA key (CF_CA_KEY), account API token (CF_API_TOKEN), or Global API Key + email (CF_API_KEY+CF_API_EMAIL) required"
+        if [ "$CF_AUTH_MODE" = "token" ]; then
+            CF_API_HEADERS+=("-H" "Authorization: Bearer $CF_API_TOKEN")
+        else
+            CF_API_HEADERS+=("-H" "X-Auth-Key: $CF_API_KEY" "-H" "X-Auth-Email: $CF_API_EMAIL")
+        fi
+    fi
+    if [ -n "$data" ]; then
+        curl -sS -X "$method" "${CF_API_HEADERS[@]}" --data "$data" "$CF_API_BASE$path"
+        return
+    fi
+    curl -sS -X "$method" "${CF_API_HEADERS[@]}" "$CF_API_BASE$path"
 }
 
 cf_api_success() {

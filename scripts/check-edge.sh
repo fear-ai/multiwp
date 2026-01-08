@@ -1,4 +1,9 @@
 #!/bin/bash
+# check-edge.sh - Validate Cloudflare edge behavior for domains.
+# For options, environment variables, defaults see usage().
+#
+# Example: check-edge.sh [OPTIONS] domain1 [domain2...]
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,16 +17,17 @@ AUTH_MODE=""
 
 usage() {
     cat <<'USAGE'
-Usage: check-edge.sh [OPTIONS] domain1 [domain2...]
-Validates Cloudflare edge behavior (redirects, proxy headers, security headers).
+check-edge.sh - Validate Cloudflare edge behavior for domains.
+Example: check-edge.sh [OPTIONS] domain1 [domain2...]
+
 Options:
-  --help             Show this help
-  --timeout SECONDS  HTTP timeout for curl (default: 10)
-  --api              Enable optional Cloudflare API checks (requires CF_ZONE_ID and either CF_API_TOKEN or CF_API_KEY+CF_API_EMAIL)
-  --auth-file PATH   Auth file to load (default: ~/.config/cloudflare/default.auth)
-  --token TOKEN      Override CF_API_TOKEN
-  --key KEY          Override CF_API_KEY
-  --email EMAIL      Override CF_API_EMAIL
+  --http-timeout SECONDS [HTTP_TIMEOUT] (default: 10)  HTTP timeout for curl
+  --api  Enable optional Cloudflare API checks (requires CF_ZONE_ID and either account API token CF_API_TOKEN or Global API Key + email CF_API_KEY+CF_API_EMAIL)
+  --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
+  --token TOKEN [CF_API_TOKEN]  Override CF_API_TOKEN (account API token)
+  --key KEY [CF_API_KEY]  Override CF_API_KEY (global API key)
+  --email EMAIL [CF_API_EMAIL]  Override CF_API_EMAIL (global API key email)
+  --help  Show this help
 USAGE
 }
 
@@ -31,7 +37,12 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 api) API_CHECKS=true ;;
-                timeout=*) HTTP_TIMEOUT="${OPTARG#*=}" ;;
+                http-timeout=*) HTTP_TIMEOUT="${OPTARG#*=}" ;;
+                http-timeout)
+                    [ -n "${!OPTIND-}" ] || err "--http-timeout requires a value"
+                    HTTP_TIMEOUT="${!OPTIND}"
+                    OPTIND=$((OPTIND+1))
+                    ;;
                 *)
                     if cli_handle_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
                         :

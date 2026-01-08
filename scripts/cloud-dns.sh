@@ -1,8 +1,8 @@
 #!/bin/bash
-# cloud-dns.sh - Create a Cloudflare zone via the API and add basic DNS records
+# cloud-dns.sh - Create a Cloudflare zone via the API and add basic DNS records.
+# For options, environment variables, defaults see usage().
 #
-# Usage:
-#   CF_ACCOUNT_ID=... CF_API_TOKEN=... cloud-dns.sh example.com 200.0.1.2
+# Example: cloud-dns.sh <domain> <ipv4> [ipv6]
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,18 +21,22 @@ CF_API_TOKEN_OVERRIDE=""
 
 usage() {
   cat <<'EOF'
-Usage: CF_API_TOKEN=... CF_ACCOUNT_ID=...  cloud-dns.sh <domain> <ipv4> [ipv6]
+cloud-dns.sh - Create a Cloudflare zone via the API and add basic DNS records.
+Example: cloud-dns.sh <domain> <ipv4> [ipv6]
+
 Creates a Cloudflare zone (full) and adds proxied A/AAAA for apex and www.
+
 Auth options (choose one):
-  - API Token (recommended): CF_API_TOKEN=... [--token TOKEN]
-  - Global API Key + email : CF_API_KEY=... CF_API_EMAIL=...
+  - Account API Token (recommended): CF_API_TOKEN=... [--token TOKEN]
+  - Global API Key + email (user): CF_API_KEY=... CF_API_EMAIL=...
+
 Options:
-  --help                 Show this help
-  --account ACCOUNT_ID   Cloudflare account ID (overrides CF_ACCOUNT_ID env)
-  --token TOKEN          Cloudflare API token (overrides CF_API_TOKEN env)
-  --key KEY              Cloudflare global API key (overrides CF_API_KEY env)
-  --email EMAIL          Cloudflare account email (overrides CF_API_EMAIL env)
-  --auth-file PATH       Auth file to load (default: ~/.config/cloudflare/default.auth)
+  --account ACCOUNT_ID [CF_ACCOUNT_ID]  Cloudflare account ID
+  --token TOKEN [CF_API_TOKEN]  Cloudflare account API token
+  --key KEY [CF_API_KEY]  Cloudflare global API key
+  --email EMAIL [CF_API_EMAIL]  Cloudflare API key email
+  --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
+  --help  Show this help
 Notes:
   You may hardcode defaults in CF_API_TOKEN_DEFAULT / CF_API_KEY_DEFAULT / CF_API_EMAIL_DEFAULT / CF_ACCOUNT_ID_DEFAULT near the top of the script; env vars or flags override them.
 EOF

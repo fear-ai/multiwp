@@ -1,4 +1,9 @@
 #!/bin/bash
+# check-wp.sh - Validate WordPress site URLs and multisite mappings.
+# For options, environment variables, defaults see usage().
+#
+# Example: check-wp.sh [OPTIONS] domain1 [domain2...]
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,17 +15,18 @@ MODE="auto"
 ALLOW_ROOT=false
 
 usage() {
-    cat <<'USAGE'
-Usage: check-wp.sh [OPTIONS] domain1 [domain2...]
-Validates WordPress site URLs for apex domains, with multisite-aware checks by default.
+    cat <<EOF
+check-wp.sh - Validate WordPress site URLs for domains.
+Example: check-wp.sh [OPTIONS] domain1 [domain2...]
+
 Options:
-  --help         Show this help
-  --single       Validate a single-site WordPress install (no multisite tables)
-  --multisite    Validate a multisite network
-  --auto         Auto-detect single-site vs multisite (default)
-USAGE
-    cli_usage_common_priv
-    cli_usage_root
+  --singlesite  Validate a single-site WordPress install (no multisite tables)
+  --multisite  Validate a multisite network
+  --autosite (default)  Auto-detect single-site vs multisite
+$(cli_usage_root)
+$(cli_usage_common_priv)
+  --help  Show this help
+EOF
 }
 
 while getopts ":-:" opt; do
@@ -28,9 +34,9 @@ while getopts ":-:" opt; do
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
-                single) MODE="single" ;;
+                singlesite) MODE="single" ;;
                 multisite) MODE="multisite" ;;
-                auto) MODE="auto" ;;
+                autosite) MODE="auto" ;;
                 root|root=*)
                     if cli_handle_root_opt "${OPTARG}" WORDPRESS_ROOT_LOCAL "${!OPTIND-}"; then
                         :

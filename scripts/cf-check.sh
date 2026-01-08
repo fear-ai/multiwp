@@ -1,8 +1,8 @@
 #!/bin/bash
-# cf-check.sh - Inspect Cloudflare zone settings via API
+# cf-check.sh - Inspect Cloudflare zone settings via the API.
+# For options, environment variables, defaults see usage().
 #
-# Usage:
-#   CF_API_TOKEN=... cf-check.sh [OPTIONS] <zone>
+# Example: cf-check.sh [OPTIONS] <zone>
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,24 +19,24 @@ raw=false
 
 usage() {
     cat <<'EOF'
-Usage: cf-check.sh [OPTIONS] <zone>
-Inspect Cloudflare zone settings via the API and optionally validate expected values.
-
-Auth options (choose one):
-  - API Token (recommended): CF_API_TOKEN=... [--token TOKEN]
-  - Global API Key + email : CF_API_KEY=... CF_API_EMAIL=... [--key KEY --email EMAIL]
+cf-check.sh - Inspect Cloudflare zone settings via the API.
+Example: cf-check.sh [OPTIONS] <zone>
 
 Options:
-  --help                 Show this help
-  -e key=val             Check that a setting matches the expected value (repeatable)
-  -s key[,key]           Show only selected settings (repeatable)
-  --raw                  Print raw settings JSON
-  --zone name            Override CF_ZONE_NAME
-  --zone-id id           Override CF_ZONE_ID
-  --auth-file PATH       Auth file to load (default: ~/.config/cloudflare/default.auth)
-  --token TOKEN          Override CF_API_TOKEN
-  --key KEY              Override CF_API_KEY
-  --email EMAIL          Override CF_API_EMAIL
+  -e key=val  Check that a setting matches the expected value (repeatable)
+  -s key[,key]  Show only selected settings (repeatable)
+  --raw  Print raw settings JSON
+  --zone name [CF_ZONE_NAME]  Override CF_ZONE_NAME
+  --zone-id id [CF_ZONE_ID]  Override CF_ZONE_ID
+
+Auth options (choose one):
+  - Account API Token (recommended): CF_API_TOKEN=... [--token TOKEN]
+  - Global API Key + email (user): CF_API_KEY=... CF_API_EMAIL=... [--key KEY --email EMAIL]
+  --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
+  --token TOKEN [CF_API_TOKEN]  Override CF_API_TOKEN (account API token)
+  --key KEY [CF_API_KEY]  Override CF_API_KEY (global API key)
+  --email EMAIL [CF_API_EMAIL]  Override CF_API_EMAIL (global API key email)
+  --help  Show this help
 EOF
 }
 

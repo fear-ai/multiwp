@@ -1,19 +1,8 @@
 #!/bin/bash
-# install-site.sh - Add a new site to WordPress Multisite and map to apex domain
+# install-site.sh - Add a new site to WordPress multisite and map to an apex domain.
+# For options, environment variables, defaults see usage().
 #
-# Usage: ./install-site.sh <domain> [title] [email]
-# Example: ./install-site.sh example.com "Example Site" admin@example.com
-#
-# Prerequisites:
-# - WordPress multisite already configured and running
-# - Apache vhost and SSL certificate already in place for the domain
-# - DNS pointing to server (via Cloudflare proxy)
-#
-# This script:
-# 1. Creates a new site in the multisite network with a subdirectory slug
-# 2. Maps the site to the apex domain in wp_blogs table
-# 3. Updates siteurl and home URLs to use HTTPS and the apex domain
-# 4. Verifies the site was created successfully
+# Example: install-site.sh [OPTIONS] <domain> [title] [email]
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,27 +12,29 @@ require_cmd wp
 
 usage() {
     cat <<'EOF'
-Usage: install-site.sh [OPTIONS] <domain> [title] [email]
+install-site.sh - Add a new site to WordPress multisite and map to an apex domain.
+Example: install-site.sh [OPTIONS] <domain> [title] [email]
 
-Creates a new site in WordPress multisite and maps it to an apex domain.
-
-Arguments:
-  domain    The apex domain (e.g., example.com)
-  title     Site title (default: domain name with capital first letter)
-  email     Admin email (default: alphaeosnet@gmail.com)
+Arguments: <domain> [title] [email]
+  - domain is the apex domain (for example, example.com).
+  - title defaults to the domain name with the first letter capitalized.
+  - email defaults to alphaeosnet@gmail.com.
 
 Options:
-  --help    Show this help message
-
-Examples:
-  ./install-site.sh example.com
-  ./install-site.sh example.com "Example Site" admin@example.com
+  --help  Show this help message
 
 Prerequisites:
+  The following dependencies must be in place before running this script.
   - WordPress multisite installed at $WORDPRESS_ROOT
   - Apache vhost configured for the domain
   - SSL certificate in place
   - DNS configured (proxied through Cloudflare)
+
+What this script does:
+  - Creates a new site in the multisite network with a subdirectory slug
+  - Maps the site to the apex domain in wp_blogs
+  - Updates siteurl and home URLs to use https://<domain>
+  - Verifies the site appears in wp site list
 EOF
 }
 

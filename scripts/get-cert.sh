@@ -1,22 +1,8 @@
 #!/bin/bash
-# get-cert.sh - Issue or install Cloudflare Origin cert/key for domain(s)
+# get-cert.sh - Issue or install Cloudflare Origin certs and keys for domains.
+# For options, environment variables, defaults see usage().
 #
-# Usage:
-#   ./get-cert.sh [OPTIONS] domain1 [domain2...]
-#
-# Modes:
-#   --api      Issue certs via Cloudflare API
-#   --manual   Paste cert/key blocks manually
-#   --auto     Use API if credentials exist, otherwise manual (default)
-#
-# Options:
-#   --ssl-dir DIR     Base SSL dir (default: /etc/ssl/cloudflare-origin)
-#   --auth-file PATH  Auth file to load (default: ~/.config/cloudflare/default.auth)
-#   --token TOKEN     Override CF_API_TOKEN
-#   --key KEY         Override CF_API_KEY
-#   --email EMAIL     Override CF_API_EMAIL
-#   --force           Overwrite existing files without prompt
-#   --help            Show help
+# Example: get-cert.sh [OPTIONS] domain1 [domain2...]
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,24 +14,29 @@ MODE="auto"
 FORCE=false
 
 usage() {
-    cat <<'EOF'
-Usage: get-cert.sh [OPTIONS] domain1 [domain2...]
-Issues or installs Cloudflare Origin cert/key files for one or more domains.
+    cat <<EOF
+get-cert.sh - Issue or install Cloudflare Origin certs and keys for domains.
+Example: get-cert.sh [OPTIONS] domain1 [domain2...]
 
 Modes:
-  --api       Issue certs via Cloudflare API
-  --manual    Paste cert/key blocks manually
-  --auto      Use API if credentials exist, otherwise manual (default)
+  --api  Issue certs via Cloudflare API
+  --manual  Paste cert/key blocks manually
+  --auto (default)  Use API if credentials exist, otherwise manual
 
 Options:
-  --auth-file PATH Auth file to load (default: ~/.config/cloudflare/default.auth)
-  --token TOKEN      Override CF_API_TOKEN
-  --key KEY          Override CF_API_KEY
-  --email EMAIL      Override CF_API_EMAIL
-  --force         Overwrite existing files without prompt
-  --help          Show this help
+  --force  Overwrite existing files without prompt
+  --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
+  --token TOKEN [CF_API_TOKEN]  Override CF_API_TOKEN (account API token)
+  --key KEY [CF_API_KEY]  Override CF_API_KEY (global API key)
+  --email EMAIL [CF_API_EMAIL]  Override CF_API_EMAIL (global API key email)
+  --ca-key KEY [CF_CA_KEY]  Override CF_CA_KEY (Origin CA User Service Key)
+$(cli_usage_ssl_dir)
+  --help  Show this help
+
+Notes:
+  - API mode requires an Origin CA key (preferred) or Cloudflare API credentials.
+  - Manual mode prompts for certificate and key blocks and writes into SSL_BASE.
 EOF
-    cli_usage_ssl_dir
 }
 
 while getopts ":-:" opt; do
@@ -85,8 +76,23 @@ require_cmd openssl
 load_cloudflare_auth
 
 AUTH_MODE=""
+if [ -n "${CF_CA_KEY_OVERRIDE:-}" ]; then
+    CF_CA_KEY="$CF_CA_KEY_OVERRIDE"
+fi
+if [ -n "${CF_API_TOKEN_OVERRIDE:-}" ]; then
+    CF_API_TOKEN="$CF_API_TOKEN_OVERRIDE"
+fi
+if [ -n "${CF_API_EMAIL_OVERRIDE:-}" ]; then
+    CF_API_EMAIL="$CF_API_EMAIL_OVERRIDE"
+fi
+if [ -n "${CF_API_KEY_OVERRIDE:-}" ]; then
+    CF_API_KEY="$CF_API_KEY_OVERRIDE"
+fi
+
 if [ "$MODE" = "auto" ] || [ "$MODE" = "api" ]; then
-    if cf_auth_mode; then
+    if [ -n "${CF_CA_KEY:-}" ]; then
+        AUTH_MODE="ca-key"
+    elif cf_auth_mode; then
         AUTH_MODE="$CF_AUTH_MODE"
     fi
 fi
@@ -100,7 +106,7 @@ if [ "$MODE" = "auto" ]; then
 fi
 
 if [ "$MODE" = "api" ]; then
-    [ -n "$AUTH_MODE" ] || err "API auth required: CF_API_TOKEN or CF_API_KEY+CF_API_EMAIL"
+    [ -n "$AUTH_MODE" ] || err "API auth required: Origin CA key (CF_CA_KEY), account API token (CF_API_TOKEN), or global API key + email (CF_API_KEY+CF_API_EMAIL)"
     require_cmd curl
     require_cmd jq
 fi
@@ -126,35 +132,54 @@ issue_cert() {
     safe=$(safe_name "$domain")
     local cert_file="$SSL_CERT_DIR/${safe}.crt"
     local key_file="$SSL_KEY_DIR/${safe}.key"
+    local tmp_key tmp_csr
+    local csr_payload
 
     log "Requesting Cloudflare Origin certificate for: $domain"
     log "Certificate file: $cert_file"
     log "Private key file: $key_file"
 
+    tmp_key=$(mktemp)
+    tmp_csr=$(mktemp)
+
+    log "Generating private key and CSR for: $domain"
+    if ! (umask 077 && openssl req -new -newkey rsa:2048 -nodes -keyout "$tmp_key" -out "$tmp_csr" -subj "/CN=$domain" >/dev/null 2>&1); then
+        rm -f "$tmp_key" "$tmp_csr"
+        err "Failed to generate key/CSR for $domain"
+    fi
+
+    csr_payload=$(awk 'NF {sub(/\r/, ""); printf "%s\n", $0;}' "$tmp_csr")
+
     local payload
     payload=$(jq -n \
         --arg domain "$domain" \
         --arg www_domain "www.$domain" \
+        --arg csr "$csr_payload" \
         '{
-            type: "origin-rsa",
             hostnames: [$domain, $www_domain],
-            requested_validity: 5475
+            requested_validity: 5475,
+            request_type: "origin-rsa",
+            csr: $csr
         }')
 
     local response
-    response=$(cf_api_request POST "/certificates" "$payload")
+    response=$(cf_origin_ca_request POST "/certificates" "$payload")
 
     if [ "$(echo "$response" | jq -r '.success')" != "true" ]; then
+        rm -f "$tmp_key" "$tmp_csr"
         err "API request failed: $(echo "$response" | jq -r '.errors[].message' | tr '\n' ' ')"
     fi
 
-    local certificate private_key
+    local certificate
     certificate=$(echo "$response" | jq -r '.result.certificate')
-    private_key=$(echo "$response" | jq -r '.result.private_key')
-    [ "$certificate" != "null" ] && [ "$private_key" != "null" ] || err "Failed to extract certificate or private key"
+    if [ "$certificate" = "null" ] || [ -z "$certificate" ]; then
+        rm -f "$tmp_key" "$tmp_csr"
+        err "Failed to extract certificate"
+    fi
 
     echo "$certificate" | priv tee "$cert_file" >/dev/null
-    echo "$private_key" | priv tee "$key_file" >/dev/null
+    priv mv "$tmp_key" "$key_file"
+    rm -f "$tmp_csr"
     ensure_perms "$cert_file"
     ensure_perms "$key_file"
     validate_cert "$cert_file"

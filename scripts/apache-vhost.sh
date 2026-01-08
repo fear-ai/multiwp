@@ -1,21 +1,8 @@
 #!/bin/bash
-# apache-vhost.sh - Add domains to WordPress multisite
-# Creates Apache virtual hosts using templates with enhanced validation and flexibility
+# apache-vhost.sh - Add Apache vhosts for WordPress domains.
+# For options, environment variables, defaults see usage().
 #
-# Usage: ./apache-vhost.sh [OPTIONS] domain1.com domain2.com ...
-# Options:
-#   --http            Create only HTTP virtual hosts
-#   --ssl             Create only SSL virtual hosts (requires certificates)
-#   --root PATH       WordPress root (default: /var/www/html/wordpress)
-#   --temp PATH       Set templates directory (default: ../templates)
-#   --ssl-dir PATH    Base SSL dir (default: /etc/ssl/cloudflare-origin)
-#   --help            Show this help message
-#
-# Examples:
-#   ./apache-vhost.sh client1.com client2.com client3.com
-#   ./apache-vhost.sh --http test-domain.org
-#   ./apache-vhost.sh --ssl secure-site.com
-#   ./apache-vhost.sh --root /opt/wordpress --temp /etc/multiwp/templates client.com
+# Example: apache-vhost.sh [OPTIONS] domain1 [domain2...]
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,27 +25,23 @@ HTTP_ONLY=false
 SSL_ONLY=false
 DOMAINS=()
 
-# Function to display help
-show_help() {
-    echo "apache-vhost.sh - Add domains to WordPress multisite"
-    echo ""
-    echo "Usage: $0 [OPTIONS] domain1.com domain2.com ..."
-    echo ""
-    echo "Options:"
-    echo "  --http            Create only HTTP virtual hosts"
-    echo "  --ssl             Create only SSL virtual hosts"
-    cli_usage_root
-    echo "  --temp PATH       Set templates directory (default: ../templates)"
-    cli_usage_ssl_dir
-    echo "  --help            Show this help message"
-    echo ""
-    echo "Examples:"
-    echo "  $0 client1.com client2.com client3.com"
-    echo "  $0 --http test-domain.org"
-    echo "  $0 --ssl secure-site.com"
-    echo "  $0 --root /opt/wordpress --temp /etc/multiwp/templates client.com"
-    echo ""
-    exit 0
+usage() {
+    cat <<EOF
+apache-vhost.sh - Add Apache vhosts for WordPress domains.
+Example: apache-vhost.sh [OPTIONS] domain1 [domain2...]
+
+Options:
+  --http  Create only HTTP virtual hosts
+  --ssl  Create only SSL virtual hosts
+  --temp PATH [TEMPLATE_DIR] (default: $TEMPLATE_DIR)  Templates directory
+$(cli_usage_root)
+$(cli_usage_ssl_dir)
+  --help  Show this help message
+
+Notes:
+  - Uses templates in the templates directory and write access to APACHE_SITES_DIR.
+  - SSL vhosts use origin cert/key files in directories from SSL_BASE.
+EOF
 }
 
 # Function to validate domain name
@@ -254,7 +237,7 @@ while getopts ":-:" opt; do
                     if cli_handle_root_opt "${OPTARG}" WORDPRESS_ROOT "${!OPTIND-}"; then
                         :
                     else
-                        show_help
+                        usage; exit 1
                     fi
                     ;;
                 temp=*) TEMPLATE_DIR="${OPTARG#*=}" ;;
@@ -262,14 +245,14 @@ while getopts ":-:" opt; do
                     if cli_handle_ssl_dir_opt "${OPTARG}" SSL_BASE SSL_CERT_DIR SSL_KEY_DIR "${!OPTIND-}"; then
                         :
                     else
-                        show_help
+                        usage; exit 1
                     fi
                     ;;
-                help) show_help ;;
-                *) show_help ;;
+                help) usage; exit 0 ;;
+                *) usage; exit 1 ;;
             esac
             ;;
-        \?) show_help ;;
+        \?) usage; exit 1 ;;
     esac
 done
 shift $((OPTIND-1))
@@ -277,8 +260,7 @@ shift $((OPTIND-1))
 # Remaining args are domains
 if [ $# -eq 0 ]; then
     echo "Error: No domains specified"
-    echo "Usage: $0 [OPTIONS] domain1.com domain2.org ..."
-    echo "Use --help for more information"
+    usage
     exit 1
 fi
 DOMAINS=("$@")

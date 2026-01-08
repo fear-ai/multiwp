@@ -1,4 +1,9 @@
 #!/bin/bash
+# check-origin.sh - Validate origin certificates, Apache configuration, and vhost wiring.
+# For options, environment variables, defaults see usage().
+#
+# Example: check-origin.sh [OPTIONS] domain1 [domain2...]
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,16 +19,17 @@ APACHE_SITES_DIR_LOCAL="$APACHE_SITES_DIR"
 WORDPRESS_ROOT_LOCAL="$WORDPRESS_ROOT"
 
 usage() {
-    cat <<'USAGE'
-Usage: check-origin.sh [OPTIONS] domain1 [domain2...]
-Validates origin certificates, Apache configuration, and vhost wiring.
+    cat <<EOF
+check-origin.sh - Validate origin certificates, Apache configuration, and vhost wiring.
+Example: check-origin.sh [OPTIONS] domain1 [domain2...]
+
 Options:
-  --help                Show this help
-  --apache-dir DIR      Apache sites-available dir (default: /etc/apache2/sites-available)
-USAGE
-    cli_usage_common_priv
-    cli_usage_ssl_dir
-    cli_usage_root
+  --apache-dir DIR [APACHE_SITES_DIR] (default: /etc/apache2/sites-available)  Apache sites-available dir
+$(cli_usage_root)
+$(cli_usage_ssl_dir)
+$(cli_usage_common_priv)
+  --help  Show this help
+EOF
 }
 
 while getopts ":-:" opt; do
