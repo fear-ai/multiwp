@@ -4,11 +4,11 @@
 # Example: ./scripts/test_cf.sh
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPTS_DIR="$ROOT_DIR/scripts"
 
-. "$ROOT_DIR/scripts/common.sh"
-. "$ROOT_DIR/scripts/auth.sh"
+. "$SCRIPTS_DIR/common.sh"
+. "$SCRIPTS_DIR/auth.sh"
 
 set +e
 
@@ -200,21 +200,21 @@ cf_auth_opt "ca-key" "cakey789"
 assert_equal "cakey789" "$CF_CA_KEY_OVERRIDE" "cf_auth_opt parses --ca-key"
 
 
-echo "== cf_api_headers_for_mode =="
+echo "== cf_api_headers_mode =="
 reset_auth_env
 CF_API_TOKEN="token123"
-cf_api_headers_for_mode "token"
+cf_api_headers_mode "token"
 assert_contains "${CF_API_HEADERS[*]}" "Authorization: Bearer token123" "token mode adds bearer header"
 
 reset_auth_env
 CF_API_KEY="key123"
 CF_API_EMAIL="user@example.com"
-cf_api_headers_for_mode "key"
+cf_api_headers_mode "key"
 assert_contains "${CF_API_HEADERS[*]}" "X-Auth-Key: key123" "key mode adds X-Auth-Key"
 assert_contains "${CF_API_HEADERS[*]}" "X-Auth-Email: user@example.com" "key mode adds X-Auth-Email"
 
 reset_auth_env
-run_subshell cf_api_headers_for_mode "token" >/dev/null
+run_subshell cf_api_headers_mode "token" >/dev/null
 assert_status 1 $? "token mode fails without CF_API_TOKEN"
 
 

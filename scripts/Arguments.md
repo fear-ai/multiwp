@@ -34,7 +34,7 @@ Privilege wrapper:
 Common options:
 - `--allow-root` lets a script run even when `USER=root` (not recommended).
 - `--no-sudo [SUDO_BIN] (default: sudo)` disables `sudo` usage inside `priv()`.
-- `--root PATH [WORDPRESS_ROOT] (default: /var/www/html/wordpress)` sets the WordPress root path.
+- `--wp-root PATH [WORDPRESS_ROOT] (default: /var/www/html/wordpress)` sets the WordPress root path.
 - `--ssl-dir DIR [SSL_BASE] (default: /etc/ssl/cloudflare-origin)` sets the SSL base dir and updates cert/key paths.
 
 ### auth.sh
@@ -97,8 +97,8 @@ These flags influence how scripts invoke privileged commands. They do not change
 
 These flags and environment variables control where WordPress is located on disk.
 
-- `--root PATH [WORDPRESS_ROOT] (default: /var/www/html/wordpress)` sets the WordPress root path for scripts that operate on the WordPress filesystem or run WP-CLI.
-- `WORDPRESS_ROOT` (env) provides the default WordPress root if the `--root` flag is not supplied.
+- `--wp-root PATH [WORDPRESS_ROOT] (default: /var/www/html/wordpress)` sets the WordPress root path for scripts that operate on the WordPress filesystem or run WP-CLI.
+- `WORDPRESS_ROOT` (env) provides the default WordPress root if the `--wp-root` flag is not supplied.
 
 ### SSL base and certificate paths
 
@@ -325,7 +325,7 @@ Options (script-specific):
 - `--temp PATH [TEMPLATE_DIR]` sets the templates directory.
 
 Options (shared):
-- `--root PATH [WORDPRESS_ROOT]`
+- `--wp-root PATH [WORDPRESS_ROOT]`
 - `--ssl-dir DIR [SSL_BASE]`
 - `--help`
 
@@ -378,7 +378,7 @@ Options (script-specific):
 - `--apache-dir DIR [APACHE_SITES_DIR]` overrides the Apache sites directory.
 
 Options (shared):
-- `--root PATH [WORDPRESS_ROOT]`
+- `--wp-root PATH [WORDPRESS_ROOT]`
 - `--ssl-dir DIR [SSL_BASE]`
 - `--allow-root`, `--no-sudo`
 - `--help`
@@ -400,7 +400,7 @@ Options (script-specific):
 - `--autosite` auto-detects single-site vs multisite (default).
 
 Options (shared):
-- `--root PATH [WORDPRESS_ROOT]`
+- `--wp-root PATH [WORDPRESS_ROOT]`
 - `--allow-root`, `--no-sudo`
 - `--help`
 
@@ -422,7 +422,7 @@ Options (script-specific):
 
 Options (shared):
 - `--ssl-dir DIR [SSL_BASE]` passes the SSL base directory to `check-origin.sh`.
-- `--root PATH [WORDPRESS_ROOT]` passes the WordPress root to `check-origin.sh` and `check-wp.sh`.
+- `--wp-root PATH [WORDPRESS_ROOT]` passes the WordPress root to `check-origin.sh` and `check-wp.sh`.
 - `--allow-root`, `--no-sudo` pass through to `check-origin.sh` and `check-wp.sh`.
 - `--help`.
 
@@ -460,7 +460,7 @@ This cross-reference lists options alphabetically and the scripts that implement
 - `--multisite` (check-wp.sh)
 - `--no-sudo` (check-origin.sh, check-wp.sh, verify-domain.sh)
 - `--raw` (cf-check.sh)
-- `--root` (apache-vhost.sh, check-origin.sh, check-wp.sh, verify-domain.sh)
+- `--wp-root` (apache-vhost.sh, check-origin.sh, check-wp.sh, verify-domain.sh)
 - `--singlesite` (check-wp.sh)
 - `--ssl` (apache-vhost.sh)
 - `--ssl-dir` (apache-vhost.sh, check-origin.sh, get-cert.sh, verify-domain.sh)

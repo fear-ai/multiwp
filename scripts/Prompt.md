@@ -30,7 +30,7 @@ Rules:
 - The header should contain only the short description line, the “For options…” line, a single-line Example, and optional Notes.
 - Any expanded explanations, requirements, or operational notes must be moved from the header into usage() under sections like Notes, Prerequisites, or What this script does.
 - Do not add separate “Usage:” or “Examples:” blocks beyond the single-line Example.
-- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_root), embed it via command substitution inside the heredoc so the EOF is last.
+- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_wp_root), embed it via command substitution inside the heredoc so the EOF is last.
 - Order options in usage() as: script-specific, auth, root, ssl, common, then --help last.
 - Omit any category the script does not support; do not add placeholders.
 - Preserve existing behavior; only adjust header and usage() formatting and ordering.
@@ -69,7 +69,7 @@ Rules:
 - The header should contain only the short description line, the “For options…” line, a single-line Example, and optional Notes.
 - Any expanded explanations, requirements, or operational notes must be moved from the header into usage() under sections like Notes, Prerequisites, or What this script does.
 - Do not add separate “Usage:” or “Examples:” blocks beyond the single-line Example.
-- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_root), embed it via command substitution inside the heredoc so the EOF is last.
+- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_wp_root), embed it via command substitution inside the heredoc so the EOF is last.
 - Order options in usage() as: script-specific, auth, root, ssl, common, then --help last.
 - Omit any category the script does not support; do not add placeholders.
 - Preserve existing behavior; only adjust header and usage() formatting and ordering.
@@ -104,7 +104,7 @@ Rules:
 - The header should contain only the short description line, the “For options…” line, a single-line Example, and optional Notes.
 - Any expanded explanations, requirements, or operational notes must be moved from the header into usage() under sections like Notes, Prerequisites, or What this script does.
 - Do not add separate “Usage:” or “Examples:” blocks beyond the single-line Example.
-- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_root), embed it via command substitution inside the heredoc so the EOF is last.
+- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_wp_root), embed it via command substitution inside the heredoc so the EOF is last.
 - Order options in usage() as: script-specific, auth, root, ssl, common, then --help last.
 - Omit any category the script does not support; do not add placeholders.
 - Preserve existing behavior; only adjust header and usage() formatting and ordering.
@@ -139,7 +139,7 @@ Rules:
 - The header should contain only the short description line, the “For options…” line, a single-line Example, and optional Notes.
 - Any expanded explanations, requirements, or operational notes must be moved from the header into usage() under sections like Notes, Prerequisites, or What this script does.
 - Do not add separate “Usage:” or “Examples:” blocks beyond the single-line Example.
-- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_root), embed it via command substitution inside the heredoc so the EOF is last.
+- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_wp_root), embed it via command substitution inside the heredoc so the EOF is last.
 - Order options in usage() as: script-specific, auth, root, ssl, common, then --help last.
 - Omit any category the script does not support; do not add placeholders.
 - Preserve existing behavior; only adjust header and usage() formatting and ordering.
@@ -174,7 +174,7 @@ Rules:
 - The header should contain only the short description line, the “For options…” line, a single-line Example, and optional Notes.
 - Any expanded explanations, requirements, or operational notes must be moved from the header into usage() under sections like Notes, Prerequisites, or What this script does.
 - Do not add separate “Usage:” or “Examples:” blocks beyond the single-line Example.
-- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_root), embed it via command substitution inside the heredoc so the EOF is last.
+- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_wp_root), embed it via command substitution inside the heredoc so the EOF is last.
 - Order options in usage() as: script-specific, auth, root, ssl, common, then --help last.
 - Omit any category the script does not support; do not add placeholders.
 - Preserve existing behavior; only adjust header and usage() formatting and ordering.
@@ -209,7 +209,7 @@ Rules:
 - The header should contain only the short description line, the “For options…” line, a single-line Example, and optional Notes.
 - Any expanded explanations, requirements, or operational notes must be moved from the header into usage() under sections like Notes, Prerequisites, or What this script does.
 - Do not add separate “Usage:” or “Examples:” blocks beyond the single-line Example.
-- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_root), embed it via command substitution inside the heredoc so the EOF is last.
+- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_wp_root), embed it via command substitution inside the heredoc so the EOF is last.
 - Order options in usage() as: script-specific, auth, root, ssl, common, then --help last.
 - Omit any category the script does not support; do not add placeholders.
 - Preserve existing behavior; only adjust header and usage() formatting and ordering.
@@ -244,7 +244,7 @@ Rules:
 - The header should contain only the short description line, the “For options…” line, a single-line Example, and optional Notes.
 - Any expanded explanations, requirements, or operational notes must be moved from the header into usage() under sections like Notes, Prerequisites, or What this script does.
 - Do not add separate “Usage:” or “Examples:” blocks beyond the single-line Example.
-- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_root), embed it via command substitution inside the heredoc so the EOF is last.
+- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_wp_root), embed it via command substitution inside the heredoc so the EOF is last.
 - Order options in usage() as: script-specific, auth, root, ssl, common, then --help last.
 - Omit any category the script does not support; do not add placeholders.
 - Preserve existing behavior; only adjust header and usage() formatting and ordering.
@@ -279,7 +279,7 @@ Rules:
 - The header should contain only the short description line, the “For options…” line, a single-line Example, and optional Notes.
 - Any expanded explanations, requirements, or operational notes must be moved from the header into usage() under sections like Notes, Prerequisites, or What this script does.
 - Do not add separate “Usage:” or “Examples:” blocks beyond the single-line Example.
-- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_root), embed it via command substitution inside the heredoc so the EOF is last.
+- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_wp_root), embed it via command substitution inside the heredoc so the EOF is last.
 - Order options in usage() as: script-specific, auth, root, ssl, common, then --help last.
 - Omit any category the script does not support; do not add placeholders.
 - Preserve existing behavior; only adjust header and usage() formatting and ordering.
@@ -314,7 +314,7 @@ Rules:
 - The header should contain only the short description line, the “For options…” line, a single-line Example, and optional Notes.
 - Any expanded explanations, requirements, or operational notes must be moved from the header into usage() under sections like Notes, Prerequisites, or What this script does.
 - Do not add separate “Usage:” or “Examples:” blocks beyond the single-line Example.
-- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_root), embed it via command substitution inside the heredoc so the EOF is last.
+- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_wp_root), embed it via command substitution inside the heredoc so the EOF is last.
 - Order options in usage() as: script-specific, auth, root, ssl, common, then --help last.
 - Omit any category the script does not support; do not add placeholders.
 - Preserve existing behavior; only adjust header and usage() formatting and ordering.
@@ -349,7 +349,7 @@ Rules:
 - The header should contain only the short description line, the “For options…” line, a single-line Example, and optional Notes.
 - Any expanded explanations, requirements, or operational notes must be moved from the header into usage() under sections like Notes, Prerequisites, or What this script does.
 - Do not add separate “Usage:” or “Examples:” blocks beyond the single-line Example.
-- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_root), embed it via command substitution inside the heredoc so the EOF is last.
+- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_wp_root), embed it via command substitution inside the heredoc so the EOF is last.
 - Order options in usage() as: script-specific, auth, root, ssl, common, then --help last.
 - Omit any category the script does not support; do not add placeholders.
 - Preserve existing behavior; only adjust header and usage() formatting and ordering.
@@ -384,7 +384,7 @@ Rules:
 - The header should contain only the short description line, the “For options…” line, a single-line Example, and optional Notes.
 - Any expanded explanations, requirements, or operational notes must be moved from the header into usage() under sections like Notes, Prerequisites, or What this script does.
 - Do not add separate “Usage:” or “Examples:” blocks beyond the single-line Example.
-- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_root), embed it via command substitution inside the heredoc so the EOF is last.
+- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_wp_root), embed it via command substitution inside the heredoc so the EOF is last.
 - Order options in usage() as: script-specific, auth, root, ssl, common, then --help last.
 - Omit any category the script does not support; do not add placeholders.
 - Preserve existing behavior; only adjust header and usage() formatting and ordering.
@@ -419,7 +419,7 @@ Rules:
 - The header should contain only the short description line, the “For options…” line, a single-line Example, and optional Notes.
 - Any expanded explanations, requirements, or operational notes must be moved from the header into usage() under sections like Notes, Prerequisites, or What this script does.
 - Do not add separate “Usage:” or “Examples:” blocks beyond the single-line Example.
-- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_root), embed it via command substitution inside the heredoc so the EOF is last.
+- usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_wp_root), embed it via command substitution inside the heredoc so the EOF is last.
 - Order options in usage() as: script-specific, auth, root, ssl, common, then --help last.
 - Omit any category the script does not support; do not add placeholders.
 - Preserve existing behavior; only adjust header and usage() formatting and ordering.

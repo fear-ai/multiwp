@@ -6,9 +6,10 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-. "$SCRIPT_DIR/common.sh"
-. "$SCRIPT_DIR/cli.sh"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPTS_DIR="$ROOT_DIR/scripts"
+. "$SCRIPTS_DIR/common.sh"
+. "$SCRIPTS_DIR/cli.sh"
 
 WORDPRESS_ROOT_LOCAL="$WORDPRESS_ROOT"
 MODE="auto"
@@ -23,7 +24,7 @@ Options:
   --singlesite  Validate a single-site WordPress install (no multisite tables)
   --multisite  Validate a multisite network
   --autosite (default)  Auto-detect single-site vs multisite
-$(cli_usage_root)
+$(cli_usage_wp_root)
 $(cli_usage_common_priv)
   --help  Show this help
 EOF
@@ -37,15 +38,15 @@ while getopts ":-:" opt; do
                 singlesite) MODE="single" ;;
                 multisite) MODE="multisite" ;;
                 autosite) MODE="auto" ;;
-                root|root=*)
-                    if cli_handle_root_opt "${OPTARG}" WORDPRESS_ROOT_LOCAL "${!OPTIND-}"; then
+                wp-root|wp-root=*)
+                    if cli_wp_root_opt "${OPTARG}" WORDPRESS_ROOT_LOCAL "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1
                     fi
                     ;;
                 *)
-                    if cli_handle_common_opt "${OPTARG}"; then
+                    if cli_common_opt "${OPTARG}"; then
                         :
                     else
                         usage; exit 1

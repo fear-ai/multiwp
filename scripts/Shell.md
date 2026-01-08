@@ -14,10 +14,10 @@ The scripts prioritize predictable behavior, explicit error handling, and clear 
 
 ## Script Structure and Dependencies
 
-Program scripts follow a consistent structure so shared helpers remain predictable. Most scripts should set `SCRIPT_DIR` and source helper libraries from there. Only source what you need.
+Program scripts follow a consistent structure so shared helpers remain predictable. Scripts derive the repository root first, then source helpers from the repo’s `scripts/` directory. Only source what you need.
 
-- Always derive `SCRIPT_DIR` using `BASH_SOURCE[0]` so scripts run correctly from any working directory.
-- Source `common.sh` first, then `cli.sh` or `auth.sh` as needed.
+- Always derive `ROOT_DIR` from `BASH_SOURCE[0]`, then set `SCRIPTS_DIR="$ROOT_DIR/scripts"` so scripts run correctly from any working directory.
+- Source `common.sh` first, then `cli.sh` or `auth.sh` as needed, using `SCRIPTS_DIR` to avoid path ambiguity.
 - Use `require_cmd` for external dependencies before running logic.
 
 ## Options and Usage Formatting
@@ -33,7 +33,7 @@ The helper libraries provide common logic for privileges, argument parsing, and 
 Key helpers:
 - `priv()` in `common.sh` centralizes privilege escalation via `sudo`.
 - `safe_name()` in `common.sh` creates safe filenames from domains.
-- `cli_usage_*` and `cli_handle_*` in `cli.sh` standardize argument parsing and help output.
+- `cli_usage_*`, `cli_*_opt`, and `cli_cf_auth_opt` in `cli.sh` standardize argument parsing and help output.
 - `auth.sh` centralizes Cloudflare auth handling and API request helpers.
 
 ## Security and Operational Discipline

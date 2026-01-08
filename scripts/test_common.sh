@@ -4,10 +4,10 @@
 # Example: ./scripts/test_common.sh
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPTS_DIR="$ROOT_DIR/scripts"
 
-. "$ROOT_DIR/scripts/common.sh"
+. "$SCRIPTS_DIR/common.sh"
 
 set +e
 

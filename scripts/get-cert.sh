@@ -5,10 +5,11 @@
 # Example: get-cert.sh [OPTIONS] domain1 [domain2...]
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-. "$SCRIPT_DIR/common.sh"
-. "$SCRIPT_DIR/auth.sh"
-. "$SCRIPT_DIR/cli.sh"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPTS_DIR="$ROOT_DIR/scripts"
+. "$SCRIPTS_DIR/common.sh"
+. "$SCRIPTS_DIR/auth.sh"
+. "$SCRIPTS_DIR/cli.sh"
 
 MODE="auto"
 FORCE=false
@@ -48,7 +49,7 @@ while getopts ":-:" opt; do
                 manual) MODE="manual" ;;
                 auto) MODE="auto" ;;
                 ssl-dir|ssl-dir=*)
-                    if cli_handle_ssl_dir_opt "${OPTARG}" SSL_BASE SSL_CERT_DIR SSL_KEY_DIR "${!OPTIND-}"; then
+                    if cli_ssl_dir_opt "${OPTARG}" SSL_BASE SSL_CERT_DIR SSL_KEY_DIR "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1
@@ -56,7 +57,7 @@ while getopts ":-:" opt; do
                     ;;
                 force) FORCE=true ;;
                 *)
-                    if cli_handle_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
+                    if cli_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1

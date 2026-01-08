@@ -5,10 +5,11 @@
 # Example: cloud-dns.sh <domain> <ipv4> [ipv6]
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-. "$SCRIPT_DIR/common.sh"
-. "$SCRIPT_DIR/auth.sh"
-. "$SCRIPT_DIR/cli.sh"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPTS_DIR="$ROOT_DIR/scripts"
+. "$SCRIPTS_DIR/common.sh"
+. "$SCRIPTS_DIR/auth.sh"
+. "$SCRIPTS_DIR/cli.sh"
 
 # Optional built-in defaults (use for non-sensitive test environments; prefer env/flags otherwise)
 CF_ACCOUNT_ID_DEFAULT=""
@@ -48,7 +49,7 @@ while getopts ":-:" opt; do
       case "${OPTARG}" in
         help) usage; exit 0 ;;
         *)
-          if cli_handle_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
+          if cli_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
             :
           else
             usage; exit 1

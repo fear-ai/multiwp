@@ -6,9 +6,10 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-. "$SCRIPT_DIR/common.sh"
-. "$SCRIPT_DIR/cli.sh"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPTS_DIR="$ROOT_DIR/scripts"
+. "$SCRIPTS_DIR/common.sh"
+. "$SCRIPTS_DIR/cli.sh"
 
 EDGE_ARGS=()
 ORIGIN_ARGS=()
@@ -24,7 +25,7 @@ Options:
   --api  Enable Cloudflare API checks in check-edge.sh
   --apache-dir DIR [APACHE_SITES_DIR] (default: /etc/apache2/sites-available)  Apache sites-available dir
   --http-timeout SECONDS [HTTP_TIMEOUT] (default: 10)  HTTP timeout for edge checks
-$(cli_usage_root)
+$(cli_usage_wp_root)
 $(cli_usage_ssl_dir)
 $(cli_usage_common_priv)
   --help  Show this help
@@ -38,7 +39,7 @@ while getopts ":-:" opt; do
                 help) usage; exit 0 ;;
                 api) EDGE_ARGS+=("--api") ;;
                 ssl-dir|ssl-dir=*)
-                    if cli_handle_ssl_dir_opt "${OPTARG}" SSL_DIR_OVERRIDE "" "" "${!OPTIND-}"; then
+                    if cli_ssl_dir_opt "${OPTARG}" SSL_DIR_OVERRIDE "" "" "${!OPTIND-}"; then
                         ORIGIN_ARGS+=("--ssl-dir=${SSL_DIR_OVERRIDE}")
                     else
                         usage; exit 1
@@ -54,10 +55,10 @@ while getopts ":-:" opt; do
                     fi
                     ORIGIN_ARGS+=("--apache-dir=${APACHE_DIR_OVERRIDE}")
                     ;;
-                root|root=*)
-                    if cli_handle_root_opt "${OPTARG}" ROOT_OVERRIDE "${!OPTIND-}"; then
-                        WP_ARGS+=("--root=${ROOT_OVERRIDE}")
-                        ORIGIN_ARGS+=("--root=${ROOT_OVERRIDE}")
+                wp-root|wp-root=*)
+                    if cli_wp_root_opt "${OPTARG}" ROOT_OVERRIDE "${!OPTIND-}"; then
+                        WP_ARGS+=("--wp-root=${ROOT_OVERRIDE}")
+                        ORIGIN_ARGS+=("--wp-root=${ROOT_OVERRIDE}")
                     else
                         usage; exit 1
                     fi
@@ -69,7 +70,7 @@ while getopts ":-:" opt; do
                     OPTIND=$((OPTIND+1))
                     ;;
                 *)
-                    if cli_handle_common_opt "${OPTARG}"; then
+                    if cli_common_opt "${OPTARG}"; then
                         :
                     else
                         usage; exit 1
@@ -91,12 +92,12 @@ fi
 
 cli_require_non_root
 
-EDGE_SCRIPT="$SCRIPT_DIR/check-edge.sh"
-ORIGIN_SCRIPT="$SCRIPT_DIR/check-origin.sh"
-WP_SCRIPT="$SCRIPT_DIR/check-wp.sh"
+EDGE_SCRIPT="$SCRIPTS_DIR/check-edge.sh"
+ORIGIN_SCRIPT="$SCRIPTS_DIR/check-origin.sh"
+WP_SCRIPT="$SCRIPTS_DIR/check-wp.sh"
 
 if [ ! -x "$EDGE_SCRIPT" ] || [ ! -x "$ORIGIN_SCRIPT" ] || [ ! -x "$WP_SCRIPT" ]; then
-    err "Missing validation scripts in $SCRIPT_DIR"
+    err "Missing validation scripts in $SCRIPTS_DIR"
 fi
 
 overall_ok=true

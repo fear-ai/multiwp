@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-cli_handle_common_opt() {
+cli_common_opt() {
     local opt="$1"
     case "$opt" in
         allow-root) ALLOW_ROOT=true; return 0 ;;
@@ -12,25 +12,25 @@ cli_handle_common_opt() {
     return 1
 }
 
-cli_handle_root_opt() {
+cli_wp_root_opt() {
     local opt="$1"
     local var="$2"
     local next="${3-}"
     local val=""
     case "$opt" in
-        root=*) val="${opt#*=}" ;;
-        root)
+        wp-root=*) val="${opt#*=}" ;;
+        wp-root)
             val="$next"
             OPTIND=$((OPTIND+1))
             ;;
         *) return 1 ;;
     esac
-    [ -n "$val" ] || err "--root requires a value"
+    [ -n "$val" ] || err "--wp-root requires a value"
     printf -v "$var" '%s' "$val"
     return 0
 }
 
-cli_handle_ssl_dir_opt() {
+cli_ssl_dir_opt() {
     local opt="$1"
     local base_var="$2"
     local cert_var="${3-}"
@@ -56,8 +56,8 @@ cli_handle_ssl_dir_opt() {
     return 0
 }
 
-cli_usage_root() {
-    echo "  --root PATH [WORDPRESS_ROOT] (default: $WORDPRESS_ROOT)  WordPress root"
+cli_usage_wp_root() {
+    echo "  --wp-root PATH [WORDPRESS_ROOT] (default: $WORDPRESS_ROOT)  WordPress root"
 }
 
 cli_usage_ssl_dir() {
@@ -75,7 +75,7 @@ cli_require_non_root() {
     fi
 }
 
-cli_handle_cf_auth_opt() {
+cli_cf_auth_opt() {
     local opt="$1"
     local next="${2-}"
     case "$opt" in

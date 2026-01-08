@@ -19,7 +19,7 @@ Option,Scripts
 --multisite,check-wp.sh
 --no-sudo,check-origin.sh;check-wp.sh;verify-domain.sh
 --raw,cf-check.sh
---root,apache-vhost.sh;check-origin.sh;check-wp.sh;verify-domain.sh
+--wp-root,apache-vhost.sh;check-origin.sh;check-wp.sh;verify-domain.sh
 --singlesite,check-wp.sh
 --ssl,apache-vhost.sh
 --ssl-dir,apache-vhost.sh;check-origin.sh;get-cert.sh;verify-domain.sh

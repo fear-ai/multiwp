@@ -140,7 +140,7 @@ cf_auth_opt() {
     return 1
 }
 
-cf_api_headers_for_mode() {
+cf_api_headers_mode() {
     local mode="$1"
     CF_API_HEADERS=("-H" "Content-Type: application/json")
     if [ "$mode" = "token" ]; then
@@ -161,7 +161,7 @@ cf_api_request_mode() {
     local method="$2"
     local path="$3"
     local data="${4-}"
-    cf_api_headers_for_mode "$mode"
+    cf_api_headers_mode "$mode"
     if [ -n "$data" ]; then
         curl -sS -X "$method" "${CF_API_HEADERS[@]}" --data "$data" "$CF_API_BASE$path"
         return

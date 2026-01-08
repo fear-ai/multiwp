@@ -5,9 +5,10 @@
 # Example: apache-vhost.sh [OPTIONS] domain1 [domain2...]
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-. "$SCRIPT_DIR/common.sh"
-. "$SCRIPT_DIR/cli.sh"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPTS_DIR="$ROOT_DIR/scripts"
+. "$SCRIPTS_DIR/common.sh"
+. "$SCRIPTS_DIR/cli.sh"
 require_cmd a2ensite
 require_cmd apache2ctl
 require_cmd systemctl
@@ -34,7 +35,7 @@ Options:
   --http  Create only HTTP virtual hosts
   --ssl  Create only SSL virtual hosts
   --temp PATH [TEMPLATE_DIR] (default: $TEMPLATE_DIR)  Templates directory
-$(cli_usage_root)
+$(cli_usage_wp_root)
 $(cli_usage_ssl_dir)
   --help  Show this help message
 
@@ -233,8 +234,8 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 http) HTTP_ONLY=true ;;
                 ssl) SSL_ONLY=true ;;
-                root|root=*)
-                    if cli_handle_root_opt "${OPTARG}" WORDPRESS_ROOT "${!OPTIND-}"; then
+                wp-root|wp-root=*)
+                    if cli_wp_root_opt "${OPTARG}" WORDPRESS_ROOT "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1
@@ -242,7 +243,7 @@ while getopts ":-:" opt; do
                     ;;
                 temp=*) TEMPLATE_DIR="${OPTARG#*=}" ;;
                 ssl-dir|ssl-dir=*)
-                    if cli_handle_ssl_dir_opt "${OPTARG}" SSL_BASE SSL_CERT_DIR SSL_KEY_DIR "${!OPTIND-}"; then
+                    if cli_ssl_dir_opt "${OPTARG}" SSL_BASE SSL_CERT_DIR SSL_KEY_DIR "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1

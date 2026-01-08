@@ -6,9 +6,10 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-. "$SCRIPT_DIR/common.sh"
-. "$SCRIPT_DIR/cli.sh"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPTS_DIR="$ROOT_DIR/scripts"
+. "$SCRIPTS_DIR/common.sh"
+. "$SCRIPTS_DIR/cli.sh"
 
 ALLOW_ROOT=false
 
@@ -25,7 +26,7 @@ Example: check-origin.sh [OPTIONS] domain1 [domain2...]
 
 Options:
   --apache-dir DIR [APACHE_SITES_DIR] (default: /etc/apache2/sites-available)  Apache sites-available dir
-$(cli_usage_root)
+$(cli_usage_wp_root)
 $(cli_usage_ssl_dir)
 $(cli_usage_common_priv)
   --help  Show this help
@@ -38,7 +39,7 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 ssl-dir|ssl-dir=*)
-                    if cli_handle_ssl_dir_opt "${OPTARG}" SSL_BASE_LOCAL SSL_CERT_DIR_LOCAL SSL_KEY_DIR_LOCAL "${!OPTIND-}"; then
+                    if cli_ssl_dir_opt "${OPTARG}" SSL_BASE_LOCAL SSL_CERT_DIR_LOCAL SSL_KEY_DIR_LOCAL "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1
@@ -53,15 +54,15 @@ while getopts ":-:" opt; do
                         APACHE_SITES_DIR_LOCAL="${OPTARG#*=}"
                     fi
                     ;;
-                root|root=*)
-                    if cli_handle_root_opt "${OPTARG}" WORDPRESS_ROOT_LOCAL "${!OPTIND-}"; then
+                wp-root|wp-root=*)
+                    if cli_wp_root_opt "${OPTARG}" WORDPRESS_ROOT_LOCAL "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1
                     fi
                     ;;
                 *)
-                    if cli_handle_common_opt "${OPTARG}"; then
+                    if cli_common_opt "${OPTARG}"; then
                         :
                     else
                         usage; exit 1

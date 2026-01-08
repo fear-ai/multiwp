@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROOT_DIR="${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+SCRIPTS_DIR="${SCRIPTS_DIR:-$ROOT_DIR/scripts}"
 
 SSL_BASE="${SSL_BASE:-/etc/ssl/cloudflare-origin}"
 SSL_CERT_DIR="${SSL_CERT_DIR:-$SSL_BASE/certs}"
