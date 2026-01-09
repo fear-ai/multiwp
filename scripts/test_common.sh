@@ -132,6 +132,38 @@ assert_status 1 $? "validate_ipv4 rejects link-local 169.254.0.0/16"
 validate_ipv4 "127.0.0.1" >/dev/null 2>&1
 assert_status 1 $? "validate_ipv4 rejects loopback 127.0.0.0/8"
 
+echo "== parse_bool =="
+assert_equal "true" "$(parse_bool "true")" "parse_bool accepts true"
+assert_equal "true" "$(parse_bool "TRUE")" "parse_bool accepts uppercase true"
+assert_equal "true" "$(parse_bool "YES")" "parse_bool accepts yes"
+assert_equal "true" "$(parse_bool " y ")" "parse_bool accepts y with whitespace"
+assert_equal "false" "$(parse_bool "false")" "parse_bool accepts false"
+assert_equal "false" "$(parse_bool "FALSE")" "parse_bool accepts uppercase false"
+assert_equal "false" "$(parse_bool "No")" "parse_bool accepts no"
+assert_equal "false" "$(parse_bool " n ")" "parse_bool accepts n with whitespace"
+parse_bool "maybe" >/dev/null 2>&1
+assert_status 1 $? "parse_bool rejects invalid value"
+parse_bool "" >/dev/null 2>&1
+assert_status 1 $? "parse_bool rejects empty string"
+parse_bool "   " >/dev/null 2>&1
+assert_status 1 $? "parse_bool rejects whitespace"
+parse_bool "tru" >/dev/null 2>&1
+assert_status 1 $? "parse_bool rejects partial token"
+parse_bool "yesplease" >/dev/null 2>&1
+assert_status 1 $? "parse_bool rejects extra characters"
+parse_bool "1" >/dev/null 2>&1
+assert_status 1 $? "parse_bool rejects numeric true"
+parse_bool "0" >/dev/null 2>&1
+assert_status 1 $? "parse_bool rejects numeric false"
+parse_bool "on" >/dev/null 2>&1
+assert_status 1 $? "parse_bool rejects on"
+parse_bool "off" >/dev/null 2>&1
+assert_status 1 $? "parse_bool rejects off"
+parse_bool "t" >/dev/null 2>&1
+assert_status 1 $? "parse_bool rejects t"
+parse_bool "f" >/dev/null 2>&1
+assert_status 1 $? "parse_bool rejects f"
+
 echo "== priv with sudo enabled =="
 SUDO_STUB="$TMP_DIR/sudo"
 cat <<'STUB' > "$SUDO_STUB"

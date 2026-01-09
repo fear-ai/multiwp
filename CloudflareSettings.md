@@ -98,9 +98,9 @@ Under consideration for inclusion:
 Cloudflare UI is authoritative for SSL mode, redirects, and headers. Automation scripts can help with DNS, origin cert placement, and vhost generation.
 
 ### Create Zone + DNS
-- Script: `scripts/cloud-dns.sh <domain> <ipv4> [ipv6]`.
+- Script: `scripts/cloud-dns.sh <domain> <ipv4>`.
 - Fit: use when onboarding a new domain; interacts with the Cloudflare API instead of the UI.
-- Does: creates the zone (full setup) and adds proxied A/AAAA for apex+www. Env or flags: `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `--token`, `--account`.
+- Does: creates the zone (full setup) and adds proxied A records for apex+www. Env or flags: `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `--token`, `--account`.
 
 ### Origin Cert Placement
 Use the unified cert helper so the same command supports manual paste, API issuance, and validation in a single workflow. This keeps the operational steps consistent across environments while preserving the default filesystem layout and permissions documented in ConfigServers.md.

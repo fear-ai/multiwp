@@ -32,6 +32,16 @@ priv() {
 
 tolower() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 safe_name() { echo "$1" | sed 's/[.-]//g'; }
+parse_bool() {
+    local raw="${1:-}"
+    local val
+    val=$(printf "%s" "$raw" | tr '[:upper:]' '[:lower:]' | xargs)
+    case "$val" in
+        true|yes|y) echo "true" ;;
+        false|no|n) echo "false" ;;
+        *) return 1 ;;
+    esac
+}
 
 normalize_domain() {
     local domain="$1"

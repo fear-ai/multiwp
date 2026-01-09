@@ -1,5 +1,5 @@
 # Program Script Prompts
-Date: January 8, 2026
+Date: January 9, 2026
 
 This file provides a copy/paste prompt for Codex to update script headers and usage blocks without changing behavior.
 
@@ -28,12 +28,16 @@ Rules:
 - Any expanded explanations, requirements, or operational notes must be moved from the header into usage() under sections like Notes, Prerequisites, or What this script does.
 - Do not add separate “Usage:” or “Examples:” blocks beyond the single-line Example.
 - usage() must be a single heredoc ending at the end of the function. If helper output is needed (for example, cli_usage_wp_root), embed it via command substitution inside the heredoc so the EOF is last.
-- Order options in usage() as: script-specific, auth, root, ssl, common, then --help last.
+- Order options in usage() as: script-specific, auth, wp-root, ssl, common, then --help last.
 - If the script accepts domains, include --domain in options and keep positional arguments valid. A literal -- is not treated specially, so do not use it in examples.
-- Examples should use realistic placeholders like example.com and www.example.com, not domain1 or similar. Avoid bracketed optional domains in examples.
+- Examples should use realistic placeholders like example.com and www.example.com, not domain1 or similar. Avoid bracketed optional domains and angle-bracket placeholders in examples.
 - Cloudflare zone naming uses CF_ZONE, and cf-check.sh normalizes and validates zone names and warns if the case-sensitive input differs from the Cloudflare API response.
 - cloud-dns.sh is IPv4-only and validates public IPv4 addresses. RFC1918, link-local, loopback, multicast/experimental, 0.0.0.0, and 255.255.255.255 are rejected; .0 and .255 addresses produce warnings.
+- Boolean overrides in env/auth files must be parsed via a helper (for example, parse_bool in common.sh). Accept true/false and yes/no/y/n (case-insensitive), but do not enumerate accepted values in usage() beyond the override and default.
+- Boolean flags remain flag-style (for example, --hsts), not value-style (for example, --hsts=true), unless the script already implements a value form.
+- Use long options only; --help is the only help flag.
 - Standard names are SSL_DIR, APACHE_DIR, and --template.
+- Use WORDPRESS_ROOT with --wp-root; do not document or reference --root.
 - Omit any category the script does not support; do not add placeholders.
 - Preserve existing behavior; only adjust header and usage() formatting and ordering.
 ```
