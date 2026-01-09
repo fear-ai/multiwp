@@ -1,8 +1,8 @@
 #!/bin/bash
-# cf-check.sh - Inspect Cloudflare zone settings via the API.
+# check-cf.sh - Inspect Cloudflare zone settings via the API.
 # For options, environment variables, defaults see usage().
 #
-# Example: cf-check.sh [OPTIONS] <zone>
+# Example: check-cf.sh [OPTIONS] <zone>
 
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,11 +20,12 @@ expects=()
 show_keys=()
 raw=false
 note() { echo "Note: $*" >&2; }
+warn() { echo "Warning: $*" >&2; }
 
 usage() {
     cat <<'EOF'
-cf-check.sh - Inspect Cloudflare zone settings via the API.
-Example: cf-check.sh [OPTIONS] <zone>
+check-cf.sh - Inspect Cloudflare zone settings via the API.
+Example: check-cf.sh [OPTIONS] <zone>
 
 Options:
   -e key=val  Check that a setting matches the expected value (repeatable)
@@ -44,11 +45,11 @@ Auth options (choose one):
 EOF
 }
 
-while getopts ":e:s-:" opt; do
+while getopts ":e:s:-:" opt; do
     case "$opt" in
         e) expects+=("$OPTARG") ;;
         s)
-            IFS=',' read -r -a parts <<<"$OPTARG"
+            IFS=',' read -r -a parts <<<"${OPTARG-}"
             for p in "${parts[@]}"; do
                 p="${p#"${p%%[![:space:]]*}"}"
                 p="${p%"${p##*[![:space:]]}"}"
@@ -171,6 +172,21 @@ fi
 settings_map=$(echo "$settings_json" | jq -c '.result | map({(.id): .value}) | add')
 
 printf "Zone: %s (%s)\n" "${CF_ZONE:-unknown}" "$CF_ZONE_ID"
+dns_types=("A" "CNAME")
+for dns_type in "${dns_types[@]}"; do
+    dns_json=$(cf_api_request GET "/zones/${CF_ZONE_ID}/dns_records?type=${dns_type}&per_page=100")
+    if [ "$(cf_api_success "$dns_json")" != "true" ]; then
+        warn "Failed to query DNS ${dns_type} records: $(cf_api_error_messages "$dns_json")"
+        continue
+    fi
+    echo "DNS ${dns_type} records:"
+    count=$(echo "$dns_json" | jq '.result | length')
+    if [ "$count" -eq 0 ]; then
+        echo "- <none>"
+    else
+        echo "$dns_json" | jq -r '.result[] | "- \(.name) -> \(.content) (proxied=\(.proxied), ttl=\(.ttl))"'
+    fi
+done
 
 if [ "${#show_keys[@]}" -eq 0 ]; then
     if command -v sort >/dev/null 2>&1; then

@@ -121,7 +121,7 @@ Program scripts (alphabetical):
 | Script | Purpose | Status |
 |--------|---------|--------|
 | `apache-vhost.sh` | Create Apache HTTP + SSL vhosts for domain | Exercised |
-| `cf-check.sh` | Inspect Cloudflare zone settings via API | Not exercised |
+| `check-cf.sh` | Inspect Cloudflare zone settings via API | Not exercised |
 | `check-edge.sh` | Validate Cloudflare edge behavior and headers | Exercised |
 | `check-origin.sh` | Validate origin certs, vhosts, and Apache health | Exercised |
 | `check-wp.sh` | Validate multisite mappings and site URLs | Exercised |

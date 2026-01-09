@@ -10,7 +10,7 @@ This plan sequences validation and deployment of the automation scripts for conf
   Confirm CLI options, usage format, and helper behavior are aligned with current scripts. Ensure `scripts/Scripts.md`, `scripts/Options.csv`, `scripts/Helpers.csv`, `scripts/Prompt.md`, and `scripts/example.auth` are consistent so automation tooling relies on a clear contract.
 
 3) Build a read-only validation pipeline
-   Run linting and unit tests, then execute read-only verification scripts (`verify-cf-auth.sh`, `cf-check.sh`, `check-edge.sh`, `check-origin.sh`, `check-wp.sh`, `verify-domain.sh`) on a small pilot set. The pilot set should be representative: at least one domain per Cloudflare account, one redirect-only domain, one fully provisioned multisite domain, and one intentionally incomplete/test domain. Define pass/fail criteria and stop if any credential or API mismatch appears.
+   Run linting and unit tests, then execute read-only verification scripts (`verify-cf-auth.sh`, `check-cf.sh`, `check-edge.sh`, `check-origin.sh`, `check-wp.sh`, `verify-domain.sh`) on a small pilot set. The pilot set should be representative: at least one domain per Cloudflare account, one redirect-only domain, one fully provisioned multisite domain, and one intentionally incomplete/test domain. Define pass/fail criteria and stop if any credential or API mismatch appears.
 
 4) Create a batch automation runner
    Implement a runner that reads a domain inventory file, separates provisioning steps (DNS, cert issuance, vhosts) from verification steps, and logs per-domain outcomes with retries and idempotent behavior. Include redirect-only classification so origin/WP checks are skipped where `DNS_REDIRECT` applies.

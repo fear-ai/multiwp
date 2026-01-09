@@ -31,7 +31,7 @@ Rules:
 - Order options in usage() as: script-specific, auth, wp-root, ssl, common, then --help last.
 - If the script accepts domains, include --domain in options and keep positional arguments valid. A literal -- is not treated specially, so do not use it in examples.
 - Examples should use realistic placeholders like example.com and www.example.com, not domain1 or similar. Avoid bracketed optional domains and angle-bracket placeholders in examples.
-- Cloudflare zone naming uses CF_ZONE, and cf-check.sh normalizes and validates zone names and warns if the case-sensitive input differs from the Cloudflare API response.
+- Cloudflare zone naming uses CF_ZONE, and check-cf.sh normalizes and validates zone names and warns if the case-sensitive input differs from the Cloudflare API response.
 - cloud-dns.sh is IPv4-only and validates public IPv4 addresses. RFC1918, link-local, loopback, multicast/experimental, 0.0.0.0, and 255.255.255.255 are rejected; .0 and .255 addresses produce warnings.
 - Boolean values from env/auth files must be parsed via a helper (for example, parse_bool in common.sh). Accept true/false and yes/no/y/n (case-insensitive), but do not enumerate accepted values in usage() beyond the priority and default.
 - Boolean options that mirror env/auth settings use value-style `--name=true|false`, not bare toggles.
@@ -57,7 +57,7 @@ Executable tests:
 Apply the shared prompt to these scripts.
 
 - `scripts/apache-vhost.sh` — Add Apache vhosts for WordPress domains. Example: `apache-vhost.sh [OPTIONS] example.com www.example.com`
-- `scripts/cf-check.sh` — Inspect Cloudflare zone settings via the API. Example: `cf-check.sh [OPTIONS] example.com`
+- `scripts/check-cf.sh` — Inspect Cloudflare zone settings via the API. Example: `check-cf.sh [OPTIONS] example.com`
 - `scripts/check-edge.sh` — Validate Cloudflare edge behavior for domains. Example: `check-edge.sh [OPTIONS] example.com www.example.com`
 - `scripts/check-origin.sh` — Validate origin certificates, Apache configuration, and vhost wiring. Example: `check-origin.sh [OPTIONS] example.com www.example.com`
 - `scripts/check-wp.sh` — Validate WordPress site URLs for domains. Example: `check-wp.sh [OPTIONS] example.com www.example.com`

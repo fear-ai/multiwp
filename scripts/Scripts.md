@@ -20,7 +20,7 @@ Cloudflare scripts manage credentials, DNS, certificates, and edge validation. A
 - `verify-cf-auth.sh` — verification (read-only)
 - `cloud-dns.sh` — provisioning
 - `get-cert.sh` — provisioning
-- `cf-check.sh` — verification (read-only)
+- `check-cf.sh` — verification (read-only)
 - `check-edge.sh` — verification (read-only)
 
 ### Origin Layer (Apache and TLS)
@@ -185,19 +185,19 @@ Auth variables:
 - `--ca-key KEY [CF_CA_KEY]` sets the Origin CA User Service Key.
 
 Cloudflare zone selection:
-- `--zone name [CF_ZONE]` sets the target zone name (used by `cf-check.sh`).
-- `--zone-id id [CF_ZONE_ID]` sets the target zone ID (used by `cf-check.sh` and `verify-cf-auth.sh`).
+- `--zone name [CF_ZONE]` sets the target zone name (used by `check-cf.sh`).
+- `--zone-id id [CF_ZONE_ID]` sets the target zone ID (used by `check-cf.sh` and `verify-cf-auth.sh`).
 - `CF_ZONE_MAIN` (env) is preferred when multiple zones exist in the auth file.
 - `CF_ZONE` and `CF_ZONE_ID` (env) are read from the auth file, with the first `CF_ZONE_ID` chosen by default.
 Notes:
 - `CF_ZONE` must be an apex (for example, `example.com`, not `www.example.com`); auth files may list multiple `CF_ZONE_ID` values—scripts use the first by default and retain the list in `CF_ZONE_IDS`.
 TODO:
 - Consider adding a per-domain zone mapping for `check-edge.sh` and `verify-domain.sh` to support multi-zone runs without relying on a single `CF_ZONE_ID`.
-- Allow `cf-check.sh` to iterate `CF_ZONE_IDS` when no `--zone` or `--zone-id` is supplied.
+- Allow `check-cf.sh` to iterate `CF_ZONE_IDS` when no `--zone` or `--zone-id` is supplied.
 
 ### Read-Only Scripts and Safe Options
 
-The following scripts are read-only by design and do not modify DNS, certificates, Apache configuration, or WordPress data. Read-only scripts: `check-edge.sh`, `cf-check.sh`, `verify-cf-auth.sh`, `check-origin.sh`, `check-wp.sh`, `verify-domain.sh`. Unit tests: `test_common.sh`, `test_cli.sh`, `test_cf.sh`.
+The following scripts are read-only by design and do not modify DNS, certificates, Apache configuration, or WordPress data. Read-only scripts: `check-edge.sh`, `check-cf.sh`, `verify-cf-auth.sh`, `check-origin.sh`, `check-wp.sh`, `verify-domain.sh`. Unit tests: `test_common.sh`, `test_cli.sh`, `test_cf.sh`.
 
 Safe options for read-only scripts:
 - `--api` (enables Cloudflare API reads; no writes)
@@ -297,7 +297,7 @@ Notes:
 - API mode prefers `CF_CA_KEY` when available and falls back to `CF_API_TOKEN` or `CF_API_KEY` + `CF_API_EMAIL`.
 - Manual mode writes to the SSL directories derived from `SSL_DIR`.
 
-#### cf-check.sh (verification/investigation)
+#### check-cf.sh (verification/investigation)
 
 Purpose:
 - Inspects Cloudflare zone settings and optionally validates expected values.
@@ -323,7 +323,8 @@ Environment variables:
 - `CF_ZONE`, `CF_ZONE_ID`, and Cloudflare auth variables.
 
 Notes:
-- Zone names are normalized and validated before lookup. `cf-check.sh` warns (case-sensitive) if the provided zone name differs from the Cloudflare API response.
+- Zone names are normalized and validated before lookup. `check-cf.sh` warns (case-sensitive) if the provided zone name differs from the Cloudflare API response.
+- DNS A and CNAME records are listed after the zone header to make edge-to-origin alignment visible alongside settings.
 
 #### check-edge.sh (verification/investigation)
 
@@ -503,41 +504,41 @@ Environment variables:
 
 This cross-reference lists options alphabetically and the scripts that implement them. CSV files are exports for future processing; this list is the human-readable view.
 
-- `-e` (cf-check.sh)
-- `-s` (cf-check.sh)
+- `-e` (check-cf.sh)
+- `-s` (check-cf.sh)
 - `--account` (cloud-dns.sh, verify-cf-auth.sh)
 - `--allow-root` (check-origin.sh, check-wp.sh, verify-domain.sh)
 - `--api` (check-edge.sh, get-cert.sh, verify-domain.sh)
 - `--apache-dir` (apache-vhost.sh, check-origin.sh, verify-domain.sh)
-- `--auth-file` (cf-check.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh)
+- `--auth-file` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh)
 - `--auto` (get-cert.sh)
 - `--autosite` (check-wp.sh)
 - `--ca-key` (get-cert.sh, verify-cf-auth.sh)
 - `--domain` (apache-vhost.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, verify-domain.sh)
-- `--email` (cf-check.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh)
+- `--email` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh)
 - `--force` (get-cert.sh)
-- `--help` (apache-vhost.sh, cf-check.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, setup-wp.sh, verify-cf-auth.sh, verify-domain.sh)
+- `--help` (apache-vhost.sh, check-cf.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, setup-wp.sh, verify-cf-auth.sh, verify-domain.sh)
 - `--http` (apache-vhost.sh)
 - `--http-timeout` (check-edge.sh, verify-domain.sh)
 - `--hsts=true|false` (check-edge.sh, verify-domain.sh)
-- `--key` (cf-check.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh)
+- `--key` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh)
 - `--manual` (get-cert.sh)
 - `--multisite` (check-wp.sh)
 - `--no-sudo` (check-origin.sh, check-wp.sh, verify-domain.sh)
-- `--raw` (cf-check.sh)
+- `--raw` (check-cf.sh)
 - `--wp-root` (apache-vhost.sh, check-origin.sh, check-wp.sh, install-site.sh, verify-domain.sh)
 - `--singlesite` (check-wp.sh)
 - `--ssl` (apache-vhost.sh)
 - `--ssl-dir` (apache-vhost.sh, check-origin.sh, get-cert.sh, verify-domain.sh)
 - `--template` (apache-vhost.sh)
-- `--token` (cf-check.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh)
-- `--zone` (cf-check.sh)
-- `--zone-id` (cf-check.sh, verify-cf-auth.sh)
+- `--token` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh)
+- `--zone` (check-cf.sh)
+- `--zone-id` (check-cf.sh, verify-cf-auth.sh)
 
 ## Helper Inclusion Cross-Reference
 
 This cross-reference lists helper scripts and the programs or tests that source them. CSV files are exports for future processing; this list is the human-readable view.
 
-- `common.sh`: apache-vhost.sh, cf-check.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, setup-wp.sh, verify-cf-auth.sh, verify-domain.sh, test_common.sh, test_cli.sh, test_cf.sh
-- `cli.sh`: apache-vhost.sh, cf-check.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh, verify-domain.sh, test_cli.sh
-- `auth.sh`: cf-check.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh, test_cli.sh, test_cf.sh
+- `common.sh`: apache-vhost.sh, check-cf.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, setup-wp.sh, verify-cf-auth.sh, verify-domain.sh, test_common.sh, test_cli.sh, test_cf.sh
+- `cli.sh`: apache-vhost.sh, check-cf.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh, verify-domain.sh, test_cli.sh
+- `auth.sh`: check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh, test_cli.sh, test_cf.sh
