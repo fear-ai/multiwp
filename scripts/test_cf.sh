@@ -236,7 +236,7 @@ PATH="$STUB_BIN:$PATH"
 reset_auth_env
 CF_API_TOKEN="token123"
 output=$(cf_api_request_mode "token" "GET" "/zones?name=example.com")
-assert_contains "$output" "-X" "cf_api_request_mode includes method flag"
+assert_contains "$output" "-X" "cf_api_request_mode includes method option"
 assert_contains "$output" "GET" "cf_api_request_mode uses method"
 assert_contains "$output" "Authorization: Bearer token123" "cf_api_request_mode uses bearer auth"
 assert_contains "$output" "https://api.cloudflare.com/client/v4/zones?name=example.com" "cf_api_request_mode builds URL"

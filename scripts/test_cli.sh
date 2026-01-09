@@ -88,7 +88,7 @@ output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/W
 assert_contains "$output" "Do not run as root" "cli_require_non_root blocks root by default"
 
 output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/WP/multiwp/scripts/cli.sh; USER=root; ALLOW_ROOT=true; cli_require_non_root; echo ok' 2>&1)
-assert_contains "$output" "ok" "cli_require_non_root allows root when priority flag set"
+assert_contains "$output" "ok" "cli_require_non_root allows root when priority option set"
 
 echo "== cli_wp_root_opt =="
 reset_env

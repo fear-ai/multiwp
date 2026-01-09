@@ -21,7 +21,7 @@ install-site.sh - Add a new site to WordPress multisite and map to an apex domai
 Example: install-site.sh [OPTIONS] <domain> [title] [email]
 
 Arguments: <domain> [title] [email]
-  - domain is the apex domain (for example, example.com). Use --domain to supply it via a flag.
+  - domain is the apex domain (for example, example.com). Use --domain to supply it via an option.
   - title defaults to the domain name with the first letter capitalized.
   - email defaults to alphaeosnet@gmail.com.
 

@@ -34,8 +34,8 @@ Rules:
 - Cloudflare zone naming uses CF_ZONE, and cf-check.sh normalizes and validates zone names and warns if the case-sensitive input differs from the Cloudflare API response.
 - cloud-dns.sh is IPv4-only and validates public IPv4 addresses. RFC1918, link-local, loopback, multicast/experimental, 0.0.0.0, and 255.255.255.255 are rejected; .0 and .255 addresses produce warnings.
 - Boolean values from env/auth files must be parsed via a helper (for example, parse_bool in common.sh). Accept true/false and yes/no/y/n (case-insensitive), but do not enumerate accepted values in usage() beyond the priority and default.
-- Boolean flags remain flag-style (for example, --hsts), not value-style (for example, --hsts=true), unless the script already implements a value form.
-- Use long options only; --help is the only help flag.
+- Boolean options that mirror env/auth settings use value-style `--name=true|false`, not bare toggles.
+- Use long options only; --help is the only help option.
 - Standard names are SSL_DIR, APACHE_DIR, and --template.
 - Use WORDPRESS_ROOT with --wp-root; do not document or reference --root.
 - Omit any category the script does not support; do not add placeholders.

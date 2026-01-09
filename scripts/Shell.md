@@ -26,9 +26,9 @@ Program scripts follow a consistent structure so shared helpers remain predictab
 
 Option parsing is a contract with operators, so `usage()` must be accurate and stable. For canonical option lists and script-specific details, refer to `scripts/Scripts.md`. The `scripts/Options.csv` cross-reference lists which scripts implement each option.
 
-The repository standard is a single heredoc for `usage()` and a short title plus single-line example at the top of usage. Ordering must be consistent: script-specific options first, then auth, then root/ssl paths, then common privilege flags, and `--help` last. The exact format and rules are captured in `scripts/Prompt.md`.
+The repository standard is a single heredoc for `usage()` and a short title plus single-line example at the top of usage. Ordering must be consistent: script-specific options first, then auth, then root/ssl paths, then common privilege options, and `--help` last. The exact format and rules are captured in `scripts/Prompt.md`.
 
-## Shared Helpers and Common Flags
+## Shared Helpers and Common Options
 
 The helper libraries provide common logic for privileges, argument parsing, and Cloudflare authentication. Use them to keep behavior consistent across scripts and to avoid duplicated logic. The definitive list of helper usage and script environments lives in `scripts/Scripts.md`, while `scripts/Helpers.csv` summarizes which scripts source each helper.
 

@@ -66,7 +66,7 @@ Supported auth variables and options are listed in the Cloudflare authentication
 
 ## Shared Option and Environment Conventions
 
-Shared options are expressed as long options only. Scripts use `--help` for help; the short `-h` flag is intentionally not supported to keep parsing consistent across scripts.
+Shared options are expressed as long options only. Scripts use `--help` for help; the short `-h` option is intentionally not supported to keep parsing consistent across scripts.
 
 When `usage()` lists an option, it follows a consistent format:
 
@@ -77,10 +77,10 @@ When `usage()` lists an option, it follows a consistent format:
 This format makes the option, the related environment variable, and the default value visible in one line. In addition, the option lists follow a consistent order to reduce scanning time.
 
 Option ordering:
-- Script-specific flags first.
-- Auth flags second (when present).
-- Root and SSL path flags next.
-- Common privilege flags next.
+- Script-specific options first.
+- Auth options second (when present).
+- Root and SSL path options next.
+- Common privilege options next.
 - `--help` always last.
 
 ### Boolean handling
@@ -90,19 +90,19 @@ Boolean settings are parsed and normalized to keep behavior consistent across sc
 - Parse boolean values from environment or auth files with `parse_bool` (from `common.sh`) and normalize to `true|false`.
 - Accept `true|false` and `yes|no|y|n` (case-insensitive). Reject anything else.
 - Treat empty or unset values as “use default.” Do not treat empty as implicit true or false.
-- For boolean CLI options that mirror env/auth settings, prefer value-style `--flag=true|false` instead of bare toggles.
+- For boolean CLI options that mirror env/auth settings, prefer value-style `--name=true|false` instead of bare toggles.
 - Do not enumerate accepted tokens in `usage()`; only show priority and default (for example: `--hsts=true|false [HSTS_REQUIRED] (default: false)`).
 - Apply standard precedence: code defaults (lowest), then auth files, then environment, then CLI options (highest).
 - If `parse_bool` fails, emit a concise error and exit non-zero.
 - Do not add new dependencies to scripts that are intentionally self-contained.
 
-## Shared Flags and Environment Variables
+## Shared Options and Environment Variables
 
-The following flags and environment variables are referenced by multiple scripts. This section documents each flag once, then the per-script sections below reference the applicable subset.
+The following options and environment variables are referenced by multiple scripts. This section documents each option once, then the per-script sections below reference the applicable subset.
 
 ### Privilege and execution controls
 
-These flags influence how scripts invoke privileged commands. They do not change functional behavior, but they can affect whether a script can read or write protected files.
+These options influence how scripts invoke privileged commands. They do not change functional behavior, but they can affect whether a script can read or write protected files.
 
 - `--allow-root` bypasses the root guard for scripts that call `cli_require_non_root`. It should only be used for constrained environments where running as root is unavoidable.
 - `--no-sudo [SUDO_BIN] (default: sudo)` sets `SUDO_BIN` to an empty string. The `priv()` helper will run commands directly as the current user instead of invoking `sudo`.
@@ -110,10 +110,10 @@ These flags influence how scripts invoke privileged commands. They do not change
 
 ### WordPress root
 
-These flags and environment variables control where WordPress is located on disk.
+These options and environment variables control where WordPress is located on disk.
 
 - `--wp-root PATH [WORDPRESS_ROOT] (default: /var/www/html/wordpress)` sets the WordPress root path for scripts that operate on the WordPress filesystem or run WP-CLI.
-- `WORDPRESS_ROOT` (env) provides the default WordPress root if the `--wp-root` flag is not supplied.
+- `WORDPRESS_ROOT` (env) provides the default WordPress root if the `--wp-root` option is not supplied.
 
 ### Domain selection
 
@@ -121,7 +121,7 @@ Domain-oriented scripts accept domains via `--domain` (repeatable). Positional d
 
 - `--domain NAME` adds a domain to the list of domains to process.
 Notes:
-- Option parsing consumes known flags only; any remaining arguments are treated as positional domains. A literal `--` is treated as a domain token and will fail validation.
+- Option parsing consumes known options only; any remaining arguments are treated as positional domains. A literal `--` is treated as a domain token and will fail validation.
 - Domains are normalized (lowercased and trimmed) before validation and de-duplication.
 
 Redirect-only domains:
@@ -134,7 +134,7 @@ Status (current behavior):
 
 Next steps:
 - Skip edge header checks for domains listed in `DNS_REDIRECT` while still validating HTTP→HTTPS redirects and Cloudflare proxy signals.
-- Add redirect-focused provisioning support to `cloud-dns.sh` (for example, record patterns or flags suitable for edge-only redirect zones).
+- Add redirect-focused provisioning support to `cloud-dns.sh` (for example, record patterns or options suitable for edge-only redirect zones).
 
 Examples:
 - `check-edge.sh --domain example.com --domain www.example.com`
@@ -253,10 +253,10 @@ Purpose:
 - Creates a Cloudflare zone and adds an apex A record plus CNAMEs for `www` and `*` pointing to the apex.
 
 Arguments:
-- `<domain> <ipv4>` where `domain` is the zone and `ipv4` is the origin address. Use `--domain` to provide the domain via a flag.
+- `<domain> <ipv4>` where `domain` is the zone and `ipv4` is the origin address. Use `--domain` to provide the domain via an option.
 
 Options (script-specific):
-- `--domain NAME` supplies the domain as a flag.
+- `--domain NAME` supplies the domain as an option.
 
 Options (auth and shared):
 - `--account ACCOUNT_ID [CF_ACCOUNT_ID]`
@@ -376,7 +376,7 @@ Typical order:
 #### setup-wp.sh (production/installation)
 
 Purpose:
-- Bootstraps a WordPress multisite base configuration. It is intentionally self-contained for early-stage setup and does not expose CLI flags.
+- Bootstraps a WordPress multisite base configuration. It is intentionally self-contained for early-stage setup and does not expose CLI options.
 
 Arguments:
 - None.
@@ -426,7 +426,7 @@ Arguments:
 - `<domain> [title] [email]` where `domain` can also be supplied via `--domain`.
 
 Options:
-- `--domain NAME` supplies the domain as a flag.
+- `--domain NAME` supplies the domain as an option.
 - `--wp-root PATH [WORDPRESS_ROOT]` sets the WordPress root used for WP-CLI with highest priority.
 - `--help`.
 
@@ -543,6 +543,7 @@ This cross-reference lists options alphabetically and the scripts that implement
 - `--help` (apache-vhost.sh, cf-check.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, setup-wp.sh, verify-cf-auth.sh, verify-domain.sh)
 - `--http` (apache-vhost.sh)
 - `--http-timeout` (check-edge.sh, verify-domain.sh)
+- `--hsts=true|false` (check-edge.sh, verify-domain.sh)
 - `--key` (cf-check.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh)
 - `--manual` (get-cert.sh)
 - `--multisite` (check-wp.sh)
