@@ -3,11 +3,12 @@ Date: January 5, 2026
 
 ## Introduction
 This project implements a WordPress multisite network in subdirectory mode with apex domain mapping. Each client site uses its own domain while sharing WordPress core, themes, and plugins for operational efficiency. Cloudflare provides DNS, CDN, and edge security.
-Included are shared VPS server and WordPress multisite installation instructions, tooling, and templates to host many domains via Cloudflare and Apache, with per-domain SSL. See the Documentation Map below for the authoritative runbooks and strategic context.
+Included are shared VPS server and WordPress multisite installation instructions, tooling, and templates to host many domains via Cloudflare and Apache, with per-domain SSL. See the Documentation Map below for the consolidated runbook and strategic context.
 
-## Target Audience
-Likely system configuration scenarios include onboarding a new client domain, validating TLS/vhost health after changes, adapting scripts to the local environment.
-Recommended skills: Bash scripting, WP-CLI, Apache vhost, Cloudflare dashboard (SSL/TLS, DNS).
+## Expected Audience
+This documentation is written for several operator roles and is structured so each role can enter at the right layer without losing the dependency chain. System administrators responsible for Ubuntu, Apache, and Cloudflare should start with Operations.md and the verification scripts, while WordPress administrators focused on site mapping and content integrity should use Operations.md sections that cover multisite configuration and validation. Developers adapting or extending the scripts should begin with `scripts/Shell.md` and `scripts/Scripts.md`, then consult MULTI.md for architectural context.
+
+This shared structure keeps operational dependencies clear: Cloudflare edge behavior must align before origin TLS and vhost wiring can be trusted, and WordPress routing depends on both layers being correct.
 
 ## Key Concepts
 
@@ -33,37 +34,36 @@ Recommended skills: Bash scripting, WP-CLI, Apache vhost, Cloudflare dashboard (
 
 ## Quick Start: Administrator
 
-Required commands for the quick-start scripts and checks: `curl`, `dig`, `jq`, `wp`, `apache2ctl`, `openssl`.
+Scripts use commands: `curl`, `dig`, `jq`, `wp`, `apache2ctl`, `openssl`. Make sure these are installed and you can run them.
 
-For the canonical, step-by-step onboarding and troubleshooting guidance, reference the "Site Onboarding & Troubleshooting" section in ConfigServers.md; this is a condensed starter.
+For the canonical, step-by-step onboarding and troubleshooting guidance, reference Operations.md; this is a condensed starter.
 
 ### Add Site to the Network
 
 **Access** sudo on the origin Ubuntu host; Cloudflare account for the domains.
-**Completed:** Domain registered, DNS pointed to Cloudflare, Cloudflare zone created.
+**Goal (not completed yet):** Domain registered, DNS pointed to Cloudflare, Cloudflare zone created, and SSL/TLS configured.
 
 #### Configure Zone on Cloudflare (via UI)
 - SSL/TLS → Overview → Set "Full (strict)"
 - SSL/TLS → Edge Certificates → "Always Use HTTPS" ON
 - Rules → Transform Rules → Managed Transforms → "Add security headers"
 
-#### Issue Cloudflare origin certificate
-Choose one path: UI issuance with manual install, or API issuance with `get-cert.sh --api`.
-If you are using the Cloudflare UI, create the certificate and download the cert/key pair.
-- SSL/TLS → Origin Server → Create Certificate
-  [Download or Copy cert and key]
-If you are using the API workflow, `get-cert.sh` issues the certificate for you and this UI step is not required.
+#### Issue and install Cloudflare origin certificate
+You can issue origin certificates via the Cloudflare UI or through the API, and in both cases the installation is handled by the same helper. The manual path uses the UI for issuance and then uses `get-cert.sh --manual` to install the certificate safely; the API path uses `get-cert.sh --api` and does not require any UI steps.
 
-#### Install certificate on origin server
-Use the unified helper so the same command supports manual paste and API issuance.
-`sudo ./scripts/get-cert.sh --manual domain.com`
-  [Paste cert and key when prompted]
+UI issuance + manual install:
+- SSL/TLS → Origin Server → Create Certificate
+- `./scripts/get-cert.sh --manual domain.com`
+
+API issuance + install:
+- `./scripts/get-cert.sh --api domain.com`
 
 #### Create Apache vhosts
-`sudo ./scripts/apache-vhost.sh domain.com`
+`./scripts/apache-vhost.sh domain.com`
 
 #### Add to WordPress multisite
 `./scripts/install-site.sh domain.com "Site Title" email@domain.com`
+  Assumes WordPress multisite is already installed; see Operations.md for the setup sequence.
 
 #### Verify
 `curl -I https://domain.com`
@@ -75,17 +75,14 @@ Use the unified helper so the same command supports manual paste and API issuanc
 Default example: `/var/www/html/wordpress` (Ubuntu default is `/var/www/html`, with `wordpress` as the chosen subdirectory).
 
 #### Check Apache vhosts
-`ls /etc/apache2/sites-enabled/`
+`sudo ls /etc/apache2/sites-enabled/`
 
 #### List installed certificates
-`ls /etc/ssl/cloudflare-origin/certs/`
+`sudo ls /etc/ssl/cloudflare-origin/certs/`
 
 #### Check DNS resolution
 `dig +short domain.com`
   [Look for `cf-ray` header]
-
-#### Test URL
-`curl -I https://domain.com`
 
 ---
 
@@ -95,11 +92,11 @@ Default example: `/var/www/html/wordpress` (Ubuntu default is `/var/www/html`, w
 The documents below describe different layers of the system and are intended to be read in this order so the operational dependencies remain clear.
 
 - `README.md`: Entry point and quick start with the script index.
-- `CloudflareSettings.md`: Cloudflare edge policy, API auth expectations, and when to use Cloudflare-facing scripts.
-- `ConfigServers.md`: Origin/server runbook for certificates, Apache vhosts, and WordPress multisite operations.
-- `MULTI.md`: Strategic architecture decisions, tradeoffs, and future work.
-- `Automate.md`: Evaluation and compliance automation overview for the check/verify scripts.
+- `Operations.md`: Consolidated runbook for Cloudflare, origin, and WordPress operations in dependency order; use the relevant sections as needed.
 - `scripts/Shell.md`: Conventions for writing scripts in this repository and using shared helpers.
+- `scripts/Scripts.md`: Authoritative script interfaces, options, and environment variables.
+- `MULTI.md` (optional): Strategic architecture decisions, tradeoffs, and future work.
+- `DNSTerms.md` (optional): DNS and Cloudflare terminology reference.
 
 ### Repository Structure
 
@@ -108,8 +105,7 @@ multiwp/
 ├── AGENTS.md                      # AI assistant guardrails and repo-specific instructions
 ├── README.md                      # This file
 ├── MULTI.md                       # Architecture & strategic decisions
-├── CloudflareSettings.md          # Cloudflare operational guide
-├── ConfigServers.md               # Server/Apache/WordPress operations
+├── Operations.md                  # Consolidated operational runbook
 ├── DNSTerms.md                    # DNS & Cloudflare terminology
 ├── scripts/
 │   [list below]
@@ -121,20 +117,34 @@ multiwp/
 
 ### Scripts
 
+Program scripts (alphabetical):
 | Script | Purpose | Status |
 |--------|---------|--------|
 | `apache-vhost.sh` | Create Apache HTTP + SSL vhosts for domain | Exercised |
-| `install-site.sh` | Add site to WordPress multisite, map to apex domain | Exercised |
-| `cloud-dns.sh` | Create Cloudflare zone + DNS records via API | Not exercised |
-| `get-cert.sh` | Issue or install Cloudflare Origin cert/key (API or manual) | Not exercised |
 | `cf-check.sh` | Inspect Cloudflare zone settings via API | Not exercised |
 | `check-edge.sh` | Validate Cloudflare edge behavior and headers | Exercised |
 | `check-origin.sh` | Validate origin certs, vhosts, and Apache health | Exercised |
 | `check-wp.sh` | Validate multisite mappings and site URLs | Exercised |
-| `verify-domain.sh` | End-to-end validation (edge, origin, WP) | Exercised |
+| `cloud-dns.sh` | Create Cloudflare zone + DNS records via API | Not exercised |
+| `get-cert.sh` | Issue or install Cloudflare Origin cert/key (API or manual) | Not exercised |
+| `install-site.sh` | Add site to WordPress multisite, map to apex domain | Exercised |
+| `setup-wp.sh` | Bootstrap WordPress multisite base configuration | Not exercised |
 | `verify-cf-auth.sh` | Validate Cloudflare credentials (token/key) | Exercised |
-| `auth.sh` | Cloudflare auth helpers and API request utilities | Library |
+| `verify-domain.sh` | End-to-end validation (edge, origin, WP) | Exercised |
+
+Helper scripts:
+| Script | Purpose | Status |
+|--------|---------|--------|
 | `common.sh` | Shared library functions (sourced by other scripts) | Library |
+| `auth.sh` | Cloudflare auth helpers and API request utilities | Library |
+| `cli.sh` | Shared option parsing helpers | Library |
+
+Test scripts:
+| Script | Purpose | Status |
+|--------|---------|--------|
+| `test_common.sh` | Unit tests for shared helpers | Test |
+| `test_cf.sh` | Unit tests for Cloudflare helpers | Test |
+| `test_cli.sh` | Unit tests for CLI helpers | Test |
 
 #### Test scripts syntax
 `bash -n scripts/*.sh`
@@ -142,12 +152,6 @@ multiwp/
 #### Permissions
 - Run as user with sudo permissions and in ssl-cert group, not as root
 `sudo usermod -aG ssl-cert {user} && sudo newgrp ssl-cert`
-
-#### Verify commands
-WP-CLI, JSON processor, HTTP client
-`command -v wp`
-`command -v jq`
-`command -v curl`
 
 ### Contributing
 
@@ -160,7 +164,7 @@ See the following references for implementation details:
 ### Troubleshooting
 
 **Site shows primary domain content:**
-See the "Site Onboarding & Troubleshooting" section in ConfigServers.md for the authoritative mapping checks.
+See Operations.md for the authoritative mapping checks and troubleshooting flow.
 
 **Certificate errors:**
 - Check cert path in Apache vhost config

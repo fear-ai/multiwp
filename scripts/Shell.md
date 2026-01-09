@@ -28,9 +28,25 @@ Option parsing is a contract with operators, so `usage()` must be accurate and s
 
 The repository standard is a single heredoc for `usage()` and a short title plus single-line example at the top of usage. Ordering must be consistent: script-specific options first, then auth, then root/ssl paths, then common privilege options, and `--help` last. The exact format and rules are captured in `scripts/Prompt.md`.
 
+## Configuration Processing
+
+Configuration flows are layered so defaults are predictable and overrides are explicit. Scripts should apply these patterns consistently so operators can reason about outcomes without reading implementation details.
+
+Priority (lowest to highest):
+- Code defaults
+- Auth file values (when a script uses `auth.sh`)
+- Environment variables
+- CLI options
+
+Auth files are inputs of convenience, not authority. Values loaded from an auth file must yield to environment variables and CLI options so automation can override state without editing files.
+
+Boolean handling is centralized in `common.sh` via `parse_bool`. Scripts must normalize auth-file or environment booleans to `true|false`, reject unknown tokens, and treat empty values as “use the default.” For option inputs, prefer value-style `--name=true|false` so the priority is explicit.
+
+Domain handling is centralized in `common.sh`: `normalize_domain` trims and lowercases; `validate_domain` enforces label rules; `finalize_domains` normalizes, validates, and de-duplicates lists. Redirect-only domains are loaded from `DNS_REDIRECT` via `load_dns_redirects` and checked with `is_redirect_domain` so origin/WP validators can skip expected redirects.
+
 ## Shared Helpers and Common Options
 
-The helper libraries provide common logic for privileges, argument parsing, and Cloudflare authentication. Use them to keep behavior consistent across scripts and to avoid duplicated logic. The definitive list of helper usage and script environments lives in `scripts/Scripts.md`, while `scripts/Helpers.csv` summarizes which scripts source each helper.
+The helper libraries provide common logic for privileges, argument parsing, and Cloudflare authentication. Use them to keep behavior consistent across scripts and to avoid duplicated logic. `scripts/Scripts.md` and `scripts/Helpers.csv` summarize where helpers are used; this section stays focused on roles and key functions.
 
 Key helpers:
 - `priv()` in `common.sh` centralizes privilege escalation via `sudo`.

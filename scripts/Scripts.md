@@ -1,7 +1,7 @@
 # Script Interfaces and Configuration
 Date: January 9, 2026
 
-This document centralizes the script interfaces, configuration expectations, environment variables, and defaults used by the scripts in `scripts/`. It emphasizes shared helpers and conventions while deferring to the scripts themselves for authoritative behavior.
+This document centralizes the script interfaces, configuration expectations, environment variables, and defaults used by the scripts in `scripts/`. It is the authoritative interface contract for operators and automation, and it complements `scripts/Shell.md` (Bash conventions and helper usage).
 
 ## Source of Truth
 
@@ -9,64 +9,61 @@ Every program script prints its authoritative help via `usage()`. Headers only p
 
 This document is authoritative for script interfaces, configuration, environment variables, and defaults. `scripts/Shell.md` is authoritative for Bash conventions and shared helper usage. `scripts/Prompt.md` encodes the Codex prompt format for applying header and `usage()` updates without altering behavior.
 
-## Current Conventions to Preserve
+## Part A: Script Catalog (by layer)
 
-Several conventions were updated recently and should not be regressed. These are summarized here so they remain visible without digging through script changes:
+This catalog groups scripts by operational layer and labels each script as provisioning or verification/investigation. Full option and environment-variable details live in Part B.
 
-- Domain-oriented scripts accept `--domain` (repeatable) and positional domain arguments; domains are normalized, validated, and de-duplicated.
-- A literal `--` is no longer treated specially; any arguments not consumed by option parsing are positional inputs.
-- Cloudflare zone naming uses `CF_ZONE` (not `CF_ZONE_NAME`), and `cf-check.sh` validates zone names and warns if the case-sensitive input differs from the Cloudflare API response.
-- `cloud-dns.sh` is IPv4-only and requires publicly routable IPv4 addresses; RFC1918, link-local, loopback, multicast/experimental, `0.0.0.0`, and `255.255.255.255` are rejected, and `.0`/`.255` addresses produce warnings.
-- Standard path names are `SSL_DIR`, `APACHE_DIR`, and the template option is `--template` (not `--temp`).
+### Cloudflare Layer
 
-## Shared Helpers and Defaults
+Cloudflare scripts manage credentials, DNS, certificates, and edge validation. A typical flow starts with credential checks, provisions DNS, then issues certificates, and ends with settings and edge validation.
 
-Before listing script-specific arguments, it helps to understand the shared helpers that define defaults and common option behavior. These helpers are dependencies for many scripts, so they are introduced here before any per-script references.
+- `verify-cf-auth.sh` — verification (read-only)
+- `cloud-dns.sh` — provisioning
+- `get-cert.sh` — provisioning
+- `cf-check.sh` — verification (read-only)
+- `check-edge.sh` — verification (read-only)
 
-### common.sh
+### Origin Layer (Apache and TLS)
 
-`common.sh` defines shared defaults and utility functions. These defaults can be overridden by environment variables before invoking a script.
+Origin scripts configure or validate Apache vhosts and TLS wiring. Provisioning typically precedes verification.
 
-Defaults:
-- `SSL_DIR` (default: `/etc/ssl/cloudflare-origin`)
-- `SSL_CERT_DIR` (default: `${SSL_DIR}/certs`)
-- `SSL_KEY_DIR` (default: `${SSL_DIR}/keys`)
-- `APACHE_DIR` (default: `/etc/apache2/sites-available`)
-- `WORDPRESS_ROOT` (default: `/var/www/html/wordpress`)
-- `TEMPLATE_DIR` (default: `<repo>/templates`)
+- `apache-vhost.sh` — provisioning
+- `check-origin.sh` — verification (read-only)
 
-Privilege wrapper:
-- `SUDO_BIN` (default: `sudo`) controls the `priv()` helper.
-- `priv()` runs commands through `sudo` when `SUDO_BIN` is set, or runs directly when `SUDO_BIN` is empty.
+### WordPress Layer
 
-Input helpers:
-- `normalize_domain`, `validate_domain`, and `finalize_domains` normalize, validate, and de-duplicate domain lists.
-- `validate_ipv4` enforces public IPv4 requirements for Cloudflare DNS provisioning.
+WordPress scripts bootstrap or validate multisite configuration and mapping. Provisioning typically precedes verification.
 
-### cli.sh
+- `setup-wp.sh` — provisioning
+- `install-site.sh` — provisioning
+- `check-wp.sh` — verification (read-only)
 
-`cli.sh` provides shared option handlers and usage lines. Scripts that source `cli.sh` inherit a consistent set of shared options and usage lines, so the operator experience stays uniform across scripts.
+### Orchestration Layer
 
-### auth.sh
+Orchestration scripts combine multiple checks in a single run.
 
-`auth.sh` manages Cloudflare auth loading and API calls. Scripts that use Cloudflare APIs source this file directly; it is not loaded via `common.sh` so that non-API scripts stay lightweight.
+- `verify-domain.sh` — verification (read-only)
 
-Auth file:
-- Default `CF_AUTH_FILE` is `~/.config/cloudflare/default.auth`.
-- Example format: `scripts/example.auth` (values intentionally blank).
-- The project expects `.auth` extensions for files under `~/.config/cloudflare/`.
+### Support and Tests
 
-Precedence (lowest to highest):
+The test scripts and helper libraries are intentionally minimal. They do not parse options and should be run directly from the `scripts/` directory.
+
+- `test_common.sh`, `test_cli.sh`, `test_cf.sh` run unit checks for shared helpers.
+- `common.sh`, `cli.sh`, `auth.sh` provide shared logic and should not be executed directly.
+
+## Part B: Option and Environment Reference (canonical)
+
+This section documents shared conventions and the full per-script interfaces. It is the authoritative reference for option and environment variable behavior; implementation details for helper usage and processing rationale live in `scripts/Shell.md`.
+
+### Shared Option and Environment Conventions
+
+Shared options are expressed as long options only. Scripts use `--help` for help; the short `-h` option is intentionally not supported to keep parsing consistent across scripts. Standard names are `SSL_DIR`, `APACHE_DIR`, and `WORDPRESS_ROOT`, and the template option is `--template` (avoid legacy names such as `--temp`).
+
+Configuration priority (lowest to highest):
 - Code defaults
 - Auth file values
 - Environment variables
 - CLI options
-
-Supported auth variables and options are listed in the Cloudflare authentication section below.
-
-## Shared Option and Environment Conventions
-
-Shared options are expressed as long options only. Scripts use `--help` for help; the short `-h` option is intentionally not supported to keep parsing consistent across scripts.
 
 When `usage()` lists an option, it follows a consistent format:
 
@@ -96,11 +93,11 @@ Boolean settings are parsed and normalized to keep behavior consistent across sc
 - If `parse_bool` fails, emit a concise error and exit non-zero.
 - Do not add new dependencies to scripts that are intentionally self-contained.
 
-## Shared Options and Environment Variables
+### Shared Options and Environment Variables
 
 The following options and environment variables are referenced by multiple scripts. This section documents each option once, then the per-script sections below reference the applicable subset.
 
-### Privilege and execution controls
+#### Privilege and execution controls
 
 These options influence how scripts invoke privileged commands. They do not change functional behavior, but they can affect whether a script can read or write protected files.
 
@@ -108,14 +105,14 @@ These options influence how scripts invoke privileged commands. They do not chan
 - `--no-sudo [SUDO_BIN] (default: sudo)` sets `SUDO_BIN` to an empty string. The `priv()` helper will run commands directly as the current user instead of invoking `sudo`.
 - `SUDO_BIN` (env) controls the privilege wrapper globally. Use an empty value to disable `sudo` while keeping the `priv()` call pattern intact.
 
-### WordPress root
+#### WordPress root
 
 These options and environment variables control where WordPress is located on disk.
 
 - `--wp-root PATH [WORDPRESS_ROOT] (default: /var/www/html/wordpress)` sets the WordPress root path for scripts that operate on the WordPress filesystem or run WP-CLI.
 - `WORDPRESS_ROOT` (env) provides the default WordPress root if the `--wp-root` option is not supplied.
 
-### Domain selection
+#### Domain selection
 
 Domain-oriented scripts accept domains via `--domain` (repeatable). Positional domains are still accepted for compatibility, and scripts normalize, validate, and de-duplicate the final list before execution.
 
@@ -142,7 +139,7 @@ Examples:
 - `cloud-dns.sh --domain example.com 203.0.113.10`
 - `cloud-dns.sh example.com 203.0.113.10`
 
-### SSL directory and certificate paths
+#### SSL directory and certificate paths
 
 These options define where origin certificates and keys are stored. Scripts that read or write certificates use these paths.
 
@@ -151,23 +148,28 @@ These options define where origin certificates and keys are stored. Scripts that
 - `SSL_CERT_DIR` (env) defaults to `${SSL_DIR}/certs`.
 - `SSL_KEY_DIR` (env) defaults to `${SSL_DIR}/keys`.
 
-### Apache sites directory
+#### Apache sites directory
 
 Scripts that inspect or write vhost files use a shared Apache sites directory setting.
 
 - `--apache-dir DIR [APACHE_DIR] (default: /etc/apache2/sites-available)` sets the Apache sites directory with highest priority.
 - `APACHE_DIR` (env) defines the default Apache sites directory.
 
-### HTTP timeouts
+#### HTTP timeouts
 
 HTTP-oriented scripts use a shared timeout for curl requests.
 
 - `--http-timeout SECONDS [HTTP_TIMEOUT] (default: 10)` controls connect and total timeouts for curl in edge checks.
 - `HTTP_TIMEOUT` (env) provides the default timeout value.
 
-### Cloudflare authentication
+#### Cloudflare authentication
 
 Cloudflare API scripts accept multiple credential types, each suited to a specific scope.
+
+Auth file conventions:
+- Default `CF_AUTH_FILE` is `~/.config/cloudflare/default.auth`.
+- Example format: `scripts/example.auth` (values intentionally blank).
+- The project expects `.auth` extensions for files under `~/.config/cloudflare/`.
 
 Auth variables:
 - `CF_API_TOKEN` (account API token, account-scoped)
@@ -193,7 +195,7 @@ TODO:
 - Consider adding a per-domain zone mapping for `check-edge.sh` and `verify-domain.sh` to support multi-zone runs without relying on a single `CF_ZONE_ID`.
 - Allow `cf-check.sh` to iterate `CF_ZONE_IDS` when no `--zone` or `--zone-id` is supplied.
 
-## Read-Only Scripts and Safe Options
+### Read-Only Scripts and Safe Options
 
 The following scripts are read-only by design and do not modify DNS, certificates, Apache configuration, or WordPress data. Read-only scripts: `check-edge.sh`, `cf-check.sh`, `verify-cf-auth.sh`, `check-origin.sh`, `check-wp.sh`, `verify-domain.sh`. Unit tests: `test_common.sh`, `test_cli.sh`, `test_cf.sh`.
 
@@ -206,18 +208,7 @@ Safe options for read-only scripts:
 - `--auth-file PATH`, `--token TOKEN`, `--key KEY`, `--email EMAIL`, `--ca-key KEY`
 - `--allow-root`, `--no-sudo`
 
-## Program Scripts by Topic and Workflow
-
-Scripts are grouped by major topic and layer, starting with Cloudflare. Within each group, the order reflects a common operational flow. Each script is labeled as either a production/installation script or a verification/investigation script.
-
-### Cloudflare: Authentication, Zones, Certificates, and Validation
-
-Typical order:
-1) `verify-cf-auth.sh` (validate credentials)
-2) `cloud-dns.sh` (provision zone and DNS)
-3) `get-cert.sh` (issue origin certs)
-4) `cf-check.sh` (inspect settings)
-5) `check-edge.sh` (verify edge behavior)
+### Cloudflare Layer Interfaces
 
 #### verify-cf-auth.sh (verification/investigation)
 
@@ -366,29 +357,7 @@ Notes:
 TODO:
 - Consider adding redirect validation options (expected status/Location) for `check-edge.sh`.
 
-### WordPress and Apache: Installation and Provisioning
-
-Typical order:
-1) `setup-wp.sh` (bootstrap base WordPress multisite)
-2) `apache-vhost.sh` (create and enable vhosts)
-3) `install-site.sh` (create a multisite site and map domain)
-
-#### setup-wp.sh (production/installation)
-
-Purpose:
-- Bootstraps a WordPress multisite base configuration. It is intentionally self-contained for early-stage setup and does not expose CLI options.
-
-Arguments:
-- None.
-
-Options:
-- `--help` shows help.
-
-Environment variables:
-- `WORDPRESS_ROOT` is hardcoded in the script today and should be edited in the script if a different path is required.
-
-Notes:
-- The header includes upstream reference links for MySQL, Apache, and PHP setup, and the script expects you to follow those instructions before enabling multisite.
+### Origin Layer Interfaces
 
 #### apache-vhost.sh (production/installation)
 
@@ -417,6 +386,46 @@ Notes:
 - Uses templates in the templates directory and requires write access to `APACHE_DIR`.
 - SSL vhosts use origin cert/key files in directories from `SSL_DIR`.
 
+#### check-origin.sh (verification/investigation)
+
+Purpose:
+- Validates origin certificates, Apache vhost wiring, and basic Apache health.
+
+Arguments:
+- One or more domain names, provided positionally or via `--domain` (repeatable).
+
+Options (script-specific):
+- `--domain NAME` adds a domain to the list (repeatable).
+- `--apache-dir DIR [APACHE_DIR]` sets the Apache sites directory with highest priority.
+
+Options (shared):
+- `--wp-root PATH [WORDPRESS_ROOT]`
+- `--ssl-dir DIR [SSL_DIR]`
+- `--allow-root`, `--no-sudo`
+- `--help`
+
+Environment variables:
+- `APACHE_DIR`, `WORDPRESS_ROOT`, `SSL_DIR`.
+
+### WordPress Layer Interfaces
+
+#### setup-wp.sh (production/installation)
+
+Purpose:
+- Bootstraps a WordPress multisite base configuration. It is intentionally self-contained for early-stage setup and does not expose CLI options.
+
+Arguments:
+- None.
+
+Options:
+- `--help` shows help.
+
+Environment variables:
+- `WORDPRESS_ROOT` is hardcoded in the script today and should be edited in the script if a different path is required.
+
+Notes:
+- The header includes upstream reference links for MySQL, Apache, and PHP setup, and the script expects you to follow those instructions before enabling multisite.
+
 #### install-site.sh (production/installation)
 
 Purpose:
@@ -442,34 +451,6 @@ Prerequisites:
 Notes:
 - The script derives a slug by removing dots and hyphens from the domain and uses WP-CLI to create the initial site.
 
-### WordPress and Apache: Verification and Investigation
-
-Typical order:
-1) `check-origin.sh` (validate origin certs and vhosts)
-2) `check-wp.sh` (validate WordPress mapping)
-3) `verify-domain.sh` (combined checks)
-
-#### check-origin.sh (verification/investigation)
-
-Purpose:
-- Validates origin certificates, Apache vhost wiring, and basic Apache health.
-
-Arguments:
-- One or more domain names, provided positionally or via `--domain` (repeatable).
-
-Options (script-specific):
-- `--domain NAME` adds a domain to the list (repeatable).
-- `--apache-dir DIR [APACHE_DIR]` sets the Apache sites directory with highest priority.
-
-Options (shared):
-- `--wp-root PATH [WORDPRESS_ROOT]`
-- `--ssl-dir DIR [SSL_DIR]`
-- `--allow-root`, `--no-sudo`
-- `--help`
-
-Environment variables:
-- `APACHE_DIR`, `WORDPRESS_ROOT`, `SSL_DIR`.
-
 #### check-wp.sh (verification/investigation)
 
 Purpose:
@@ -491,6 +472,8 @@ Options (shared):
 
 Environment variables:
 - `WORDPRESS_ROOT`.
+
+### Orchestration Layer Interfaces
 
 #### verify-domain.sh (verification/investigation)
 
@@ -515,13 +498,6 @@ Options (shared):
 
 Environment variables:
 - `HTTP_TIMEOUT`, `WORDPRESS_ROOT`, `SSL_DIR`, `APACHE_DIR`.
-
-## Test and Helper Scripts
-
-The test scripts and helper libraries are intentionally minimal. They do not parse arguments and should be run directly from the `scripts/` directory.
-
-- `test_common.sh`, `test_cli.sh`, `test_cf.sh` run unit checks for shared helpers.
-- `common.sh`, `cli.sh`, `auth.sh` provide shared logic and should not be executed directly.
 
 ## Option Cross-Reference (Alphabetical)
 
