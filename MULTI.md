@@ -377,7 +377,7 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 3. Update wp_<blog_id>_options URLs
 4. Verify site accessible at new domain
 
-**Lesson**: Domain mapping must happen before using `--url` flag with new domain. Direct database queries bypass site detection issues.
+**Lesson**: Domain mapping must happen before using `--url` option with new domain. Direct database queries bypass site detection issues.
 
 ---
 

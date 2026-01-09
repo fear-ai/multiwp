@@ -7,7 +7,7 @@ This plan sequences validation and deployment of the automation scripts for conf
    Gather the domain inventory, map each domain to the correct Cloudflare account/zone, and classify domains as full origin-backed sites or redirect-only domains (for `DNS_REDIRECT`). Confirm credentials and auth files are consistent, and decide which credential types (token, key, CA key) are allowed per account so subsequent automation is deterministic.
 
 2) Stabilize script interfaces and documentation
-   Confirm CLI flags, usage format, and helper behavior are aligned with current scripts. Ensure `scripts/Arguments.md`, `scripts/Options.csv`, `scripts/Helpers.csv`, `scripts/Prompt.md`, `scripts/Bool.md`, and `scripts/example.auth` are consistent so automation tooling relies on a clear contract.
+  Confirm CLI options, usage format, and helper behavior are aligned with current scripts. Ensure `scripts/Scripts.md`, `scripts/Options.csv`, `scripts/Helpers.csv`, `scripts/Prompt.md`, and `scripts/example.auth` are consistent so automation tooling relies on a clear contract.
 
 3) Build a read-only validation pipeline
    Run linting and unit tests, then execute read-only verification scripts (`verify-cf-auth.sh`, `cf-check.sh`, `check-edge.sh`, `check-origin.sh`, `check-wp.sh`, `verify-domain.sh`) on a small pilot set. The pilot set should be representative: at least one domain per Cloudflare account, one redirect-only domain, one fully provisioned multisite domain, and one intentionally incomplete/test domain. Define pass/fail criteria and stop if any credential or API mismatch appears.
