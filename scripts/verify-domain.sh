@@ -24,7 +24,7 @@ Example: verify-domain.sh [OPTIONS] domain1 [domain2...]
 
 Options:
   --api  Enable Cloudflare API checks in check-edge.sh
-  --hsts  Require Strict-Transport-Security header in check-edge.sh
+  --hsts=true|false  Require Strict-Transport-Security header in check-edge.sh
 $(cli_usage_domain)
   --apache-dir DIR [APACHE_DIR] (default: /etc/apache2/sites-available)  Apache sites-available dir
   --http-timeout SECONDS [HTTP_TIMEOUT] (default: 10)  HTTP timeout for edge checks
@@ -41,7 +41,20 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 api) EDGE_ARGS+=("--api") ;;
-                hsts) EDGE_ARGS+=("--hsts") ;;
+                hsts=*)
+                    if ! HSTS_CLI="$(parse_bool "${OPTARG#*=}")"; then
+                        err "--hsts must be true or false"
+                    fi
+                    EDGE_ARGS+=("--hsts=${HSTS_CLI}")
+                    ;;
+                hsts)
+                    [ -n "${!OPTIND-}" ] || err "--hsts requires true or false"
+                    if ! HSTS_CLI="$(parse_bool "${!OPTIND}")"; then
+                        err "--hsts must be true or false"
+                    fi
+                    EDGE_ARGS+=("--hsts=${HSTS_CLI}")
+                    OPTIND=$((OPTIND+1))
+                    ;;
                 ssl-dir|ssl-dir=*)
                     if cli_ssl_dir_opt "${OPTARG}" SSL_DIR_CLI "" "" "${!OPTIND-}"; then
                         ORIGIN_ARGS+=("--ssl-dir=${SSL_DIR_CLI}")

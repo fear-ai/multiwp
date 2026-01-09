@@ -1,13 +1,13 @@
-# Script Arguments and Environment Variables
+# Script Interfaces and Configuration
 Date: January 9, 2026
 
-This document centralizes the arguments, environment variables, and defaults used by the scripts in `scripts/`. It emphasizes shared helpers and conventions while deferring to the scripts themselves for authoritative behavior.
+This document centralizes the script interfaces, configuration expectations, environment variables, and defaults used by the scripts in `scripts/`. It emphasizes shared helpers and conventions while deferring to the scripts themselves for authoritative behavior.
 
 ## Source of Truth
 
 Every program script prints its authoritative help via `usage()`. Headers only point to `usage()` to avoid duplication; when this document conflicts with `usage()`, update this document to match the script output.
 
-This document is authoritative for script arguments, environment variables, and defaults. `scripts/Shell.md` is authoritative for Bash conventions and shared helper usage. `scripts/Prompt.md` encodes the Codex prompt format for applying header and `usage()` updates without altering behavior.
+This document is authoritative for script interfaces, configuration, environment variables, and defaults. `scripts/Shell.md` is authoritative for Bash conventions and shared helper usage. `scripts/Prompt.md` encodes the Codex prompt format for applying header and `usage()` updates without altering behavior.
 
 ## Current Conventions to Preserve
 
@@ -47,12 +47,6 @@ Input helpers:
 
 `cli.sh` provides shared option handlers and usage lines. Scripts that source `cli.sh` inherit a consistent set of shared options and usage lines, so the operator experience stays uniform across scripts.
 
-Common options:
-- `--allow-root` lets a script run even when `USER=root` (not recommended).
-- `--no-sudo [SUDO_BIN] (default: sudo)` disables `sudo` usage inside `priv()`.
-- `--wp-root PATH [WORDPRESS_ROOT] (default: /var/www/html/wordpress)` sets the WordPress root path.
-- `--ssl-dir DIR [SSL_DIR] (default: /etc/ssl/cloudflare-origin)` sets the SSL directory and updates cert/key paths.
-
 ### auth.sh
 
 `auth.sh` manages Cloudflare auth loading and API calls. Scripts that use Cloudflare APIs source this file directly; it is not loaded via `common.sh` so that non-API scripts stay lightweight.
@@ -62,32 +56,13 @@ Auth file:
 - Example format: `scripts/example.auth` (values intentionally blank).
 - The project expects `.auth` extensions for files under `~/.config/cloudflare/`.
 
-Precedence and layering:
-Cloudflare auth values are layered intentionally so operators can supply defaults in auth files, adjust them via environment variables for a run, and then set explicit CLI values when needed. The auth file provides baseline values, environment values take precedence, and CLI options take highest precedence. This behavior is implemented in code by `load_cloudflare_auth`, which preserves pre-existing `CF_*` environment values after sourcing the auth file.
-
 Precedence (lowest to highest):
 - Code defaults
 - Auth file values
 - Environment variables
 - CLI options
 
-Supported auth variables:
-- `CF_API_TOKEN` (account API token, account-scoped)
-- `CF_API_KEY` + `CF_API_EMAIL` (global API key, user-scoped)
-- `CF_CA_KEY` (Origin CA User Service Key, user-scoped)
-- `CF_ACCOUNT_ID` (account identifier)
-- `CF_ZONE_ID` and `CF_ZONE` for zone-specific operations
-- `CF_ZONE_MAIN` to prefer a “main” zone name when multiple zones exist
-Notes:
-- Auth files may list multiple `CF_ZONE_ID` entries. Current scripts use the first zone ID by default and retain the full list for future multi-zone checks.
-
-Auth options accepted by scripts that use Cloudflare APIs:
-- `--auth-file PATH [CF_AUTH_FILE]`
-- `--account ID [CF_ACCOUNT_ID]`
-- `--token TOKEN [CF_API_TOKEN]`
-- `--key KEY [CF_API_KEY]`
-- `--email EMAIL [CF_API_EMAIL]`
-- `--ca-key KEY [CF_CA_KEY]`
+Supported auth variables and options are listed in the Cloudflare authentication section below.
 
 ## Shared Option and Environment Conventions
 
@@ -116,7 +91,7 @@ Boolean settings are parsed and normalized to keep behavior consistent across sc
 - Accept `true|false` and `yes|no|y|n` (case-insensitive). Reject anything else.
 - Treat empty or unset values as “use default.” Do not treat empty as implicit true or false.
 - For boolean CLI options that mirror env/auth settings, prefer value-style `--flag=true|false` instead of bare toggles.
-- Do not enumerate accepted tokens in `usage()`; only show priority and default (for example: `--hsts=true [HSTS_REQUIRED] (default: false)`).
+- Do not enumerate accepted tokens in `usage()`; only show priority and default (for example: `--hsts=true|false [HSTS_REQUIRED] (default: false)`).
 - Apply standard precedence: code defaults (lowest), then auth files, then environment, then CLI options (highest).
 - If `parse_bool` fails, emit a concise error and exit non-zero.
 - Do not add new dependencies to scripts that are intentionally self-contained.
@@ -194,6 +169,12 @@ HTTP-oriented scripts use a shared timeout for curl requests.
 
 Cloudflare API scripts accept multiple credential types, each suited to a specific scope.
 
+Auth variables:
+- `CF_API_TOKEN` (account API token, account-scoped)
+- `CF_API_KEY` + `CF_API_EMAIL` (global API key, user-scoped)
+- `CF_CA_KEY` (Origin CA User Service Key, user-scoped)
+- `CF_ACCOUNT_ID` (account identifier)
+
 - `--auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)` points to the auth file to load.
 - `--account ID [CF_ACCOUNT_ID]` sets the account ID with highest priority for account-scoped calls.
 - `--token TOKEN [CF_API_TOKEN]` sets the account API token.
@@ -207,23 +188,14 @@ Cloudflare zone selection:
 - `CF_ZONE_MAIN` (env) is preferred when multiple zones exist in the auth file.
 - `CF_ZONE` and `CF_ZONE_ID` (env) are read from the auth file, with the first `CF_ZONE_ID` chosen by default.
 Notes:
-- `CF_ZONE` should be the zone apex (for example, `example.com`), not a host like `www.example.com`.
+- `CF_ZONE` must be an apex (for example, `example.com`, not `www.example.com`); auth files may list multiple `CF_ZONE_ID` values—scripts use the first by default and retain the list in `CF_ZONE_IDS`.
 TODO:
 - Consider adding a per-domain zone mapping for `check-edge.sh` and `verify-domain.sh` to support multi-zone runs without relying on a single `CF_ZONE_ID`.
 - Allow `cf-check.sh` to iterate `CF_ZONE_IDS` when no `--zone` or `--zone-id` is supplied.
 
 ## Read-Only Scripts and Safe Options
 
-The following scripts are read-only by design and do not modify DNS, certificates, Apache configuration, or WordPress data. The listed options are safe selectors or validation settings that do not change system state.
-
-Read-only scripts:
-- `check-edge.sh` (DNS and HTTP(S) checks only; optional API reads)
-- `cf-check.sh` (Cloudflare settings reads only)
-- `verify-cf-auth.sh` (credential verification reads only)
-- `check-origin.sh` (filesystem and service inspection only)
-- `check-wp.sh` (WP-CLI reads only)
-- `verify-domain.sh` (orchestrates read-only checks)
-- `test_common.sh`, `test_cli.sh`, `test_cf.sh` (unit tests)
+The following scripts are read-only by design and do not modify DNS, certificates, Apache configuration, or WordPress data. Read-only scripts: `check-edge.sh`, `cf-check.sh`, `verify-cf-auth.sh`, `check-origin.sh`, `check-wp.sh`, `verify-domain.sh`. Unit tests: `test_common.sh`, `test_cli.sh`, `test_cf.sh`.
 
 Safe options for read-only scripts:
 - `--api` (enables Cloudflare API reads; no writes)
@@ -374,7 +346,7 @@ Options (script-specific):
 - `--http-timeout SECONDS [HTTP_TIMEOUT] (default: 10)` controls curl timeouts.
 - `--api` enables Cloudflare API checks and requires `CF_ZONE_ID` plus valid credentials.
 - `--domain NAME` adds a domain to the list (repeatable).
-- `--hsts` requires the Strict-Transport-Security header.
+- `--hsts=true|false` requires the Strict-Transport-Security header.
 
 Options (auth and shared):
 - `--auth-file PATH [CF_AUTH_FILE]`
@@ -390,7 +362,7 @@ Environment variables:
 Notes:
 - `--api` performs Cloudflare setting checks using the single `CF_ZONE_ID` value; use separate runs if you need to validate multiple zones with different IDs.
 - DNS checks report A records (required) and also report CNAME and AAAA records when present.
-- `HSTS_REQUIRED` can be set to `true` or `false` in the environment or auth file to require Strict-Transport-Security without passing `--hsts`.
+- `HSTS_REQUIRED` can be set to `true` or `false` in the environment or auth file to require Strict-Transport-Security without passing `--hsts=true|false`.
 TODO:
 - Consider adding redirect validation options (expected status/Location) for `check-edge.sh`.
 
@@ -530,7 +502,7 @@ Arguments:
 
 Options (script-specific):
 - `--api` passes `--api` to `check-edge.sh`.
-- `--hsts` passes `--hsts` to `check-edge.sh`.
+- `--hsts=true|false` passes `--hsts=true|false` to `check-edge.sh`.
 - `--domain NAME` adds a domain to the list (repeatable).
 - `--apache-dir DIR [APACHE_DIR]` passes the Apache sites directory to `check-origin.sh`.
 - `--http-timeout SECONDS [HTTP_TIMEOUT]` passes the timeout to `check-edge.sh`.
@@ -553,7 +525,7 @@ The test scripts and helper libraries are intentionally minimal. They do not par
 
 ## Option Cross-Reference (Alphabetical)
 
-This cross-reference lists options alphabetically and the scripts that implement them.
+This cross-reference lists options alphabetically and the scripts that implement them. CSV files are exports for future processing; this list is the human-readable view.
 
 - `-e` (cf-check.sh)
 - `-s` (cf-check.sh)
@@ -587,7 +559,7 @@ This cross-reference lists options alphabetically and the scripts that implement
 
 ## Helper Inclusion Cross-Reference
 
-This cross-reference lists helper scripts and the programs or tests that source them.
+This cross-reference lists helper scripts and the programs or tests that source them. CSV files are exports for future processing; this list is the human-readable view.
 
 - `common.sh`: apache-vhost.sh, cf-check.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, setup-wp.sh, verify-cf-auth.sh, verify-domain.sh, test_common.sh, test_cli.sh, test_cf.sh
 - `cli.sh`: apache-vhost.sh, cf-check.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh, verify-domain.sh, test_cli.sh

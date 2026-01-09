@@ -28,7 +28,7 @@ Example: check-edge.sh [OPTIONS] domain1 [domain2...]
 Options:
   --domain NAME  Domain to process (repeatable; positional also accepted)
   --http-timeout SECONDS [HTTP_TIMEOUT] (default: 10)  HTTP timeout for curl
-  --hsts  Require Strict-Transport-Security header
+  --hsts=true|false  Require Strict-Transport-Security header
   --api  Enable optional Cloudflare API checks (requires CF_ZONE_ID and either account API token CF_API_TOKEN or Global API Key + email CF_API_KEY+CF_API_EMAIL)
   --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
   --token TOKEN [CF_API_TOKEN]  Override CF_API_TOKEN (account API token)
@@ -44,7 +44,18 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 api) API_CHECKS=true ;;
-                hsts) HSTS_REQUIRED_CLI=true ;;
+                hsts=*)
+                    if ! HSTS_REQUIRED_CLI="$(parse_bool "${OPTARG#*=}")"; then
+                        err "--hsts must be true or false"
+                    fi
+                    ;;
+                hsts)
+                    [ -n "${!OPTIND-}" ] || err "--hsts requires true or false"
+                    if ! HSTS_REQUIRED_CLI="$(parse_bool "${!OPTIND}")"; then
+                        err "--hsts must be true or false"
+                    fi
+                    OPTIND=$((OPTIND+1))
+                    ;;
                 http-timeout=*) HTTP_TIMEOUT="${OPTARG#*=}" ;;
                 http-timeout)
                     [ -n "${!OPTIND-}" ] || err "--http-timeout requires a value"
@@ -73,19 +84,20 @@ done
 finalize_domains DOMAINS || { usage; exit 1; }
 [ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
 
-if [ -n "$HSTS_REQUIRED_CLI" ]; then
-    HSTS_REQUIRED=true
-elif [ -z "$HSTS_REQUIRED" ] && [ -n "${CF_AUTH_FILE-}" ]; then
+if [ -n "${HSTS_REQUIRED_CLI-}" ]; then
+    HSTS_REQUIRED="$HSTS_REQUIRED_CLI"
+elif [ -z "${HSTS_REQUIRED-}" ] && [ -n "${CF_AUTH_FILE-}" ]; then
     load_cloudflare_auth "$CF_AUTH_FILE"
     AUTH_LOADED=true
 fi
 
-case "${HSTS_REQUIRED-}" in
-    '') HSTS_REQUIRED=false ;;
-    true) HSTS_REQUIRED=true ;;
-    false) HSTS_REQUIRED=false ;;
-    *) err "HSTS_REQUIRED must be true or false" ;;
-esac
+if [ -n "${HSTS_REQUIRED-}" ]; then
+    if ! HSTS_REQUIRED="$(parse_bool "$HSTS_REQUIRED")"; then
+        err "HSTS_REQUIRED must be true or false"
+    fi
+else
+    HSTS_REQUIRED=false
+fi
 
 require_cmd curl
 require_cmd dig
