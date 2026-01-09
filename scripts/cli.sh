@@ -56,12 +56,35 @@ cli_ssl_dir_opt() {
     return 0
 }
 
+cli_domain_opt() {
+    local opt="$1"
+    local array_name="$2"
+    local next="${3-}"
+    local val=""
+    case "$opt" in
+        domain=*) val="${opt#*=}" ;;
+        domain)
+            val="$next"
+            OPTIND=$((OPTIND+1))
+            ;;
+        *) return 1 ;;
+    esac
+    [ -n "$val" ] || err "--domain requires a value"
+    local -n domain_list="$array_name"
+    domain_list+=("$val")
+    return 0
+}
+
 cli_usage_wp_root() {
     echo "  --wp-root PATH [WORDPRESS_ROOT] (default: $WORDPRESS_ROOT)  WordPress root"
 }
 
 cli_usage_ssl_dir() {
-    echo "  --ssl-dir DIR [SSL_BASE] (default: $SSL_BASE)  Base SSL dir"
+    echo "  --ssl-dir DIR [SSL_DIR] (default: $SSL_DIR)  SSL directory"
+}
+
+cli_usage_domain() {
+    echo "  --domain NAME  Domain to process (repeatable; positional also accepted)"
 }
 
 cli_usage_common_priv() {

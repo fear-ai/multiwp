@@ -14,6 +14,7 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 WORDPRESS_ROOT_LOCAL="$WORDPRESS_ROOT"
 MODE="auto"
 ALLOW_ROOT=false
+DOMAINS=()
 
 usage() {
     cat <<EOF
@@ -24,6 +25,7 @@ Options:
   --singlesite  Validate a single-site WordPress install (no multisite tables)
   --multisite  Validate a multisite network
   --autosite (default)  Auto-detect single-site vs multisite
+$(cli_usage_domain)
 $(cli_usage_wp_root)
 $(cli_usage_common_priv)
   --help  Show this help
@@ -46,7 +48,9 @@ while getopts ":-:" opt; do
                     fi
                     ;;
                 *)
-                    if cli_common_opt "${OPTARG}"; then
+                    if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
+                        :
+                    elif cli_common_opt "${OPTARG}"; then
                         :
                     else
                         usage; exit 1
@@ -59,7 +63,11 @@ while getopts ":-:" opt; do
 done
 shift $((OPTIND-1))
 
-[ $# -ge 1 ] || { usage; exit 1; }
+for domain in "$@"; do
+    DOMAINS+=("$domain")
+done
+finalize_domains DOMAINS || { usage; exit 1; }
+[ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
 
 cli_require_non_root
 
@@ -241,7 +249,7 @@ check_domain_single() {
 }
 
 overall_ok=true
-for domain in "$@"; do
+for domain in "${DOMAINS[@]}"; do
     if [ "$MODE" = "multisite" ]; then
         if ! check_domain_multisite "$domain"; then
             overall_ok=false

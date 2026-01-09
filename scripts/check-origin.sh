@@ -13,11 +13,12 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 
 ALLOW_ROOT=false
 
-SSL_BASE_LOCAL="$SSL_BASE"
+SSL_DIR_LOCAL="$SSL_DIR"
 SSL_CERT_DIR_LOCAL="$SSL_CERT_DIR"
 SSL_KEY_DIR_LOCAL="$SSL_KEY_DIR"
-APACHE_SITES_DIR_LOCAL="$APACHE_SITES_DIR"
+APACHE_DIR_LOCAL="$APACHE_DIR"
 WORDPRESS_ROOT_LOCAL="$WORDPRESS_ROOT"
+DOMAINS=()
 
 usage() {
     cat <<EOF
@@ -25,7 +26,8 @@ check-origin.sh - Validate origin certificates, Apache configuration, and vhost 
 Example: check-origin.sh [OPTIONS] domain1 [domain2...]
 
 Options:
-  --apache-dir DIR [APACHE_SITES_DIR] (default: /etc/apache2/sites-available)  Apache sites-available dir
+$(cli_usage_domain)
+  --apache-dir DIR [APACHE_DIR] (default: /etc/apache2/sites-available)  Apache sites-available dir
 $(cli_usage_wp_root)
 $(cli_usage_ssl_dir)
 $(cli_usage_common_priv)
@@ -39,7 +41,7 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 ssl-dir|ssl-dir=*)
-                    if cli_ssl_dir_opt "${OPTARG}" SSL_BASE_LOCAL SSL_CERT_DIR_LOCAL SSL_KEY_DIR_LOCAL "${!OPTIND-}"; then
+                    if cli_ssl_dir_opt "${OPTARG}" SSL_DIR_LOCAL SSL_CERT_DIR_LOCAL SSL_KEY_DIR_LOCAL "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1
@@ -48,10 +50,10 @@ while getopts ":-:" opt; do
                 apache-dir|apache-dir=*)
                     if [ "${OPTARG}" = "apache-dir" ]; then
                         [ -n "${!OPTIND-}" ] || err "--apache-dir requires a value"
-                        APACHE_SITES_DIR_LOCAL="${!OPTIND}"
+                        APACHE_DIR_LOCAL="${!OPTIND}"
                         OPTIND=$((OPTIND+1))
                     else
-                        APACHE_SITES_DIR_LOCAL="${OPTARG#*=}"
+                        APACHE_DIR_LOCAL="${OPTARG#*=}"
                     fi
                     ;;
                 wp-root|wp-root=*)
@@ -62,7 +64,9 @@ while getopts ":-:" opt; do
                     fi
                     ;;
                 *)
-                    if cli_common_opt "${OPTARG}"; then
+                    if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
+                        :
+                    elif cli_common_opt "${OPTARG}"; then
                         :
                     else
                         usage; exit 1
@@ -75,7 +79,11 @@ while getopts ":-:" opt; do
 done
 shift $((OPTIND-1))
 
-[ $# -ge 1 ] || { usage; exit 1; }
+for domain in "$@"; do
+    DOMAINS+=("$domain")
+done
+finalize_domains DOMAINS || { usage; exit 1; }
+[ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
 
 cli_require_non_root
 
@@ -147,8 +155,8 @@ check_domain() {
         check_file_perms "$key_file" "root:ssl-cert 640" || ok=false
     fi
 
-    local http_conf="$APACHE_SITES_DIR_LOCAL/${safe}.conf"
-    local ssl_conf="$APACHE_SITES_DIR_LOCAL/${safe}-ssl.conf"
+    local http_conf="$APACHE_DIR_LOCAL/${safe}.conf"
+    local ssl_conf="$APACHE_DIR_LOCAL/${safe}-ssl.conf"
 
     if priv test -f "$http_conf"; then
         echo "HTTP vhost present: $http_conf"
@@ -223,7 +231,7 @@ if ! check_module "headers"; then
 fi
 
 overall_ok=true
-for domain in "$@"; do
+for domain in "${DOMAINS[@]}"; do
     if ! check_domain "$domain"; then
         overall_ok=false
     fi

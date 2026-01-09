@@ -15,6 +15,10 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 HTTP_TIMEOUT="${HTTP_TIMEOUT:-10}"
 API_CHECKS=false
 AUTH_MODE=""
+DOMAINS=()
+HSTS_REQUIRED="${HSTS_REQUIRED-}"
+HSTS_REQUIRED_OVERRIDE=""
+AUTH_LOADED=false
 
 usage() {
     cat <<'USAGE'
@@ -22,7 +26,9 @@ check-edge.sh - Validate Cloudflare edge behavior for domains.
 Example: check-edge.sh [OPTIONS] domain1 [domain2...]
 
 Options:
+  --domain NAME  Domain to process (repeatable; positional also accepted)
   --http-timeout SECONDS [HTTP_TIMEOUT] (default: 10)  HTTP timeout for curl
+  --hsts  Require Strict-Transport-Security header
   --api  Enable optional Cloudflare API checks (requires CF_ZONE_ID and either account API token CF_API_TOKEN or Global API Key + email CF_API_KEY+CF_API_EMAIL)
   --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
   --token TOKEN [CF_API_TOKEN]  Override CF_API_TOKEN (account API token)
@@ -38,6 +44,7 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 api) API_CHECKS=true ;;
+                hsts) HSTS_REQUIRED_OVERRIDE=true ;;
                 http-timeout=*) HTTP_TIMEOUT="${OPTARG#*=}" ;;
                 http-timeout)
                     [ -n "${!OPTIND-}" ] || err "--http-timeout requires a value"
@@ -45,7 +52,9 @@ while getopts ":-:" opt; do
                     OPTIND=$((OPTIND+1))
                     ;;
                 *)
-                    if cli_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
+                    if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
+                        :
+                    elif cli_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1
@@ -58,19 +67,40 @@ while getopts ":-:" opt; do
 done
 shift $((OPTIND-1))
 
-[ $# -ge 1 ] || { usage; exit 1; }
+for domain in "$@"; do
+    DOMAINS+=("$domain")
+done
+finalize_domains DOMAINS || { usage; exit 1; }
+[ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
+
+if [ -n "$HSTS_REQUIRED_OVERRIDE" ]; then
+    HSTS_REQUIRED=true
+elif [ -z "$HSTS_REQUIRED" ] && [ -n "${CF_AUTH_FILE-}" ]; then
+    load_cloudflare_auth "$CF_AUTH_FILE"
+    AUTH_LOADED=true
+fi
+
+case "${HSTS_REQUIRED-}" in
+    '') HSTS_REQUIRED=false ;;
+    true) HSTS_REQUIRED=true ;;
+    false) HSTS_REQUIRED=false ;;
+    *) err "HSTS_REQUIRED must be true or false" ;;
+esac
 
 require_cmd curl
 require_cmd dig
 
 if [ "$API_CHECKS" = true ]; then
-    load_cloudflare_auth
+    if [ "$AUTH_LOADED" = false ]; then
+        load_cloudflare_auth
+        AUTH_LOADED=true
+    fi
     cf_require_auth "for --api"
     [ -n "${CF_ZONE_ID:-}" ] || err "CF_ZONE_ID required for --api"
     require_cmd jq
 fi
 
-if [ "$API_CHECKS" = true ] && [ $# -gt 1 ]; then
+if [ "$API_CHECKS" = true ] && [ ${#DOMAINS[@]} -gt 1 ]; then
     log "Warning: --api uses a single CF_ZONE_ID for all domains. Ensure it matches each domain."
 fi
 
@@ -101,6 +131,12 @@ check_domain() {
         ok=false
     else
         echo "DNS A: $a_records"
+    fi
+
+    local cname_records
+    cname_records=$(dig +short CNAME "$domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    if [ -n "$cname_records" ]; then
+        echo "DNS CNAME: $cname_records"
     fi
 
     local aaaa_records
@@ -149,7 +185,6 @@ check_domain() {
         fi
 
         local required_headers=(
-            "strict-transport-security"
             "x-content-type-options"
             "x-frame-options"
             "referrer-policy"
@@ -158,6 +193,9 @@ check_domain() {
             "x-xss-protection"
             "expect-ct"
         )
+        if [ "$HSTS_REQUIRED" = true ]; then
+            required_headers+=("strict-transport-security")
+        fi
 
         local header
         for header in "${required_headers[@]}"; do
@@ -176,6 +214,10 @@ check_domain() {
                 echo "Warning: Optional header not found: ${header}"
             fi
         done
+
+        if [ "$HSTS_REQUIRED" = false ] && echo "$https_headers" | grep -qi "^strict-transport-security:"; then
+            echo "Header present: strict-transport-security"
+        fi
     fi
 
     if [ "$API_CHECKS" = true ]; then
@@ -216,7 +258,7 @@ check_domain() {
 }
 
 overall_ok=true
-for domain in "$@"; do
+for domain in "${DOMAINS[@]}"; do
     if ! check_domain "$domain"; then
         overall_ok=false
     fi

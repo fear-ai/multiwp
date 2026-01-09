@@ -11,12 +11,15 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/auth.sh"
 . "$SCRIPTS_DIR/cli.sh"
 
-CF_ZONE_NAME_OVERRIDE=""
+CF_ZONE_OVERRIDE=""
 CF_ZONE_ID_OVERRIDE=""
+CF_ZONE_INPUT_RAW=""
+CF_ZONE_API=""
 
 expects=()
 show_keys=()
 raw=false
+note() { echo "Note: $*" >&2; }
 
 usage() {
     cat <<'EOF'
@@ -27,7 +30,7 @@ Options:
   -e key=val  Check that a setting matches the expected value (repeatable)
   -s key[,key]  Show only selected settings (repeatable)
   --raw  Print raw settings JSON
-  --zone name [CF_ZONE_NAME]  Override CF_ZONE_NAME
+  --zone name [CF_ZONE]  Override CF_ZONE (zone apex, e.g., example.com)
   --zone-id id [CF_ZONE_ID]  Override CF_ZONE_ID
 
 Auth options (choose one):
@@ -56,10 +59,10 @@ while getopts ":e:s-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 raw) raw=true ;;
-                zone=*) CF_ZONE_NAME_OVERRIDE="${OPTARG#*=}" ;;
+                zone=*) CF_ZONE_OVERRIDE="${OPTARG#*=}" ;;
                 zone)
                     [ -n "${!OPTIND-}" ] || err "--zone requires a value"
-                    CF_ZONE_NAME_OVERRIDE="${!OPTIND}"
+                    CF_ZONE_OVERRIDE="${!OPTIND}"
                     OPTIND=$((OPTIND+1))
                     ;;
                 zone-id=*) CF_ZONE_ID_OVERRIDE="${OPTARG#*=}" ;;
@@ -87,7 +90,7 @@ if [ $# -gt 1 ]; then
     err "Too many arguments. Provide a single zone name, or use --zone/--zone-id."
 fi
 if [ $# -eq 1 ]; then
-    CF_ZONE_NAME_OVERRIDE="$1"
+    CF_ZONE_OVERRIDE="$1"
 fi
 
 require_cmd curl
@@ -107,27 +110,52 @@ fi
 if [ -n "$CF_ZONE_ID_OVERRIDE" ]; then
     CF_ZONE_ID="$CF_ZONE_ID_OVERRIDE"
 fi
-if [ -n "$CF_ZONE_NAME_OVERRIDE" ]; then
-    CF_ZONE_NAME="$CF_ZONE_NAME_OVERRIDE"
+if [ -n "$CF_ZONE_OVERRIDE" ]; then
+    CF_ZONE="$CF_ZONE_OVERRIDE"
+fi
+if [ -n "${CF_ZONE:-}" ]; then
+    CF_ZONE_INPUT_RAW="$CF_ZONE"
+    CF_ZONE=$(normalize_domain "$CF_ZONE_INPUT_RAW")
+    validate_domain "$CF_ZONE" || exit 1
 fi
 
 cf_require_auth "for Cloudflare settings check"
 
+if [ -n "${CF_ZONE_ID:-}" ] && [ -n "${CF_ZONE:-}" ]; then
+    note "Using CF_ZONE_ID and CF_ZONE; zone ID takes precedence for API calls"
+fi
 if [ -z "${CF_ZONE_ID:-}" ]; then
-    [ -n "${CF_ZONE_NAME:-}" ] || err "CF_ZONE_NAME or CF_ZONE_ID is required"
-    zone_resp=$(cf_api_request GET "/zones?name=${CF_ZONE_NAME}&status=active")
+    [ -n "${CF_ZONE:-}" ] || err "CF_ZONE or CF_ZONE_ID is required"
+    note "Resolving zone ID from zone name: $CF_ZONE"
+    zone_resp=$(cf_api_request GET "/zones?name=${CF_ZONE}&status=active")
     if [ "$(cf_api_success "$zone_resp")" != "true" ]; then
         err "Failed to query zones: $(cf_api_error_messages "$zone_resp")"
     fi
     CF_ZONE_ID=$(echo "$zone_resp" | jq -r '.result[0].id // empty')
-    [ -n "$CF_ZONE_ID" ] || err "No active zone found for name: $CF_ZONE_NAME"
+    [ -n "$CF_ZONE_ID" ] || err "No active zone found for name: $CF_ZONE"
+    CF_ZONE_API=$(echo "$zone_resp" | jq -r '.result[0].name // empty')
+    if [ -n "$CF_ZONE_API" ]; then
+        CF_ZONE="$CF_ZONE_API"
+    fi
 fi
 
-if [ -z "${CF_ZONE_NAME:-}" ]; then
+if [ -z "${CF_ZONE:-}" ]; then
+    note "Resolving zone name from zone ID: $CF_ZONE_ID"
     zone_detail=$(cf_api_request GET "/zones/${CF_ZONE_ID}")
     if [ "$(cf_api_success "$zone_detail")" = "true" ]; then
-        CF_ZONE_NAME=$(echo "$zone_detail" | jq -r '.result.name // empty')
+        CF_ZONE_API=$(echo "$zone_detail" | jq -r '.result.name // empty')
+        CF_ZONE="$CF_ZONE_API"
     fi
+elif [ -z "$CF_ZONE_API" ]; then
+    note "Confirming zone name for zone ID: $CF_ZONE_ID"
+    zone_detail=$(cf_api_request GET "/zones/${CF_ZONE_ID}")
+    if [ "$(cf_api_success "$zone_detail")" = "true" ]; then
+        CF_ZONE_API=$(echo "$zone_detail" | jq -r '.result.name // empty')
+    fi
+fi
+
+if [ -n "$CF_ZONE_INPUT_RAW" ] && [ -n "$CF_ZONE_API" ] && [ "$CF_ZONE_INPUT_RAW" != "$CF_ZONE_API" ]; then
+    note "Zone name differs from Cloudflare: input='$CF_ZONE_INPUT_RAW' api='$CF_ZONE_API' (case-sensitive)"
 fi
 
 settings_json=$(cf_api_request GET "/zones/${CF_ZONE_ID}/settings")
@@ -142,7 +170,7 @@ fi
 
 settings_map=$(echo "$settings_json" | jq -c '.result | map({(.id): .value}) | add')
 
-printf "Zone: %s (%s)\n" "${CF_ZONE_NAME:-unknown}" "$CF_ZONE_ID"
+printf "Zone: %s (%s)\n" "${CF_ZONE:-unknown}" "$CF_ZONE_ID"
 
 if [ "${#show_keys[@]}" -eq 0 ]; then
     if command -v sort >/dev/null 2>&1; then

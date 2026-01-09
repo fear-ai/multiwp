@@ -13,6 +13,7 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 
 MODE="auto"
 FORCE=false
+DOMAINS=()
 
 usage() {
     cat <<EOF
@@ -25,6 +26,7 @@ Modes:
   --auto (default)  Use API if credentials exist, otherwise manual
 
 Options:
+$(cli_usage_domain)
   --force  Overwrite existing files without prompt
   --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
   --token TOKEN [CF_API_TOKEN]  Override CF_API_TOKEN (account API token)
@@ -36,7 +38,7 @@ $(cli_usage_ssl_dir)
 
 Notes:
   - API mode requires an Origin CA key (preferred) or Cloudflare API credentials.
-  - Manual mode prompts for certificate and key blocks and writes into SSL_BASE.
+  - Manual mode prompts for certificate and key blocks and writes into SSL_DIR.
 EOF
 }
 
@@ -49,7 +51,7 @@ while getopts ":-:" opt; do
                 manual) MODE="manual" ;;
                 auto) MODE="auto" ;;
                 ssl-dir|ssl-dir=*)
-                    if cli_ssl_dir_opt "${OPTARG}" SSL_BASE SSL_CERT_DIR SSL_KEY_DIR "${!OPTIND-}"; then
+                    if cli_ssl_dir_opt "${OPTARG}" SSL_DIR SSL_CERT_DIR SSL_KEY_DIR "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1
@@ -57,7 +59,9 @@ while getopts ":-:" opt; do
                     ;;
                 force) FORCE=true ;;
                 *)
-                    if cli_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
+                    if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
+                        :
+                    elif cli_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
                         :
                     else
                         usage; exit 1
@@ -70,7 +74,11 @@ while getopts ":-:" opt; do
 done
 shift $((OPTIND-1))
 
-[ $# -ge 1 ] || { usage; exit 1; }
+for domain in "$@"; do
+    DOMAINS+=("$domain")
+done
+finalize_domains DOMAINS || { usage; exit 1; }
+[ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
 
 require_cmd openssl
 
@@ -210,7 +218,7 @@ install_manual() {
     validate_cert "$cert_file"
 }
 
-for domain in "$@"; do
+for domain in "${DOMAINS[@]}"; do
     domain=$(tolower "$domain")
     safe=$(safe_name "$domain")
     cert_file="$SSL_CERT_DIR/${safe}.crt"

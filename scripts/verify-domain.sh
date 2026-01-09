@@ -15,6 +15,7 @@ EDGE_ARGS=()
 ORIGIN_ARGS=()
 WP_ARGS=()
 ALLOW_ROOT=false
+DOMAINS=()
 
 usage() {
     cat <<EOF
@@ -23,7 +24,9 @@ Example: verify-domain.sh [OPTIONS] domain1 [domain2...]
 
 Options:
   --api  Enable Cloudflare API checks in check-edge.sh
-  --apache-dir DIR [APACHE_SITES_DIR] (default: /etc/apache2/sites-available)  Apache sites-available dir
+  --hsts  Require Strict-Transport-Security header in check-edge.sh
+$(cli_usage_domain)
+  --apache-dir DIR [APACHE_DIR] (default: /etc/apache2/sites-available)  Apache sites-available dir
   --http-timeout SECONDS [HTTP_TIMEOUT] (default: 10)  HTTP timeout for edge checks
 $(cli_usage_wp_root)
 $(cli_usage_ssl_dir)
@@ -38,6 +41,7 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 api) EDGE_ARGS+=("--api") ;;
+                hsts) EDGE_ARGS+=("--hsts") ;;
                 ssl-dir|ssl-dir=*)
                     if cli_ssl_dir_opt "${OPTARG}" SSL_DIR_OVERRIDE "" "" "${!OPTIND-}"; then
                         ORIGIN_ARGS+=("--ssl-dir=${SSL_DIR_OVERRIDE}")
@@ -56,9 +60,9 @@ while getopts ":-:" opt; do
                     ORIGIN_ARGS+=("--apache-dir=${APACHE_DIR_OVERRIDE}")
                     ;;
                 wp-root|wp-root=*)
-                    if cli_wp_root_opt "${OPTARG}" ROOT_OVERRIDE "${!OPTIND-}"; then
-                        WP_ARGS+=("--wp-root=${ROOT_OVERRIDE}")
-                        ORIGIN_ARGS+=("--wp-root=${ROOT_OVERRIDE}")
+                    if cli_wp_root_opt "${OPTARG}" WORDPRESS_ROOT_OVERRIDE "${!OPTIND-}"; then
+                        WP_ARGS+=("--wp-root=${WORDPRESS_ROOT_OVERRIDE}")
+                        ORIGIN_ARGS+=("--wp-root=${WORDPRESS_ROOT_OVERRIDE}")
                     else
                         usage; exit 1
                     fi
@@ -70,7 +74,9 @@ while getopts ":-:" opt; do
                     OPTIND=$((OPTIND+1))
                     ;;
                 *)
-                    if cli_common_opt "${OPTARG}"; then
+                    if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
+                        :
+                    elif cli_common_opt "${OPTARG}"; then
                         :
                     else
                         usage; exit 1
@@ -83,7 +89,11 @@ while getopts ":-:" opt; do
 done
 shift $((OPTIND-1))
 
-[ $# -ge 1 ] || { usage; exit 1; }
+for domain in "$@"; do
+    DOMAINS+=("$domain")
+done
+finalize_domains DOMAINS || { usage; exit 1; }
+[ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
 
 if [ "$ALLOW_ROOT" = true ]; then
     ORIGIN_ARGS+=("--allow-root")
@@ -101,7 +111,7 @@ if [ ! -x "$EDGE_SCRIPT" ] || [ ! -x "$ORIGIN_SCRIPT" ] || [ ! -x "$WP_SCRIPT" ]
 fi
 
 overall_ok=true
-for domain in "$@"; do
+for domain in "${DOMAINS[@]}"; do
     echo ""
     log "=============================="
     log "Verifying domain: $domain"

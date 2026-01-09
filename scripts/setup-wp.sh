@@ -88,7 +88,7 @@ priv systemctl reload apache2
 
 
 ## WordPress Configuration
-WORDPRESS_ROOT="/var/www/html/wordpress"
+WORDPRESS_ROOT="${WORDPRESS_ROOT:-/var/www/html/wordpress}"
 WP_CONFIG_PATH="$WORDPRESS_ROOT/wp-config.php"
 HTACCESS_PATH="$WORDPRESS_ROOT/.htaccess"
 

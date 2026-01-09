@@ -3,6 +3,8 @@ Date: January 8, 2026
 
 This document defines Bash development conventions for the scripts in this repository. It focuses on technique and structure for the shared script infrastructure, and it points to other documents for the full catalog of script arguments and environment variables.
 
+This document is authoritative for Bash conventions and shared helper usage. `scripts/Arguments.md` is authoritative for option and environment variable definitions, including current interface conventions and validations. `scripts/Prompt.md` encodes the standard Codex prompt format for applying header and `usage()` updates without altering behavior.
+
 ## Baseline Bash Practices
 
 The scripts prioritize predictable behavior, explicit error handling, and clear input validation. These conventions are the foundation for the shared helpers and are expected in all program scripts.
@@ -33,6 +35,7 @@ The helper libraries provide common logic for privileges, argument parsing, and 
 Key helpers:
 - `priv()` in `common.sh` centralizes privilege escalation via `sudo`.
 - `safe_name()` in `common.sh` creates safe filenames from domains.
+- `normalize_domain`, `validate_domain`, `finalize_domains`, and `validate_ipv4` in `common.sh` keep domain and IP inputs consistent and safe.
 - `cli_usage_*`, `cli_*_opt`, and `cli_cf_auth_opt` in `cli.sh` standardize argument parsing and help output.
 - `auth.sh` centralizes Cloudflare auth handling and API request helpers.
 

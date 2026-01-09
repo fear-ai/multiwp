@@ -111,26 +111,44 @@ assert_contains "$output" "--wp-root requires a value" "cli_wp_root_opt errors o
 echo "== cli_ssl_dir_opt =="
 reset_env
 OPTIND=1
-SSL_BASE=""
+SSL_DIR=""
 SSL_CERT_DIR=""
 SSL_KEY_DIR=""
-cli_ssl_dir_opt "ssl-dir=/ssl" SSL_BASE SSL_CERT_DIR SSL_KEY_DIR
-assert_equal "/ssl" "$SSL_BASE" "cli_ssl_dir_opt parses --ssl-dir=VAL"
+cli_ssl_dir_opt "ssl-dir=/ssl" SSL_DIR SSL_CERT_DIR SSL_KEY_DIR
+assert_equal "/ssl" "$SSL_DIR" "cli_ssl_dir_opt parses --ssl-dir=VAL"
 assert_equal "/ssl/certs" "$SSL_CERT_DIR" "cli_ssl_dir_opt sets cert dir"
 assert_equal "/ssl/keys" "$SSL_KEY_DIR" "cli_ssl_dir_opt sets key dir"
 assert_equal "1" "$OPTIND" "cli_ssl_dir_opt does not advance OPTIND for --ssl-dir=VAL"
 
 reset_env
 OPTIND=1
-SSL_BASE=""
+SSL_DIR=""
 SSL_CERT_DIR=""
 SSL_KEY_DIR=""
-cli_ssl_dir_opt "ssl-dir" SSL_BASE SSL_CERT_DIR SSL_KEY_DIR "/etc/ssl"
-assert_equal "/etc/ssl" "$SSL_BASE" "cli_ssl_dir_opt parses --ssl-dir VAL"
+cli_ssl_dir_opt "ssl-dir" SSL_DIR SSL_CERT_DIR SSL_KEY_DIR "/etc/ssl"
+assert_equal "/etc/ssl" "$SSL_DIR" "cli_ssl_dir_opt parses --ssl-dir VAL"
 assert_equal "2" "$OPTIND" "cli_ssl_dir_opt advances OPTIND for --ssl-dir VAL"
 
-output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/WP/multiwp/scripts/cli.sh; OPTIND=1; cli_ssl_dir_opt ssl-dir SSL_BASE' 2>&1)
+output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/WP/multiwp/scripts/cli.sh; OPTIND=1; cli_ssl_dir_opt ssl-dir SSL_DIR' 2>&1)
 assert_contains "$output" "--ssl-dir requires a value" "cli_ssl_dir_opt errors on missing value"
+
+echo "== cli_domain_opt =="
+reset_env
+OPTIND=1
+DOMAINS=()
+cli_domain_opt "domain=example.com" DOMAINS
+assert_equal "example.com" "${DOMAINS[0]-}" "cli_domain_opt parses --domain=VAL"
+assert_equal "1" "$OPTIND" "cli_domain_opt does not advance OPTIND for --domain=VAL"
+
+reset_env
+OPTIND=1
+DOMAINS=()
+cli_domain_opt "domain" DOMAINS "example.org"
+assert_equal "example.org" "${DOMAINS[0]-}" "cli_domain_opt parses --domain VAL"
+assert_equal "2" "$OPTIND" "cli_domain_opt advances OPTIND for --domain VAL"
+
+output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/WP/multiwp/scripts/cli.sh; OPTIND=1; DOMAINS=(); cli_domain_opt domain DOMAINS ""' 2>&1)
+assert_contains "$output" "--domain requires a value" "cli_domain_opt errors on missing value"
 
 echo "== cli_cf_auth_opt =="
 reset_env
