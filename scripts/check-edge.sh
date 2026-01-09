@@ -29,12 +29,18 @@ Options:
   --domain NAME  Domain to process (repeatable; positional also accepted)
   --http-timeout SECONDS [HTTP_TIMEOUT] (default: 10)  HTTP timeout for curl
   --hsts=true|false  Require Strict-Transport-Security header
-  --api  Enable optional Cloudflare API checks (requires CF_ZONE_ID and either account API token CF_API_TOKEN or Global API Key + email CF_API_KEY+CF_API_EMAIL)
+  --api  Enable Cloudflare API checks (optional; requires CF_ZONE_ID and either account API token CF_API_TOKEN or Global API Key + email CF_API_KEY+CF_API_EMAIL)
   --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
   --token TOKEN [CF_API_TOKEN]  Override CF_API_TOKEN (account API token)
   --key KEY [CF_API_KEY]  Override CF_API_KEY (global API key)
   --email EMAIL [CF_API_EMAIL]  Override CF_API_EMAIL (global API key email)
   --help  Show this help
+
+Notes:
+  - Assumes apex is canonical. Expected behavior: http://<apex> -> https://<apex> (301), http://www -> https://www or https://<apex> (301), and https://www -> https://<apex> (301).
+  - Validates WordPress asset markers (/wp-content or /wp-includes) on the canonical HTTPS response.
+  - Cloudflare API checks run only when --api is provided.
+  - Accepts a www A record when Cloudflare CNAME flattening hides the CNAME.
 USAGE
 }
 
@@ -131,60 +137,100 @@ cf_get_setting() {
 check_domain() {
     local domain
     domain=$(tolower "$1")
+    local canonical_domain="${domain#www.}"
+    local www_domain="www.${canonical_domain}"
     local ok=true
 
     echo ""
-    log "Edge checks for: $domain"
+    log "Edge checks for: $domain (canonical: $canonical_domain)"
+
+    fetch_headers() {
+        local url="$1"
+        curl -sS --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_TIMEOUT" -I "$url"
+    }
+
+    check_redirect() {
+        local url="$1"
+        local expected_prefix="$2"
+        local alt_prefix="${3-}"
+        local label="$4"
+        local headers
+        if ! headers=$(fetch_headers "$url"); then
+            echo "Error: HTTP request failed for $url"
+            ok=false
+            return
+        fi
+        local status
+        status=$(echo "$headers" | awk 'NR==1 {print $2}')
+        local location
+        location=$(echo "$headers" | awk -F': ' 'tolower($1)=="location" {print $2}' | tail -n 1 | tr -d '\r')
+        if [ "$status" = "301" ]; then
+            if [[ "$location" == "${expected_prefix}"* ]] || { [ -n "$alt_prefix" ] && [[ "$location" == "${alt_prefix}"* ]]; }; then
+                echo "${label}: 301 -> ${location}"
+            else
+                echo "Error: ${label} redirect target mismatch (Location: $location)"
+                ok=false
+            fi
+        else
+            echo "Error: ${label} expected 301 (status: ${status})"
+            ok=false
+        fi
+    }
 
     local a_records
-    a_records=$(dig +short A "$domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    a_records=$(dig +short A "$canonical_domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
     if [ -z "$a_records" ]; then
-        echo "Error: DNS A records not found for $domain"
+        echo "Error: DNS A records not found for $canonical_domain"
         ok=false
     else
         echo "DNS A: $a_records"
     fi
 
     local cname_records
-    cname_records=$(dig +short CNAME "$domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    cname_records=$(dig +short CNAME "$www_domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
     if [ -n "$cname_records" ]; then
-        echo "DNS CNAME: $cname_records"
-    fi
-
-    local aaaa_records
-    aaaa_records=$(dig +short AAAA "$domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
-    if [ -n "$aaaa_records" ]; then
-        echo "DNS AAAA: $aaaa_records"
-    fi
-
-    local http_headers
-    if ! http_headers=$(curl -sS --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_TIMEOUT" -I "http://$domain"); then
-        echo "Error: HTTP request failed for http://$domain"
-        ok=false
+        echo "DNS CNAME (www): $cname_records"
     else
-        local http_status
-        http_status=$(echo "$http_headers" | awk 'NR==1 {print $2}')
-        local http_location
-        http_location=$(echo "$http_headers" | awk -F': ' 'tolower($1)=="location" {print $2}' | tail -n 1 | tr -d '\r')
-
-        if [[ "$http_status" =~ ^30(1|2|7|8)$ ]]; then
-            if [[ "$http_location" =~ ^https:// ]]; then
-                echo "HTTP redirect: $http_status -> $http_location"
-            else
-                echo "Error: HTTP redirect does not point to HTTPS (Location: $http_location)"
-                ok=false
-            fi
+        local www_a_records
+        www_a_records=$(dig +short A "$www_domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+        if [ -n "$www_a_records" ]; then
+            echo "DNS A (www): $www_a_records"
         else
-            echo "Error: HTTP did not redirect to HTTPS (status: $http_status)"
+            echo "Error: DNS CNAME or A record not found for $www_domain"
             ok=false
         fi
     fi
 
+    local wildcard_cname
+    wildcard_cname=$(dig +short CNAME "*.${canonical_domain}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    if [ -n "$wildcard_cname" ]; then
+        echo "DNS CNAME (*): $wildcard_cname"
+    fi
+
+    local aaaa_records
+    aaaa_records=$(dig +short AAAA "$canonical_domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    if [ -n "$aaaa_records" ]; then
+        echo "DNS AAAA: $aaaa_records"
+    fi
+
+    check_redirect "http://$canonical_domain" "https://$canonical_domain" "" "HTTP apex"
+    check_redirect "http://$www_domain" "https://$canonical_domain" "https://$www_domain" "HTTP www"
+    check_redirect "https://$www_domain" "https://$canonical_domain" "" "HTTPS www"
+
     local https_headers
-    if ! https_headers=$(curl -sS --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_TIMEOUT" -I "https://$domain"); then
-        echo "Error: HTTPS request failed for https://$domain"
+    if ! https_headers=$(fetch_headers "https://$canonical_domain"); then
+        echo "Error: HTTPS request failed for https://$canonical_domain"
         ok=false
     else
+        local https_status
+        https_status=$(echo "$https_headers" | awk 'NR==1 {print $2}')
+        if [ "$https_status" = "200" ]; then
+            echo "HTTPS apex status: 200"
+        else
+            echo "Error: HTTPS apex expected 200 (status: ${https_status})"
+            ok=false
+        fi
+
         local cf_ray
         cf_ray=$(echo "$https_headers" | awk -F': ' 'tolower($1)=="cf-ray" {print $2}' | tail -n 1 | tr -d '\r')
         local server_header
@@ -229,6 +275,19 @@ check_domain() {
 
         if [ "$HSTS_REQUIRED" = false ] && echo "$https_headers" | grep -qi "^strict-transport-security:"; then
             echo "Header present: strict-transport-security"
+        fi
+    fi
+
+    local html_body
+    if ! html_body=$(curl -sS --compressed --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_TIMEOUT" -L "https://$canonical_domain"); then
+        echo "Error: HTTPS body fetch failed for https://$canonical_domain"
+        ok=false
+    else
+        if grep -qiE '/wp-(content|includes)/' <<<"$html_body"; then
+            echo "WordPress asset markers present"
+        else
+            echo "Error: WordPress asset markers not found"
+            ok=false
         fi
     fi
 

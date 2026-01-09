@@ -325,6 +325,7 @@ Environment variables:
 Notes:
 - Zone names are normalized and validated before lookup. `check-cf.sh` warns (case-sensitive) if the provided zone name differs from the Cloudflare API response.
 - DNS A and CNAME records are listed after the zone header to make edge-to-origin alignment visible alongside settings.
+- Derived keys are added for assertion and filtering: `managed_add_security_headers` and `leaked_credential_checks`.
 
 #### check-edge.sh (verification/investigation)
 
@@ -355,6 +356,18 @@ Notes:
 - `--api` performs Cloudflare setting checks using the single `CF_ZONE_ID` value; use separate runs if you need to validate multiple zones with different IDs.
 - DNS checks report A records (required) and also report CNAME and AAAA records when present.
 - `HSTS_REQUIRED` can be set to `true` or `false` in the environment or auth file to require Strict-Transport-Security without passing `--hsts=true|false`.
+- Behavioral checks assume apex is canonical, require 301 redirects for HTTP and www, and verify WordPress asset markers (`/wp-content` or `/wp-includes`) on the canonical HTTPS response.
+  - If the www CNAME is flattened by Cloudflare, the script accepts an A record for www instead of a CNAME.
+  - HTTP apex must redirect to https://<apex> with 301. HTTP www may redirect to https://www or https://<apex> (301), and HTTPS www must redirect to https://<apex> (301). HTTPS apex must return 200.
+- The script runs checks in this order:
+  1. DNS lookups (apex A, www A/CNAME, apex AAAA).
+  2. HTTP redirect checks (apex and www).
+  3. HTTPS redirect check for www.
+  4. HTTPS apex status.
+  5. Cloudflare proxy header detection.
+  6. Security headers, requiring `x-content-type-options`, `x-frame-options`, and `referrer-policy`, and conditionally `strict-transport-security` when `HSTS_REQUIRED=true`; `x-xss-protection` and `expect-ct` are treated as optional and reported.
+  7. WordPress asset marker verification in the canonical HTTPS response, requiring `/wp-content/` or `/wp-includes/` in the HTML body.
+  8. Cloudflare API checks (only when `--api` is provided).
 TODO:
 - Consider adding redirect validation options (expected status/Location) for `check-edge.sh`.
 

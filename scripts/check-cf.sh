@@ -42,6 +42,9 @@ Auth options (choose one):
   --key KEY [CF_API_KEY]  Override CF_API_KEY (global API key)
   --email EMAIL [CF_API_EMAIL]  Override CF_API_EMAIL (global API key email)
   --help  Show this help
+
+Notes:
+  - Derived keys available for -s/-e: managed_add_security_headers, leaked_credential_checks.
 EOF
 }
 
@@ -172,6 +175,33 @@ fi
 settings_map=$(echo "$settings_json" | jq -c '.result | map({(.id): .value}) | add')
 
 printf "Zone: %s (%s)\n" "${CF_ZONE:-unknown}" "$CF_ZONE_ID"
+
+# Managed headers (Cloudflare Managed Transforms)
+managed_headers_json=$(cf_api_request GET "/zones/${CF_ZONE_ID}/managed_headers")
+if [ "$(cf_api_success "$managed_headers_json")" != "true" ]; then
+    warn "Failed to query managed headers: $(cf_api_error_messages "$managed_headers_json")"
+else
+    managed_headers_status=$(echo "$managed_headers_json" | jq -r '.result.managed_response_headers[]? | select(.id=="add_security_headers") | .enabled' | head -n 1)
+    if [ -n "$managed_headers_status" ]; then
+        settings_map=$(echo "$settings_map" | jq -c --arg v "$managed_headers_status" '. + {managed_add_security_headers: $v}')
+    else
+        warn "Managed headers response missing expected key"
+    fi
+fi
+
+# WAF leaked credential checks
+leaked_json=$(cf_api_request GET "/zones/${CF_ZONE_ID}/leaked-credential-checks")
+if [ "$(cf_api_success "$leaked_json")" != "true" ]; then
+    warn "Failed to query leaked credential checks: $(cf_api_error_messages "$leaked_json")"
+else
+    leaked_status=$(echo "$leaked_json" | jq -r 'if .result.enabled == true then "true" elif .result.enabled == false then "false" else empty end')
+    if [ -n "$leaked_status" ]; then
+        settings_map=$(echo "$settings_map" | jq -c --arg v "$leaked_status" '. + {leaked_credential_checks: $v}')
+    else
+        warn "Leaked credential checks response missing expected key"
+    fi
+fi
+
 dns_types=("A" "CNAME")
 for dns_type in "${dns_types[@]}"; do
     dns_json=$(cf_api_request GET "/zones/${CF_ZONE_ID}/dns_records?type=${dns_type}&per_page=100")
