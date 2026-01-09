@@ -11,17 +11,17 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/auth.sh"
 . "$SCRIPTS_DIR/cli.sh"
 
-ACCOUNT_OVERRIDE=""
-TOKEN_OVERRIDE=""
-EMAIL_OVERRIDE=""
-KEY_OVERRIDE=""
-AUTH_FILE_OVERRIDE=""
-CF_ACCOUNT_ID_OVERRIDE=""
-CF_API_TOKEN_OVERRIDE=""
-CF_API_EMAIL_OVERRIDE=""
-CF_API_KEY_OVERRIDE=""
-CF_CA_KEY_OVERRIDE=""
-CF_ZONE_ID_OVERRIDE=""
+ACCOUNT_CLI=""
+TOKEN_CLI=""
+EMAIL_CLI=""
+KEY_CLI=""
+AUTH_FILE_CLI=""
+CF_ACCOUNT_ID_CLI=""
+CF_API_TOKEN_CLI=""
+CF_API_EMAIL_CLI=""
+CF_API_KEY_CLI=""
+CF_CA_KEY_CLI=""
+CF_ZONE_ID_CLI=""
 
 usage() {
     cat <<'EOF'
@@ -50,16 +50,16 @@ while getopts ":-:" opt; do
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
-                zone-id=*) CF_ZONE_ID_OVERRIDE="${OPTARG#*=}" ;;
+                zone-id=*) CF_ZONE_ID_CLI="${OPTARG#*=}" ;;
                 zone-id)
                     [ -n "${!OPTIND-}" ] || err "--zone-id requires a value"
-                    CF_ZONE_ID_OVERRIDE="${!OPTIND}"
+                    CF_ZONE_ID_CLI="${!OPTIND}"
                     OPTIND=$((OPTIND+1))
                     ;;
                 *)
                     if cli_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
                         if [ -n "${CF_AUTH_FILE:-}" ]; then
-                            AUTH_FILE_OVERRIDE="$CF_AUTH_FILE"
+                            AUTH_FILE_CLI="$CF_AUTH_FILE"
                         fi
                     else
                         usage; exit 1
@@ -74,18 +74,18 @@ shift $((OPTIND-1))
 
 require_cmd curl
 
-if [ -n "$AUTH_FILE_OVERRIDE" ]; then
-    load_cloudflare_auth "$AUTH_FILE_OVERRIDE"
+if [ -n "$AUTH_FILE_CLI" ]; then
+    load_cloudflare_auth "$AUTH_FILE_CLI"
 else
     load_cloudflare_auth
 fi
 
-CF_ACCOUNT_ID="${CF_ACCOUNT_ID_OVERRIDE:-${CF_ACCOUNT_ID:-}}"
-CF_API_TOKEN="${CF_API_TOKEN_OVERRIDE:-${CF_API_TOKEN:-}}"
-CF_API_EMAIL="${CF_API_EMAIL_OVERRIDE:-${CF_API_EMAIL:-}}"
-CF_API_KEY="${CF_API_KEY_OVERRIDE:-${CF_API_KEY:-}}"
-CF_CA_KEY="${CF_CA_KEY_OVERRIDE:-${CF_CA_KEY:-}}"
-CF_ZONE_ID="${CF_ZONE_ID_OVERRIDE:-${CF_ZONE_ID:-}}"
+CF_ACCOUNT_ID="${CF_ACCOUNT_ID_CLI:-${CF_ACCOUNT_ID:-}}"
+CF_API_TOKEN="${CF_API_TOKEN_CLI:-${CF_API_TOKEN:-}}"
+CF_API_EMAIL="${CF_API_EMAIL_CLI:-${CF_API_EMAIL:-}}"
+CF_API_KEY="${CF_API_KEY_CLI:-${CF_API_KEY:-}}"
+CF_CA_KEY="${CF_CA_KEY_CLI:-${CF_CA_KEY:-}}"
+CF_ZONE_ID="${CF_ZONE_ID_CLI:-${CF_ZONE_ID:-}}"
 
 token_checked=false
 key_checked=false

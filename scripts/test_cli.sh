@@ -59,7 +59,7 @@ assert_status() {
 
 reset_env() {
     unset ALLOW_ROOT
-    unset CF_AUTH_FILE CF_ACCOUNT_ID_OVERRIDE CF_API_TOKEN_OVERRIDE CF_API_EMAIL_OVERRIDE CF_API_KEY_OVERRIDE CF_CA_KEY_OVERRIDE
+    unset CF_AUTH_FILE CF_ACCOUNT_ID_CLI CF_API_TOKEN_CLI CF_API_EMAIL_CLI CF_API_KEY_CLI CF_CA_KEY_CLI
 }
 
 run_subshell() {
@@ -88,7 +88,7 @@ output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/W
 assert_contains "$output" "Do not run as root" "cli_require_non_root blocks root by default"
 
 output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/WP/multiwp/scripts/cli.sh; USER=root; ALLOW_ROOT=true; cli_require_non_root; echo ok' 2>&1)
-assert_contains "$output" "ok" "cli_require_non_root allows root when override set"
+assert_contains "$output" "ok" "cli_require_non_root allows root when priority flag set"
 
 echo "== cli_wp_root_opt =="
 reset_env
@@ -154,13 +154,13 @@ echo "== cli_cf_auth_opt =="
 reset_env
 OPTIND=1
 cli_cf_auth_opt "token=tok123" ""
-assert_equal "tok123" "$CF_API_TOKEN_OVERRIDE" "cli_cf_auth_opt parses --token=VAL"
+assert_equal "tok123" "$CF_API_TOKEN_CLI" "cli_cf_auth_opt parses --token=VAL"
 assert_equal "1" "$OPTIND" "cli_cf_auth_opt does not advance OPTIND for --token=VAL"
 
 reset_env
 OPTIND=1
 cli_cf_auth_opt "token" "tok456"
-assert_equal "tok456" "$CF_API_TOKEN_OVERRIDE" "cli_cf_auth_opt parses --token VAL"
+assert_equal "tok456" "$CF_API_TOKEN_CLI" "cli_cf_auth_opt parses --token VAL"
 assert_equal "2" "$OPTIND" "cli_cf_auth_opt advances OPTIND for --token VAL"
 
 reset_env
@@ -172,22 +172,22 @@ assert_equal "1" "$OPTIND" "cli_cf_auth_opt does not advance OPTIND for --auth-f
 reset_env
 OPTIND=1
 cli_cf_auth_opt "account" "acc123"
-assert_equal "acc123" "$CF_ACCOUNT_ID_OVERRIDE" "cli_cf_auth_opt parses --account VAL"
+assert_equal "acc123" "$CF_ACCOUNT_ID_CLI" "cli_cf_auth_opt parses --account VAL"
 
 reset_env
 OPTIND=1
 cli_cf_auth_opt "email" "user@example.com"
-assert_equal "user@example.com" "$CF_API_EMAIL_OVERRIDE" "cli_cf_auth_opt parses --email VAL"
+assert_equal "user@example.com" "$CF_API_EMAIL_CLI" "cli_cf_auth_opt parses --email VAL"
 
 reset_env
 OPTIND=1
 cli_cf_auth_opt "key" "key123"
-assert_equal "key123" "$CF_API_KEY_OVERRIDE" "cli_cf_auth_opt parses --key VAL"
+assert_equal "key123" "$CF_API_KEY_CLI" "cli_cf_auth_opt parses --key VAL"
 
 reset_env
 OPTIND=1
 cli_cf_auth_opt "ca-key" "cakey123"
-assert_equal "cakey123" "$CF_CA_KEY_OVERRIDE" "cli_cf_auth_opt parses --ca-key VAL"
+assert_equal "cakey123" "$CF_CA_KEY_CLI" "cli_cf_auth_opt parses --ca-key VAL"
 
 reset_env
 OPTIND=1

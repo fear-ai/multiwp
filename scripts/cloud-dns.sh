@@ -11,10 +11,10 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/auth.sh"
 . "$SCRIPTS_DIR/cli.sh"
 
-CF_ACCOUNT_ID_OVERRIDE=""
-CF_API_TOKEN_OVERRIDE=""
-CF_API_EMAIL_OVERRIDE=""
-CF_API_KEY_OVERRIDE=""
+CF_ACCOUNT_ID_CLI=""
+CF_API_TOKEN_CLI=""
+CF_API_EMAIL_CLI=""
+CF_API_KEY_CLI=""
 DOMAINS=()
 
 usage() {
@@ -87,17 +87,17 @@ validate_ipv4 "$IPV4" || exit 1
 
 load_cloudflare_auth
 
-if [ -n "${CF_ACCOUNT_ID_OVERRIDE:-}" ]; then
-  CF_ACCOUNT_ID="$CF_ACCOUNT_ID_OVERRIDE"
+if [ -n "${CF_ACCOUNT_ID_CLI:-}" ]; then
+  CF_ACCOUNT_ID="$CF_ACCOUNT_ID_CLI"
 fi
-if [ -n "${CF_API_TOKEN_OVERRIDE:-}" ]; then
-  CF_API_TOKEN="$CF_API_TOKEN_OVERRIDE"
+if [ -n "${CF_API_TOKEN_CLI:-}" ]; then
+  CF_API_TOKEN="$CF_API_TOKEN_CLI"
 fi
-if [ -n "${CF_API_EMAIL_OVERRIDE:-}" ]; then
-  CF_API_EMAIL="$CF_API_EMAIL_OVERRIDE"
+if [ -n "${CF_API_EMAIL_CLI:-}" ]; then
+  CF_API_EMAIL="$CF_API_EMAIL_CLI"
 fi
-if [ -n "${CF_API_KEY_OVERRIDE:-}" ]; then
-  CF_API_KEY="$CF_API_KEY_OVERRIDE"
+if [ -n "${CF_API_KEY_CLI:-}" ]; then
+  CF_API_KEY="$CF_API_KEY_CLI"
 fi
 
 [ -n "${CF_ACCOUNT_ID:-}" ] || err "CF_ACCOUNT_ID required (env or --account)"

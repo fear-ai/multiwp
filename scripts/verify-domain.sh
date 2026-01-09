@@ -43,8 +43,8 @@ while getopts ":-:" opt; do
                 api) EDGE_ARGS+=("--api") ;;
                 hsts) EDGE_ARGS+=("--hsts") ;;
                 ssl-dir|ssl-dir=*)
-                    if cli_ssl_dir_opt "${OPTARG}" SSL_DIR_OVERRIDE "" "" "${!OPTIND-}"; then
-                        ORIGIN_ARGS+=("--ssl-dir=${SSL_DIR_OVERRIDE}")
+                    if cli_ssl_dir_opt "${OPTARG}" SSL_DIR_CLI "" "" "${!OPTIND-}"; then
+                        ORIGIN_ARGS+=("--ssl-dir=${SSL_DIR_CLI}")
                     else
                         usage; exit 1
                     fi
@@ -52,17 +52,17 @@ while getopts ":-:" opt; do
                 apache-dir|apache-dir=*)
                     if [ "${OPTARG}" = "apache-dir" ]; then
                         [ -n "${!OPTIND-}" ] || err "--apache-dir requires a value"
-                        APACHE_DIR_OVERRIDE="${!OPTIND}"
+                        APACHE_DIR_CLI="${!OPTIND}"
                         OPTIND=$((OPTIND+1))
                     else
-                        APACHE_DIR_OVERRIDE="${OPTARG#*=}"
+                        APACHE_DIR_CLI="${OPTARG#*=}"
                     fi
-                    ORIGIN_ARGS+=("--apache-dir=${APACHE_DIR_OVERRIDE}")
+                    ORIGIN_ARGS+=("--apache-dir=${APACHE_DIR_CLI}")
                     ;;
                 wp-root|wp-root=*)
-                    if cli_wp_root_opt "${OPTARG}" WORDPRESS_ROOT_OVERRIDE "${!OPTIND-}"; then
-                        WP_ARGS+=("--wp-root=${WORDPRESS_ROOT_OVERRIDE}")
-                        ORIGIN_ARGS+=("--wp-root=${WORDPRESS_ROOT_OVERRIDE}")
+                    if cli_wp_root_opt "${OPTARG}" WORDPRESS_ROOT_CLI "${!OPTIND-}"; then
+                        WP_ARGS+=("--wp-root=${WORDPRESS_ROOT_CLI}")
+                        ORIGIN_ARGS+=("--wp-root=${WORDPRESS_ROOT_CLI}")
                     else
                         usage; exit 1
                     fi

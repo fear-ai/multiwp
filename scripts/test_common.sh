@@ -164,6 +164,22 @@ assert_status 1 $? "parse_bool rejects t"
 parse_bool "f" >/dev/null 2>&1
 assert_status 1 $? "parse_bool rejects f"
 
+echo "== load_dns_redirects / is_redirect_domain =="
+auth_file="$TMP_DIR/redirects.auth"
+cat <<'AUTH' > "$auth_file"
+DNS_REDIRECT="Example.com, www.example.com"
+AUTH
+unset DNS_REDIRECT
+CF_AUTH_FILE="$auth_file"
+load_dns_redirects
+assert_equal "2" "${#DNS_REDIRECT_LIST[@]}" "load_dns_redirects loads redirect list from auth file"
+assert_equal "example.com" "${DNS_REDIRECT_LIST[0]}" "load_dns_redirects normalizes redirect list"
+assert_equal "www.example.com" "${DNS_REDIRECT_LIST[1]}" "load_dns_redirects keeps list order"
+is_redirect_domain "WWW.EXAMPLE.COM"
+assert_status 0 $? "is_redirect_domain matches normalized domain"
+is_redirect_domain "other.example.com"
+assert_status 1 $? "is_redirect_domain rejects non-redirect domain"
+
 echo "== priv with sudo enabled =="
 SUDO_STUB="$TMP_DIR/sudo"
 cat <<'STUB' > "$SUDO_STUB"

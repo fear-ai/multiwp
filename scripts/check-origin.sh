@@ -32,6 +32,10 @@ $(cli_usage_wp_root)
 $(cli_usage_ssl_dir)
 $(cli_usage_common_priv)
   --help  Show this help
+
+Notes:
+  - DNS_REDIRECT lists redirect-only domains; origin checks are skipped for those domains.
+  - If DNS_REDIRECT is unset and CF_AUTH_FILE is set, DNS_REDIRECT is read from that file.
 EOF
 }
 
@@ -84,6 +88,7 @@ for domain in "$@"; do
 done
 finalize_domains DOMAINS || { usage; exit 1; }
 [ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
+load_dns_redirects || { usage; exit 1; }
 
 cli_require_non_root
 
@@ -123,6 +128,11 @@ check_domain() {
     local domain
     domain=$(tolower "$1")
     local ok=true
+
+    if is_redirect_domain "$domain"; then
+        log "Redirect-only domain; origin checks skipped: $domain"
+        return 0
+    fi
 
     echo ""
     log "Origin checks for: $domain"

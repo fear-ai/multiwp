@@ -11,8 +11,8 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/auth.sh"
 . "$SCRIPTS_DIR/cli.sh"
 
-CF_ZONE_OVERRIDE=""
-CF_ZONE_ID_OVERRIDE=""
+CF_ZONE_CLI=""
+CF_ZONE_ID_CLI=""
 CF_ZONE_INPUT_RAW=""
 CF_ZONE_API=""
 
@@ -59,16 +59,16 @@ while getopts ":e:s-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 raw) raw=true ;;
-                zone=*) CF_ZONE_OVERRIDE="${OPTARG#*=}" ;;
+                zone=*) CF_ZONE_CLI="${OPTARG#*=}" ;;
                 zone)
                     [ -n "${!OPTIND-}" ] || err "--zone requires a value"
-                    CF_ZONE_OVERRIDE="${!OPTIND}"
+                    CF_ZONE_CLI="${!OPTIND}"
                     OPTIND=$((OPTIND+1))
                     ;;
-                zone-id=*) CF_ZONE_ID_OVERRIDE="${OPTARG#*=}" ;;
+                zone-id=*) CF_ZONE_ID_CLI="${OPTARG#*=}" ;;
                 zone-id)
                     [ -n "${!OPTIND-}" ] || err "--zone-id requires a value"
-                    CF_ZONE_ID_OVERRIDE="${!OPTIND}"
+                    CF_ZONE_ID_CLI="${!OPTIND}"
                     OPTIND=$((OPTIND+1))
                     ;;
                 *)
@@ -90,7 +90,7 @@ if [ $# -gt 1 ]; then
     err "Too many arguments. Provide a single zone name, or use --zone/--zone-id."
 fi
 if [ $# -eq 1 ]; then
-    CF_ZONE_OVERRIDE="$1"
+    CF_ZONE_CLI="$1"
 fi
 
 require_cmd curl
@@ -98,20 +98,20 @@ require_cmd jq
 
 load_cloudflare_auth
 
-if [ -n "${CF_API_TOKEN_OVERRIDE:-}" ]; then
-    CF_API_TOKEN="$CF_API_TOKEN_OVERRIDE"
+if [ -n "${CF_API_TOKEN_CLI:-}" ]; then
+    CF_API_TOKEN="$CF_API_TOKEN_CLI"
 fi
-if [ -n "${CF_API_EMAIL_OVERRIDE:-}" ]; then
-    CF_API_EMAIL="$CF_API_EMAIL_OVERRIDE"
+if [ -n "${CF_API_EMAIL_CLI:-}" ]; then
+    CF_API_EMAIL="$CF_API_EMAIL_CLI"
 fi
-if [ -n "${CF_API_KEY_OVERRIDE:-}" ]; then
-    CF_API_KEY="$CF_API_KEY_OVERRIDE"
+if [ -n "${CF_API_KEY_CLI:-}" ]; then
+    CF_API_KEY="$CF_API_KEY_CLI"
 fi
-if [ -n "$CF_ZONE_ID_OVERRIDE" ]; then
-    CF_ZONE_ID="$CF_ZONE_ID_OVERRIDE"
+if [ -n "$CF_ZONE_ID_CLI" ]; then
+    CF_ZONE_ID="$CF_ZONE_ID_CLI"
 fi
-if [ -n "$CF_ZONE_OVERRIDE" ]; then
-    CF_ZONE="$CF_ZONE_OVERRIDE"
+if [ -n "$CF_ZONE_CLI" ]; then
+    CF_ZONE="$CF_ZONE_CLI"
 fi
 if [ -n "${CF_ZONE:-}" ]; then
     CF_ZONE_INPUT_RAW="$CF_ZONE"

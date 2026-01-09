@@ -29,6 +29,10 @@ $(cli_usage_domain)
 $(cli_usage_wp_root)
 $(cli_usage_common_priv)
   --help  Show this help
+
+Notes:
+  - DNS_REDIRECT lists redirect-only domains; WordPress checks are skipped for those domains.
+  - If DNS_REDIRECT is unset and CF_AUTH_FILE is set, DNS_REDIRECT is read from that file.
 EOF
 }
 
@@ -68,6 +72,7 @@ for domain in "$@"; do
 done
 finalize_domains DOMAINS || { usage; exit 1; }
 [ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
+load_dns_redirects || { usage; exit 1; }
 
 cli_require_non_root
 
@@ -103,6 +108,11 @@ check_domain_multisite() {
     local domain
     domain=$(tolower "$1")
     local ok=true
+
+    if is_redirect_domain "$domain"; then
+        log "Redirect-only domain; WordPress checks skipped: $domain"
+        return 0
+    fi
 
     echo ""
     log "WordPress checks for: $domain"
@@ -209,6 +219,11 @@ check_domain_single() {
     local domain
     domain=$(tolower "$1")
     local ok=true
+
+    if is_redirect_domain "$domain"; then
+        log "Redirect-only domain; WordPress checks skipped: $domain"
+        return 0
+    fi
 
     echo ""
     log "WordPress checks for: $domain"

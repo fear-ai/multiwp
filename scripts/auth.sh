@@ -14,12 +14,15 @@ load_cloudflare_auth() {
     local prev_zone_id="${CF_ZONE_ID-}"
     local prev_zone="${CF_ZONE-}"
     local prev_ca_key="${CF_CA_KEY-}"
+    local prev_zone_ids="${CF_ZONE_IDS-}"
 
     local first_zone_id=""
     local first_zone=""
+    local all_zone_ids=""
 
     if [ -f "$auth_file" ]; then
-        first_zone_id=$(awk -F= '/^[[:space:]]*CF_ZONE_ID=/{gsub(/^[[:space:]]*CF_ZONE_ID=|["'\'']/, "", $0); print $0; exit}' "$auth_file")
+        all_zone_ids=$(awk -F= '/^[[:space:]]*CF_ZONE_ID=/{gsub(/^[[:space:]]*CF_ZONE_ID=|["'\'']/, "", $0); print $0}' "$auth_file")
+        first_zone_id=$(printf '%s\n' "$all_zone_ids" | awk 'NF{print; exit}')
         first_zone=$(awk -F= '/^[[:space:]]*CF_ZONE=/{gsub(/^[[:space:]]*CF_ZONE=|["'\'']/, "", $0); print $0; exit}' "$auth_file")
 
         set -a
@@ -46,6 +49,11 @@ load_cloudflare_auth() {
         CF_ZONE_ID="$prev_zone_id"
     elif [ -n "$first_zone_id" ]; then
         CF_ZONE_ID="$first_zone_id"
+    fi
+    if [ -n "$prev_zone_ids" ]; then
+        CF_ZONE_IDS="$prev_zone_ids"
+    elif [ -n "$all_zone_ids" ]; then
+        CF_ZONE_IDS=$(printf '%s\n' "$all_zone_ids" | paste -sd ' ' -)
     fi
     if [ -n "$prev_zone" ]; then
         CF_ZONE="$prev_zone"
@@ -106,34 +114,34 @@ cf_auth_opt() {
     local opt="$1"
     local val="${2-}"
     case "$opt" in
-        account=*) CF_ACCOUNT_ID_OVERRIDE="${opt#*=}"; return 0 ;;
+        account=*) CF_ACCOUNT_ID_CLI="${opt#*=}"; return 0 ;;
         account)
             [ -n "$val" ] || err "account requires a value"
-            CF_ACCOUNT_ID_OVERRIDE="$val"
+            CF_ACCOUNT_ID_CLI="$val"
             return 0
             ;;
-        token=*) CF_API_TOKEN_OVERRIDE="${opt#*=}"; return 0 ;;
+        token=*) CF_API_TOKEN_CLI="${opt#*=}"; return 0 ;;
         token)
             [ -n "$val" ] || err "token requires a value"
-            CF_API_TOKEN_OVERRIDE="$val"
+            CF_API_TOKEN_CLI="$val"
             return 0
             ;;
-        email=*) CF_API_EMAIL_OVERRIDE="${opt#*=}"; return 0 ;;
+        email=*) CF_API_EMAIL_CLI="${opt#*=}"; return 0 ;;
         email)
             [ -n "$val" ] || err "email requires a value"
-            CF_API_EMAIL_OVERRIDE="$val"
+            CF_API_EMAIL_CLI="$val"
             return 0
             ;;
-        key=*) CF_API_KEY_OVERRIDE="${opt#*=}"; return 0 ;;
+        key=*) CF_API_KEY_CLI="${opt#*=}"; return 0 ;;
         key)
             [ -n "$val" ] || err "key requires a value"
-            CF_API_KEY_OVERRIDE="$val"
+            CF_API_KEY_CLI="$val"
             return 0
             ;;
-        ca-key=*) CF_CA_KEY_OVERRIDE="${opt#*=}"; return 0 ;;
+        ca-key=*) CF_CA_KEY_CLI="${opt#*=}"; return 0 ;;
         ca-key)
             [ -n "$val" ] || err "ca-key requires a value"
-            CF_CA_KEY_OVERRIDE="$val"
+            CF_CA_KEY_CLI="$val"
             return 0
             ;;
     esac

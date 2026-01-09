@@ -17,7 +17,7 @@ API_CHECKS=false
 AUTH_MODE=""
 DOMAINS=()
 HSTS_REQUIRED="${HSTS_REQUIRED-}"
-HSTS_REQUIRED_OVERRIDE=""
+HSTS_REQUIRED_CLI=""
 AUTH_LOADED=false
 
 usage() {
@@ -44,7 +44,7 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 api) API_CHECKS=true ;;
-                hsts) HSTS_REQUIRED_OVERRIDE=true ;;
+                hsts) HSTS_REQUIRED_CLI=true ;;
                 http-timeout=*) HTTP_TIMEOUT="${OPTARG#*=}" ;;
                 http-timeout)
                     [ -n "${!OPTIND-}" ] || err "--http-timeout requires a value"
@@ -73,7 +73,7 @@ done
 finalize_domains DOMAINS || { usage; exit 1; }
 [ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
 
-if [ -n "$HSTS_REQUIRED_OVERRIDE" ]; then
+if [ -n "$HSTS_REQUIRED_CLI" ]; then
     HSTS_REQUIRED=true
 elif [ -z "$HSTS_REQUIRED" ] && [ -n "${CF_AUTH_FILE-}" ]; then
     load_cloudflare_auth "$CF_AUTH_FILE"

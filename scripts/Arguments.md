@@ -1,5 +1,5 @@
 # Script Arguments and Environment Variables
-Date: January 8, 2026
+Date: January 9, 2026
 
 This document centralizes the arguments, environment variables, and defaults used by the scripts in `scripts/`. It emphasizes shared helpers and conventions while deferring to the scripts themselves for authoritative behavior.
 
@@ -62,6 +62,15 @@ Auth file:
 - Example format: `scripts/example.auth` (values intentionally blank).
 - The project expects `.auth` extensions for files under `~/.config/cloudflare/`.
 
+Precedence and layering:
+Cloudflare auth values are layered intentionally so operators can supply defaults in auth files, adjust them via environment variables for a run, and then set explicit CLI values when needed. The auth file provides baseline values, environment values take precedence, and CLI options take highest precedence. This behavior is implemented in code by `load_cloudflare_auth`, which preserves pre-existing `CF_*` environment values after sourcing the auth file.
+
+Precedence (lowest to highest):
+- Code defaults
+- Auth file values
+- Environment variables
+- CLI options
+
 Supported auth variables:
 - `CF_API_TOKEN` (account API token, account-scoped)
 - `CF_API_KEY` + `CF_API_EMAIL` (global API key, user-scoped)
@@ -69,6 +78,8 @@ Supported auth variables:
 - `CF_ACCOUNT_ID` (account identifier)
 - `CF_ZONE_ID` and `CF_ZONE` for zone-specific operations
 - `CF_ZONE_MAIN` to prefer a “main” zone name when multiple zones exist
+Notes:
+- Auth files may list multiple `CF_ZONE_ID` entries. Current scripts use the first zone ID by default and retain the full list for future multi-zone checks.
 
 Auth options accepted by scripts that use Cloudflare APIs:
 - `--auth-file PATH [CF_AUTH_FILE]`
@@ -125,6 +136,18 @@ Notes:
 - Option parsing consumes known flags only; any remaining arguments are treated as positional domains. A literal `--` is treated as a domain token and will fail validation.
 - Domains are normalized (lowercased and trimmed) before validation and de-duplication.
 
+Redirect-only domains:
+Redirect-only domains are managed with a single source of truth so validation scripts can distinguish “edge-only” domains from full origin-backed sites.
+
+Status (current behavior):
+- `DNS_REDIRECT` (env or auth file referenced by `CF_AUTH_FILE`) lists domains that should not have origin or WordPress presence.
+- `check-origin.sh` and `check-wp.sh` skip origin/WP checks for domains listed in `DNS_REDIRECT` and treat absence as expected.
+- `check-edge.sh` continues to validate redirects and security headers for all domains, including redirect-only entries.
+
+Next steps:
+- Skip edge header checks for domains listed in `DNS_REDIRECT` while still validating HTTP→HTTPS redirects and Cloudflare proxy signals.
+- Add redirect-focused provisioning support to `cloud-dns.sh` (for example, record patterns or flags suitable for edge-only redirect zones).
+
 Examples:
 - `check-edge.sh --domain example.com --domain www.example.com`
 - `check-edge.sh example.com www.example.com`
@@ -144,7 +167,7 @@ These options define where origin certificates and keys are stored. Scripts that
 
 Scripts that inspect or write vhost files use a shared Apache sites directory setting.
 
-- `--apache-dir DIR [APACHE_DIR] (default: /etc/apache2/sites-available)` overrides the Apache sites directory.
+- `--apache-dir DIR [APACHE_DIR] (default: /etc/apache2/sites-available)` sets the Apache sites directory with highest priority.
 - `APACHE_DIR` (env) defines the default Apache sites directory.
 
 ### HTTP timeouts
@@ -159,7 +182,7 @@ HTTP-oriented scripts use a shared timeout for curl requests.
 Cloudflare API scripts accept multiple credential types, each suited to a specific scope.
 
 - `--auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)` points to the auth file to load.
-- `--account ID [CF_ACCOUNT_ID]` overrides the account ID for account-scoped calls.
+- `--account ID [CF_ACCOUNT_ID]` sets the account ID with highest priority for account-scoped calls.
 - `--token TOKEN [CF_API_TOKEN]` sets the account API token.
 - `--key KEY [CF_API_KEY]` sets the global API key.
 - `--email EMAIL [CF_API_EMAIL]` sets the email for the global API key.
@@ -174,6 +197,29 @@ Notes:
 - `CF_ZONE` should be the zone apex (for example, `example.com`), not a host like `www.example.com`.
 TODO:
 - Consider adding a per-domain zone mapping for `check-edge.sh` and `verify-domain.sh` to support multi-zone runs without relying on a single `CF_ZONE_ID`.
+- Allow `cf-check.sh` to iterate `CF_ZONE_IDS` when no `--zone` or `--zone-id` is supplied.
+
+## Read-Only Scripts and Safe Options
+
+The following scripts are read-only by design and do not modify DNS, certificates, Apache configuration, or WordPress data. The listed options are safe selectors or validation settings that do not change system state.
+
+Read-only scripts:
+- `check-edge.sh` (DNS and HTTP(S) checks only; optional API reads)
+- `cf-check.sh` (Cloudflare settings reads only)
+- `verify-cf-auth.sh` (credential verification reads only)
+- `check-origin.sh` (filesystem and service inspection only)
+- `check-wp.sh` (WP-CLI reads only)
+- `verify-domain.sh` (orchestrates read-only checks)
+- `test_common.sh`, `test_cli.sh`, `test_cf.sh` (unit tests)
+
+Safe options for read-only scripts:
+- `--api` (enables Cloudflare API reads; no writes)
+- `--hsts=true|false` (changes validation expectations only)
+- `--http-timeout SECONDS`
+- `--domain NAME` / positional domains
+- `--zone-id ID`
+- `--auth-file PATH`, `--token TOKEN`, `--key KEY`, `--email EMAIL`, `--ca-key KEY`
+- `--allow-root`, `--no-sudo`
 
 ## Program Scripts by Topic and Workflow
 
@@ -242,6 +288,7 @@ Notes:
 - When `--domain` is provided, positional arguments supply `<ipv4>` only.
 - IPv4 must be publicly routable; RFC1918, link-local, loopback, and multicast ranges are rejected.
 - IPv4 addresses ending in `.0` or `.255` are accepted but produce a warning to prompt verification.
+- Planned: support marking zones as redirect-only (for example, via `DNS_REDIRECT`) so cloud-dns can provision redirect-focused DNS without origin dependencies.
 
 #### get-cert.sh (production/installation)
 
@@ -371,7 +418,7 @@ Options (script-specific):
 - `--ssl` creates SSL vhosts only.
 - `--domain NAME` adds a domain to the list (repeatable).
 - `--template PATH [TEMPLATE_DIR]` sets the templates directory.
-- `--apache-dir DIR [APACHE_DIR]` overrides the Apache sites directory.
+- `--apache-dir DIR [APACHE_DIR]` sets the Apache sites directory with highest priority.
 
 Options (shared):
 - `--wp-root PATH [WORDPRESS_ROOT]`
@@ -395,7 +442,7 @@ Arguments:
 
 Options:
 - `--domain NAME` supplies the domain as a flag.
-- `--wp-root PATH [WORDPRESS_ROOT]` overrides the WordPress root used for WP-CLI.
+- `--wp-root PATH [WORDPRESS_ROOT]` sets the WordPress root used for WP-CLI with highest priority.
 - `--help`.
 
 Environment variables:
@@ -427,7 +474,7 @@ Arguments:
 
 Options (script-specific):
 - `--domain NAME` adds a domain to the list (repeatable).
-- `--apache-dir DIR [APACHE_DIR]` overrides the Apache sites directory.
+- `--apache-dir DIR [APACHE_DIR]` sets the Apache sites directory with highest priority.
 
 Options (shared):
 - `--wp-root PATH [WORDPRESS_ROOT]`

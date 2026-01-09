@@ -43,6 +43,46 @@ parse_bool() {
     esac
 }
 
+auth_file_var() {
+    local path="$1"
+    local key="$2"
+    [ -n "$path" ] && [ -n "$key" ] || return 1
+    [ -f "$path" ] || return 1
+    awk -F= -v k="$key" '
+        $0 ~ "^[[:space:]]*"k"[[:space:]]*=" {
+            sub("^[[:space:]]*"k"[[:space:]]*=", "", $0);
+            gsub(/["'\''"]/, "", $0);
+            print $0;
+            exit
+        }' "$path"
+}
+
+load_dns_redirects() {
+    DNS_REDIRECT_LIST=()
+    local redirect="${DNS_REDIRECT-}"
+    if [ -z "$redirect" ] && [ -n "${CF_AUTH_FILE-}" ]; then
+        redirect=$(auth_file_var "$CF_AUTH_FILE" "DNS_REDIRECT")
+    fi
+    if [ -z "$redirect" ]; then
+        return 0
+    fi
+    redirect="${redirect//,/ }"
+    read -r -a DNS_REDIRECT_LIST <<<"$redirect"
+    finalize_domains DNS_REDIRECT_LIST || return 1
+}
+
+is_redirect_domain() {
+    local domain
+    domain=$(normalize_domain "$1")
+    local item
+    for item in "${DNS_REDIRECT_LIST[@]:-}"; do
+        if [ "$item" = "$domain" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 normalize_domain() {
     local domain="$1"
     domain=$(tolower "$domain")

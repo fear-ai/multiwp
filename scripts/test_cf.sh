@@ -58,8 +58,8 @@ assert_status() {
 
 reset_auth_env() {
     unset CF_API_TOKEN CF_API_KEY CF_API_EMAIL CF_CA_KEY
-    unset CF_ACCOUNT_ID CF_ZONE_ID CF_ZONE CF_ZONE_MAIN CF_AUTH_MODE
-    unset CF_API_TOKEN_OVERRIDE CF_API_KEY_OVERRIDE CF_API_EMAIL_OVERRIDE CF_ACCOUNT_ID_OVERRIDE CF_CA_KEY_OVERRIDE
+    unset CF_ACCOUNT_ID CF_ZONE_ID CF_ZONE CF_ZONE_MAIN CF_ZONE_IDS CF_AUTH_MODE
+    unset CF_API_TOKEN_CLI CF_API_KEY_CLI CF_API_EMAIL_CLI CF_ACCOUNT_ID_CLI CF_CA_KEY_CLI
     unset CF_AUTH_FILE
 }
 
@@ -105,13 +105,14 @@ load_cloudflare_auth "$auth_file"
 assert_equal "filetoken" "$CF_API_TOKEN" "load_cloudflare_auth sets token from file"
 assert_equal "fileaccount" "$CF_ACCOUNT_ID" "load_cloudflare_auth sets account id from file"
 assert_equal "filezone" "$CF_ZONE_ID" "load_cloudflare_auth sets zone id from file"
+assert_equal "filezone" "$CF_ZONE_IDS" "load_cloudflare_auth collects zone ids from file"
 
 reset_auth_env
 CF_API_TOKEN="envtoken"
 CF_ACCOUNT_ID="envaccount"
 load_cloudflare_auth "$auth_file"
-assert_equal "envtoken" "$CF_API_TOKEN" "load_cloudflare_auth preserves env token override"
-assert_equal "envaccount" "$CF_ACCOUNT_ID" "load_cloudflare_auth preserves env account override"
+assert_equal "envtoken" "$CF_API_TOKEN" "load_cloudflare_auth preserves env token priority"
+assert_equal "envaccount" "$CF_ACCOUNT_ID" "load_cloudflare_auth preserves env account priority"
 assert_equal "filezone" "$CF_ZONE_ID" "load_cloudflare_auth still loads unset vars"
 
 auth_file_multi="$TMP_DIR/auth-multi"
@@ -127,6 +128,7 @@ reset_auth_env
 load_cloudflare_auth "$auth_file_multi"
 assert_equal "zone-alpha" "$CF_ZONE_ID" "load_cloudflare_auth uses first CF_ZONE_ID by default"
 assert_equal "alpha.example" "$CF_ZONE" "load_cloudflare_auth prefers CF_ZONE_MAIN for zone name"
+assert_equal "zone-alpha zone-beta" "$CF_ZONE_IDS" "load_cloudflare_auth collects multiple zone ids"
 
 auth_file_first="$TMP_DIR/auth-first"
 cat <<'AUTH' > "$auth_file_first"
@@ -140,13 +142,16 @@ reset_auth_env
 load_cloudflare_auth "$auth_file_first"
 assert_equal "zone-first" "$CF_ZONE_ID" "load_cloudflare_auth uses first CF_ZONE_ID when no CF_ZONE_MAIN"
 assert_equal "first.example" "$CF_ZONE" "load_cloudflare_auth uses first CF_ZONE when no CF_ZONE_MAIN"
+assert_equal "zone-first zone-second" "$CF_ZONE_IDS" "load_cloudflare_auth keeps zone id list"
 
 reset_auth_env
-CF_ZONE_ID="override-zone"
-CF_ZONE="override.example"
+CF_ZONE_ID="env-zone"
+CF_ZONE="env.example"
+CF_ZONE_IDS="env-one env-two"
 load_cloudflare_auth "$auth_file_first"
-assert_equal "override-zone" "$CF_ZONE_ID" "load_cloudflare_auth preserves CF_ZONE_ID override"
-assert_equal "override.example" "$CF_ZONE" "load_cloudflare_auth preserves CF_ZONE override"
+assert_equal "env-zone" "$CF_ZONE_ID" "load_cloudflare_auth preserves CF_ZONE_ID priority"
+assert_equal "env.example" "$CF_ZONE" "load_cloudflare_auth preserves CF_ZONE priority"
+assert_equal "env-one env-two" "$CF_ZONE_IDS" "load_cloudflare_auth preserves CF_ZONE_IDS priority"
 
 auth_file_quotes="$TMP_DIR/auth-quotes"
 cat <<'AUTH' > "$auth_file_quotes"
@@ -181,23 +186,23 @@ assert_equal "$auth_file" "$CF_AUTH_FILE" "cf_auth_file parses --auth-file value
 
 reset_auth_env
 cf_auth_opt "account" "acct123"
-assert_equal "acct123" "$CF_ACCOUNT_ID_OVERRIDE" "cf_auth_opt parses --account"
+assert_equal "acct123" "$CF_ACCOUNT_ID_CLI" "cf_auth_opt parses --account"
 
 reset_auth_env
 cf_auth_opt "token" "tok123"
-assert_equal "tok123" "$CF_API_TOKEN_OVERRIDE" "cf_auth_opt parses --token"
+assert_equal "tok123" "$CF_API_TOKEN_CLI" "cf_auth_opt parses --token"
 
 reset_auth_env
 cf_auth_opt "email" "user@example.com"
-assert_equal "user@example.com" "$CF_API_EMAIL_OVERRIDE" "cf_auth_opt parses --email"
+assert_equal "user@example.com" "$CF_API_EMAIL_CLI" "cf_auth_opt parses --email"
 
 reset_auth_env
 cf_auth_opt "key" "key456"
-assert_equal "key456" "$CF_API_KEY_OVERRIDE" "cf_auth_opt parses --key"
+assert_equal "key456" "$CF_API_KEY_CLI" "cf_auth_opt parses --key"
 
 reset_auth_env
 cf_auth_opt "ca-key" "cakey789"
-assert_equal "cakey789" "$CF_CA_KEY_OVERRIDE" "cf_auth_opt parses --ca-key"
+assert_equal "cakey789" "$CF_CA_KEY_CLI" "cf_auth_opt parses --ca-key"
 
 
 echo "== cf_api_headers_mode =="

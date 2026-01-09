@@ -85,17 +85,17 @@ require_cmd openssl
 load_cloudflare_auth
 
 AUTH_MODE=""
-if [ -n "${CF_CA_KEY_OVERRIDE:-}" ]; then
-    CF_CA_KEY="$CF_CA_KEY_OVERRIDE"
+if [ -n "${CF_CA_KEY_CLI:-}" ]; then
+    CF_CA_KEY="$CF_CA_KEY_CLI"
 fi
-if [ -n "${CF_API_TOKEN_OVERRIDE:-}" ]; then
-    CF_API_TOKEN="$CF_API_TOKEN_OVERRIDE"
+if [ -n "${CF_API_TOKEN_CLI:-}" ]; then
+    CF_API_TOKEN="$CF_API_TOKEN_CLI"
 fi
-if [ -n "${CF_API_EMAIL_OVERRIDE:-}" ]; then
-    CF_API_EMAIL="$CF_API_EMAIL_OVERRIDE"
+if [ -n "${CF_API_EMAIL_CLI:-}" ]; then
+    CF_API_EMAIL="$CF_API_EMAIL_CLI"
 fi
-if [ -n "${CF_API_KEY_OVERRIDE:-}" ]; then
-    CF_API_KEY="$CF_API_KEY_OVERRIDE"
+if [ -n "${CF_API_KEY_CLI:-}" ]; then
+    CF_API_KEY="$CF_API_KEY_CLI"
 fi
 
 if [ "$MODE" = "auto" ] || [ "$MODE" = "api" ]; then
