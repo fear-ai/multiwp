@@ -16,6 +16,8 @@ CF_API_TOKEN_CLI=""
 CF_API_EMAIL_CLI=""
 CF_API_KEY_CLI=""
 DOMAINS=()
+CREATE_ONLY=false
+UPDATE_ONLY=false
 
 usage() {
   cat <<'EOF'
@@ -29,6 +31,8 @@ Creates a Cloudflare zone (full) and adds:
 
 Options:
   --domain NAME  Domain to provision (required if not given positionally)
+  --create  Only create DNS records; error if a record already exists
+  --update  Only update existing DNS records; error if a record is missing
   --account ACCOUNT_ID [CF_ACCOUNT_ID]  Cloudflare account ID
   --token TOKEN [CF_API_TOKEN]  Cloudflare account API token
   --key KEY [CF_API_KEY]  Cloudflare global API key
@@ -48,6 +52,8 @@ while getopts ":-:" opt; do
     -)
       case "${OPTARG}" in
         help) usage; exit 0 ;;
+        create) CREATE_ONLY=true ;;
+        update) UPDATE_ONLY=true ;;
         *)
           if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
             :
@@ -65,6 +71,9 @@ while getopts ":-:" opt; do
 done
 shift $((OPTIND-1))
 
+if [ "$CREATE_ONLY" = true ] && [ "$UPDATE_ONLY" = true ]; then
+  err "Use either --create or --update, not both."
+fi
 
 if [ ${#DOMAINS[@]} -eq 0 ]; then
   if [ $# -lt 2 ]; then usage; exit 1; fi
@@ -107,12 +116,17 @@ require_cmd jq
 
 log "Ensuring zone exists: $DOMAIN"
 zone_resp=$(cf_api_request GET "/zones?name=${DOMAIN}")
+if [ "$(cf_api_success "$zone_resp")" != "true" ]; then
+  err "Failed to query zones: $(cf_api_error_messages "$zone_resp")"
+fi
 zone_id=$(echo "$zone_resp" | jq -r '.result[0].id // empty')
 
 if [ -z "$zone_id" ]; then
   log "Creating zone $DOMAIN"
   create_resp=$(cf_api_request POST "/zones" "{\"name\":\"$DOMAIN\",\"account\":{\"id\":\"$CF_ACCOUNT_ID\"},\"type\":\"full\"}")
-  [ "$(echo "$create_resp" | jq -r '.success')" = "true" ] || err "Zone creation failed: $create_resp"
+  if [ "$(cf_api_success "$create_resp")" != "true" ]; then
+    err "Zone creation failed: $(cf_api_error_messages "$create_resp")"
+  fi
   zone_id=$(echo "$create_resp" | jq -r '.result.id')
   log "Zone created: $zone_id"
 else
@@ -125,19 +139,47 @@ add_dns() {
   local content="$3"
   local existing
   existing=$(cf_api_request GET "/zones/${zone_id}/dns_records?type=${type}&name=${name}")
+  if [ "$(cf_api_success "$existing")" != "true" ]; then
+    err "Failed to query DNS ${type} ${name}: $(cf_api_error_messages "$existing")"
+  fi
   local existing_content existing_id
   existing_content=$(echo "$existing" | jq -r '.result[0].content // empty')
   existing_id=$(echo "$existing" | jq -r '.result[0].id // empty')
-  if [ "$existing_content" = "$content" ] && [ -n "$existing_id" ]; then
-    log "DNS ${type} ${name} already set to ${content}"
-    return
+  local existing_count
+  existing_count=$(echo "$existing" | jq -r '.result | length')
+  if [ "$existing_count" -gt 1 ]; then
+    if [ "$type" = "A" ]; then
+      err "Multiple DNS ${type} ${name} records found; resolve duplicates before running"
+    fi
+    warn "Multiple DNS ${type} ${name} records found; using the first"
   fi
-  log "Creating DNS ${type} ${name} -> ${content}"
   local payload
   payload="{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":120,\"proxied\":true}"
+  if [ -n "$existing_id" ]; then
+    if [ "$CREATE_ONLY" = true ]; then
+      err "DNS ${type} ${name} already exists; --create forbids updates"
+    fi
+    if [ "$existing_content" = "$content" ]; then
+      log "DNS ${type} ${name} already set to ${content}"
+      return
+    fi
+    log "Updating DNS ${type} ${name} -> ${content}"
+    local update
+    update=$(cf_api_request PUT "/zones/${zone_id}/dns_records/${existing_id}" "$payload")
+    if [ "$(cf_api_success "$update")" != "true" ]; then
+      err "Failed to update DNS record: $(cf_api_error_messages "$update")"
+    fi
+    return
+  fi
+  if [ "$UPDATE_ONLY" = true ]; then
+    err "DNS ${type} ${name} missing; --update forbids create"
+  fi
+  log "Creating DNS ${type} ${name} -> ${content}"
   local create
   create=$(cf_api_request POST "/zones/${zone_id}/dns_records" "$payload")
-  [ "$(echo "$create" | jq -r '.success')" = "true" ] || err "Failed to create DNS record: $create"
+  if [ "$(cf_api_success "$create")" != "true" ]; then
+    err "Failed to create DNS record: $(cf_api_error_messages "$create")"
+  fi
 }
 
 add_dns "A" "$DOMAIN" "$IPV4"

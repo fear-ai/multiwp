@@ -7,6 +7,7 @@ Option,Scripts
 --auto,get-cert.sh
 --autosite,check-wp.sh
 --ca-key,get-cert.sh;verify-cf-auth.sh
+--create,cloud-dns.sh
 --domain,apache-vhost.sh;check-edge.sh;check-origin.sh;check-wp.sh;cloud-dns.sh;get-cert.sh;install-site.sh;verify-domain.sh
 --email,check-cf.sh;check-edge.sh;cloud-dns.sh;get-cert.sh;verify-cf-auth.sh
 --force,get-cert.sh
@@ -24,6 +25,7 @@ Option,Scripts
 --ssl-dir,apache-vhost.sh;check-origin.sh;get-cert.sh;verify-domain.sh
 --template,apache-vhost.sh
 --token,check-cf.sh;check-edge.sh;cloud-dns.sh;get-cert.sh;verify-cf-auth.sh
+--update,cloud-dns.sh
 --wp-root,apache-vhost.sh;check-origin.sh;check-wp.sh;install-site.sh;verify-domain.sh
 --zone,check-cf.sh
 --zone-id,check-cf.sh;verify-cf-auth.sh

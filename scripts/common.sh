@@ -13,6 +13,7 @@ TEMPLATE_DIR="${TEMPLATE_DIR:-$ROOT_DIR/templates}"
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 err() { echo "[$(date +%H:%M:%S)] ERROR: $*" >&2; exit 1; }
+warn() { echo "[$(date +%H:%M:%S)] Warning: $*" >&2; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || err "Missing command: $1"; }
 
 # priv() is a thin wrapper for running commands with sudo.

@@ -155,6 +155,9 @@ fi
 
 log "  Verified: $SITE_INFO"
 
+# Emit a stable key=value line for automation and CSV capture.
+echo "BLOG_ID=$BLOG_ID"
+
 # Final summary
 log ""
 log "SUCCESS: Site added to multisite network"

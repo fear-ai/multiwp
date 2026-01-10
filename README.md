@@ -1,5 +1,5 @@
 # WordPress Multisite Tools
-Date: January 5, 2026
+Date: January 10, 2026
 
 ## Introduction
 This project implements a WordPress multisite network in subdirectory mode with apex domain mapping. Each client site uses its own domain while sharing WordPress core, themes, and plugins for operational efficiency. Cloudflare provides DNS, CDN, and edge security.
@@ -66,7 +66,7 @@ API issuance + install:
   Assumes WordPress multisite is already installed; see Operations.md for the setup sequence.
 
 #### Verify
-`curl -I https://domain.com`
+`./scripts/verify-domain.sh domain.com`
 
 ### Query Multisite Setup
 
@@ -82,7 +82,7 @@ Default example: `/var/www/html/wordpress` (Ubuntu default is `/var/www/html`, w
 
 #### Check DNS resolution
 `dig +short domain.com`
-  [Look for `cf-ray` header]
+`curl -I https://domain.com | grep -i cf-ray`
 
 ---
 
@@ -95,6 +95,7 @@ The documents below describe different layers of the system and are intended to 
 - `Operations.md`: Consolidated runbook for Cloudflare, origin, and WordPress operations in dependency order; use the relevant sections as needed.
 - `scripts/Shell.md`: Conventions for writing scripts in this repository and using shared helpers.
 - `scripts/Scripts.md`: Authoritative script interfaces, options, and environment variables.
+- `CloudflareMCP.md` (optional): MCP portal access, OAuth flows, and how to validate Cloudflare-hosted MCP servers.
 - `MULTI.md` (optional): Strategic architecture decisions, tradeoffs, and future work.
 - `DNSTerms.md` (optional): DNS and Cloudflare terminology reference.
 
@@ -107,6 +108,7 @@ multiwp/
 ├── MULTI.md                       # Architecture & strategic decisions
 ├── Operations.md                  # Consolidated operational runbook
 ├── DNSTerms.md                    # DNS & Cloudflare terminology
+├── CloudflareMCP.md               # Cloudflare MCP notes and validation steps
 ├── scripts/
 │   [list below]
 ├── templates/
@@ -121,13 +123,14 @@ Program scripts (alphabetical):
 | Script | Purpose | Status |
 |--------|---------|--------|
 | `apache-vhost.sh` | Create Apache HTTP + SSL vhosts for domain | Exercised |
-| `check-cf.sh` | Inspect Cloudflare zone settings via API | Not exercised |
+| `check-cf.sh` | Inspect Cloudflare zone settings via API | Exercised |
 | `check-edge.sh` | Validate Cloudflare edge behavior and headers | Exercised |
 | `check-origin.sh` | Validate origin certs, vhosts, and Apache health | Exercised |
 | `check-wp.sh` | Validate multisite mappings and site URLs | Exercised |
 | `cloud-dns.sh` | Create Cloudflare zone + DNS records via API | Not exercised |
 | `get-cert.sh` | Issue or install Cloudflare Origin cert/key (API or manual) | Not exercised |
 | `install-site.sh` | Add site to WordPress multisite, map to apex domain | Exercised |
+| `mcp-cf.sh` | Validate Cloudflare MCP portal access | Exercised |
 | `setup-wp.sh` | Bootstrap WordPress multisite base configuration | Not exercised |
 | `verify-cf-auth.sh` | Validate Cloudflare credentials (token/key) | Exercised |
 | `verify-domain.sh` | End-to-end validation (edge, origin, WP) | Exercised |
@@ -138,6 +141,7 @@ Helper scripts:
 | `common.sh` | Shared library functions (sourced by other scripts) | Library |
 | `auth.sh` | Cloudflare auth helpers and API request utilities | Library |
 | `cli.sh` | Shared option parsing helpers | Library |
+| `mcp.sh` | MCP helper functions | Library |
 
 Test scripts:
 | Script | Purpose | Status |
@@ -145,6 +149,7 @@ Test scripts:
 | `test_common.sh` | Unit tests for shared helpers | Test |
 | `test_cf.sh` | Unit tests for Cloudflare helpers | Test |
 | `test_cli.sh` | Unit tests for CLI helpers | Test |
+| `test_mcp.sh` | Unit tests for MCP helpers | Test |
 
 #### Test scripts syntax
 `bash -n scripts/*.sh`
@@ -179,9 +184,9 @@ See Operations.md for the authoritative mapping checks and troubleshooting flow.
 ---
 
 ## External Documentation
-- [WordPress Multisite Guide](https://developer.wordpress.org/advanced-administration/multisite/create-network)
-- [WP-CLI Handbook](https://make.wordpress.org/cli/handbook/)
-- [Cloudflare SSL Modes](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/)
-- [Cloudflare Origin Certificates](https://developers.cloudflare.com/ssl/origin-configuration/origin-ca/)
+- [WordPress Multisite Guide] https://developer.wordpress.org/advanced-administration/multisite/create-network
+- [WP-CLI Handbook] https://make.wordpress.org/cli/handbook/
+- [Cloudflare SSL Modes] https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/
+- [Cloudflare Origin Certificates] https://developers.cloudflare.com/ssl/origin-configuration/origin-ca/
 
 ---

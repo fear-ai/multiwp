@@ -248,6 +248,8 @@ Arguments:
 
 Options (script-specific):
 - `--domain NAME` supplies the domain as an option.
+- `--create` only creates DNS records; errors if a record already exists.
+- `--update` only updates existing DNS records; errors if a record is missing.
 
 Options (auth and shared):
 - `--account ACCOUNT_ID [CF_ACCOUNT_ID]`
@@ -262,8 +264,10 @@ Environment variables:
 
 Notes:
 - When `--domain` is provided, positional arguments supply `<ipv4>` only.
+- By default, DNS records are created or updated to avoid duplicates.
 - IPv4 must be publicly routable; RFC1918, link-local, loopback, and multicast ranges are rejected.
 - IPv4 addresses ending in `.0` or `.255` are accepted but produce a warning to prompt verification.
+- `warn()` is used for non-fatal conditions; `err()` emits a fatal error and exits non-zero when a required condition fails. In `cloud-dns.sh`, duplicate A records are fatal while duplicate CNAME records emit a warning.
 - Planned: support marking zones as redirect-only (for example, via `DNS_REDIRECT`) so cloud-dns can provision redirect-focused DNS without origin dependencies.
 
 #### get-cert.sh (production/installation)

@@ -1,10 +1,10 @@
-# Cloudflare MCP Notes
+# Cloudflare MCP
 Date: 2026-01-09
 
-## Purpose and Use Case
+## Purpose
 This document captures what Cloudflare’s MCP offering provides today, how it relates to the WordPress multisite hosting workflow in this repository, and where MCP does or does not replace the Cloudflare REST API calls used by our scripts. It is written for system administrators who own Cloudflare configuration and need a clear view of which MCP features can help with verification, documentation access, or monitoring, versus which configuration tasks still rely on REST API calls.
 
-## Summary: Fit for This Project
+## Summary
 Cloudflare’s managed MCP servers are service-specific and appear to focus on data access, documentation, or service telemetry. Based on the published catalog (inference), there is no general “Cloudflare API MCP” server that would replace zone and settings endpoints such as `/zones/{id}/settings`, so our scripts must continue to use the REST API for configuration validation. MCP can still add value in two areas (inference):
 
 - Documentation access and workflow assistance via the Cloudflare Docs MCP server.
@@ -12,62 +12,47 @@ Cloudflare’s managed MCP servers are service-specific and appear to focus on d
 
 In other words, MCP is a complementary layer for knowledge and monitoring workflows, not a replacement for the configuration checks in `check-cf.sh`, `cloud-dns.sh`, or `get-cert.sh`.
 
-## Managed MCP Servers (Cloudflare-Hosted)
-Cloudflare publishes a catalog of managed MCP servers and their endpoints. The catalog includes a range of servers such as Documentation, Observability, Radar, DNS Analytics, GraphQL, AI Gateway, and others. The catalog documentation states that managed MCP servers can read configurations, process data, make suggestions, and (when authorized) make changes. This indicates that MCP can support write operations, but only when the specific server and OAuth scopes allow it.
+## Managed Servers
+Cloudflare publishes a catalog of managed MCP servers and their endpoints. The catalog includes a range of servers such as Documentation, Observability, Radar, DNS Analytics, GraphQL, AI Gateway, and others. The catalog documentation states that managed MCP servers can read configurations, process data, make suggestions, and (when authorized) make changes. This indicates that MCP can support write operations, but only when the specific server and OAuth scopes allow it. [Cloudflare MCP servers] https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/
 
 For our use case, the list is notable for what it does not include: there is no general “Cloudflare API” MCP server or a zone-settings server that exposes the same capabilities as the REST API endpoints used by our scripts. That means MCP cannot currently serve as a drop-in replacement for zone settings, DNS record management, or certificate provisioning.
 
-References:
-- Cloudflare managed MCP servers catalog: `https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/`
+## Portals
+Cloudflare’s MCP portals are configured through Cloudflare Access (Cloudflare One). Portal configuration requires an active domain on Cloudflare (full or partial/CNAME setup) and a configured identity provider in Cloudflare Zero Trust. The portal documentation focuses on OAuth-based access through Cloudflare Access policies. It does not explicitly describe plan gating for MCP portals, so availability must be verified in the dashboard for a Free-tier account. [MCP portals] https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/mcp-servers/mcp-portals/ [Linked apps] https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/linked-apps/
 
-## MCP Portals and Access Integration
-Cloudflare’s MCP portals are configured through Cloudflare Access (Cloudflare One). Portal configuration requires an active domain on Cloudflare (full or partial/CNAME setup) and a configured identity provider in Cloudflare Zero Trust. The portal documentation focuses on OAuth-based access through Cloudflare Access policies. It does not explicitly describe plan gating for MCP portals, so availability must be verified in the dashboard for a Free-tier account.
-
-References:
-- MCP portals: `https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/mcp-servers/mcp-portals/`
-- Linked apps and OAuth for MCP: `https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/linked-apps/`
-
-## Free Tier: What Is Clear vs. Ambiguous
+## Free Tier
 The documentation is explicit that Cloudflare Access has a Free plan, and that Identity Provider integration is supported for any Zero Trust tier, including Free. The account limits page lists MCP portal and MCP server count limits but does not associate them with plan tiers beyond noting that Enterprise can raise limits. The MCP portals documentation itself does not state plan requirements. As a result, MCP portals and OAuth-based MCP access are best treated as “possible but unconfirmed” for Free tier until verified in the dashboard.
 
 Definite (explicitly documented):
-- Cloudflare Access Free plan exists.
-- Identity provider integration (example: Okta) is available on any Zero Trust tier, including Free.
-- Account limits include MCP portals and MCP servers per portal, with Enterprise able to raise limits.
+- Cloudflare Access Free plan exists. [Access Free plan] https://www.cloudflare.com/zero-trust/products/access/
+- Identity provider integration (example: Okta) is available on any Zero Trust tier, including Free. [Okta IdP integration] https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/okta/
+- Account limits include MCP portals and MCP servers per portal, with Enterprise able to raise limits. [Access account limits] https://developers.cloudflare.com/cloudflare-one/account-limits/
 
 Ambiguous (not explicitly documented for Free tier):
 - MCP portals availability and functionality on Free tier.
 - OAuth-protected MCP servers availability and functionality on Free tier.
 - Access logging and observability coverage for MCP portals on Free tier.
 
-References:
-- Cloudflare Access Free plan: `https://www.cloudflare.com/zero-trust/products/access/`
-- IdP integration prerequisites (Okta example): `https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/okta/`
-- Access account limits: `https://developers.cloudflare.com/cloudflare-one/account-limits/`
-
-## Verification Procedures (Manual)
-The most reliable confirmation is to verify feature availability in the dashboard for the account in question. The following checks are straightforward and match the documented UI paths:
+## Verification
+The most reliable confirmation is to verify feature availability in the dashboard for the account in question. The following checks are straightforward and match the documented UI paths in the MCP portals guide. [MCP portals] https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/mcp-servers/mcp-portals/
 
 1. Verify “AI controls” section exists in Zero Trust and that MCP server and MCP portal creation are available.
 2. Create a small test MCP portal and confirm it can be reached at `/mcp` using an MCP client.
 3. Add a simple IdP integration (or verify it exists already) and ensure Access policies can be applied.
 4. If any of these steps prompt for an upgrade or are hidden, treat MCP portal functionality as unavailable on that tier.
 
-References:
-- MCP portal creation and connection steps: `https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/mcp-servers/mcp-portals/`
-
 ## MCP Authentication
 Cloudflare’s MCP portals sit on top of Cloudflare Access and OAuth. In practice, this means MCP clients handle OAuth on the user’s behalf, and bearer tokens are typically not exposed unless you build a custom client. This section consolidates the recommended OAuth path, client choices, and developer tooling in a structure that we can later lift into a standalone document if needed.
 
-### OAuth (token handling, transmission, storage, lifetime)
-The recommended OAuth path for this project is to use a real MCP client that implements the Access login and per-server OAuth prompts. Cloudflare’s portal workflow explicitly expects an Access login, followed by per-server authorization. This keeps us aligned with Access policy enforcement and avoids brittle token scraping.
+### OAuth
+The recommended OAuth path for this project is to use a real MCP client that implements the Access login and per-server OAuth prompts. Cloudflare’s portal workflow explicitly expects an Access login, followed by per-server authorization. This keeps us aligned with Access policy enforcement and avoids brittle token scraping. [MCP portals] https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/mcp-servers/mcp-portals/
 
 Availability of settings and writes:
-- Cloudflare’s managed MCP server catalog states that MCP servers can read configurations, process data, make suggestions, and make changes when authorized. This indicates that write operations are possible on a per-server basis, but it does not enumerate which fields are writable. Treat write availability as server- and scope-dependent and verify per endpoint before attempting changes.
+- Cloudflare’s managed MCP server catalog states that MCP servers can read configurations, process data, make suggestions, and make changes when authorized. This indicates that write operations are possible on a per-server basis, but it does not enumerate which fields are writable. Treat write availability as server- and scope-dependent and verify per endpoint before attempting changes. [Cloudflare MCP servers] https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/
 
 Token handling and acquisition:
 - MCP clients initiate the OAuth flow by navigating to the portal URL, which triggers Access login and returns an authorization flow to the client.
-- Cloudflare’s OAuth guide for MCP clients describes a programmatic flow in which a client receives an `authUrl`, the user completes authorization, and the client finishes the connection.
+- Cloudflare’s OAuth guide for MCP clients describes a programmatic flow in which a client receives an `authUrl`, the user completes authorization, and the client finishes the connection. [OAuth guide] https://developers.cloudflare.com/agents/guides/oauth-mcp-client/
 
 Token transmission and storage:
 - When a bearer token is available, `mcp-cf.sh` can submit it in the Authorization header for portal probing.
@@ -75,63 +60,39 @@ Token transmission and storage:
 - If you build a custom client, capture the token in your client code and store it in a short-lived location (environment variable, temporary file with `chmod 600`, or in-memory cache). Do not commit tokens to the repo.
 
 Token lifetime:
-- Access issues both a global session token and an application token (JWT). The application token controls access to the specific Access application and defaults to 24 hours, with configuration allowing immediate timeout up to one month.
-- The Access authorization cookie (`CF_Authorization`) follows the same session duration rules, which affects how long an MCP client can reuse a browser session.
-
-References:
-- MCP portal connection steps (Access login and portal authentication): `https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/mcp-servers/mcp-portals/`
-- OAuth flow guide for MCP clients: `https://developers.cloudflare.com/agents/guides/oauth-mcp-client/`
-- Access session management (global/app/policy session durations and defaults): `https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/`
-- Access authorization cookie expiration details: `https://developers.cloudflare.com/cloudflare-one/identity/authorization-cookie/`
+- Access issues both a global session token and an application token (JWT). The application token controls access to the specific Access application and defaults to 24 hours, with configuration allowing immediate timeout up to one month. [Session management] https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/
+- The Access authorization cookie (`CF_Authorization`) follows the same session duration rules, which affects how long an MCP client can reuse a browser session. [Session management] https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/ [Authorization cookie] https://developers.cloudflare.com/cloudflare-one/identity/authorization-cookie/
 
 Lower-priority auth mechanisms for this project:
-- Linked Apps (bearer token forwarding to a self-hosted app): `https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/linked-apps/`
-- Service tokens for Access Service Auth: `https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/`
+- Linked Apps (bearer token forwarding to a self-hosted app). [Linked apps] https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/linked-apps/
+- Service tokens for Access Service Auth. [Service tokens] https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/
 
-### Clients (relevance and feasibility)
+### Clients
 The list below is intentionally tight and focused on our use case: portal verification and eventual automation. Each item is rated for relevance and feasibility.
 
 1) MCP Inspector
    - Relevance: High. It is the standard open-source tool for MCP testing and is explicitly supported in Cloudflare portal docs.
-   - Feasibility: High. Runs via `npx` and has a Docker image; no repo clone needed.
+   - Feasibility: High. Runs via `npx` and has a Docker image; no repo clone needed. [MCP Inspector] https://github.com/modelcontextprotocol/inspector [MCP portals] https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/mcp-servers/mcp-portals/
 
 2) `mcp-remote`
    - Relevance: High. Cloudflare recommends it when clients do not fully support remote MCP.
-   - Feasibility: High. Runs via `npx` and fits the same operational model as Inspector.
+   - Feasibility: High. Runs via `npx` and fits the same operational model as Inspector. [Remote MCP guide] https://developers.cloudflare.com/agents/guides/remote-mcp-server/ [MCP portals] https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/mcp-servers/mcp-portals/
 
 3) MCP SDKs (TypeScript or Python)
    - Relevance: Medium-High. Best option for custom automation and token capture, but more build effort.
-   - Feasibility: Medium. Requires app code and OAuth handling.
+   - Feasibility: Medium. Requires app code and OAuth handling. [MCP SDK] https://modelcontextprotocol.io/docs/sdk [TypeScript SDK] https://github.com/modelcontextprotocol/typescript-sdk [Python SDK] https://modelcontextprotocol.github.io/python-sdk/
 
-References:
-- MCP portal docs (Inspector and `mcp-remote` are supported): `https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/mcp-servers/mcp-portals/`
-- MCP Inspector requirements and Docker image: `https://github.com/modelcontextprotocol/inspector`
-- Remote MCP server guide with `mcp-remote`: `https://developers.cloudflare.com/agents/guides/remote-mcp-server/`
-- SDK overview: `https://modelcontextprotocol.io/docs/sdk`
-- TypeScript SDK (official): `https://github.com/modelcontextprotocol/typescript-sdk`
-- TypeScript SDK (npm): `https://www.npmjs.com/package/%40modelcontextprotocol/sdk/v/1.3.0`
-- Python SDK (official): `https://modelcontextprotocol.github.io/python-sdk/`
+### Tooling
+Tooling here means runtime services and development libraries that support MCP client work, not the ready-to-run client programs listed above.
 
-### Developer Tooling (dominant alternatives)
-This section focuses on what a developer would actually install or run to work with MCP portals today.
+Runtime environment:
+- Node.js for Inspector and `mcp-remote` execution, or Docker if Node.js is not available. [MCP Inspector] https://github.com/modelcontextprotocol/inspector
 
-Inspector (Node or Docker):
-- `npx @modelcontextprotocol/inspector` for local testing with a browser UI.
-- Docker image available for environments without Node.js.
+Libraries:
+- TypeScript SDK for custom clients and token capture workflows. [TypeScript SDK] https://github.com/modelcontextprotocol/typescript-sdk
+- Python SDK for scripting and integration work. [Python SDK] https://modelcontextprotocol.github.io/python-sdk/
 
-`mcp-remote`:
-- `npx mcp-remote` to bridge or proxy MCP connections for clients lacking remote transport support.
-
-SDK-based clients:
-- TypeScript SDK for custom clients or automation when OAuth tokens must be captured and reused.
-- Python SDK for scripting and integration work that benefits from native Python tooling.
-
-References:
-- MCP Inspector requirements and Docker image: `https://github.com/modelcontextprotocol/inspector`
-- Remote MCP server guide with `mcp-remote`: `https://developers.cloudflare.com/agents/guides/remote-mcp-server/`
-- SDK overview: `https://modelcontextprotocol.io/docs/sdk`
-
-### Validation and Iteration Steps (for this repository)
+### Validation
 The steps below validate our assumptions and drive iteration on `mcp-cf.sh`, with a specific focus on MCP Inspector as the OAuth client. Each step includes concrete actions and expected observable signals.
 
 1) Validate an open portal with MCP Inspector
@@ -140,10 +101,8 @@ The steps below validate our assumptions and drive iteration on `mcp-cf.sh`, wit
      - Run: `npx @modelcontextprotocol/inspector`
      - Connect to: `https://docs.mcp.cloudflare.com/mcp`
    - Expected signals:
-     - Inspector connects without Access login prompts.
-     - The tool list loads and remains available.
-     - `./scripts/mcp-cf.sh --portal-url https://docs.mcp.cloudflare.com/mcp` outputs:
-       - `PASS: Portal reachable (authorized)`
+     - Inspector loads the tool list without Access prompts.
+     - `./scripts/mcp-cf.sh --portal-url https://docs.mcp.cloudflare.com/mcp` returns `PASS: Portal reachable (authorized)`.
 
 2) Validate a protected portal with MCP Inspector
    - Purpose: Confirm Access login and OAuth prompts are enforced for protected portals.
@@ -151,9 +110,8 @@ The steps below validate our assumptions and drive iteration on `mcp-cf.sh`, wit
      - Connect Inspector to: `https://dns-analytics.mcp.cloudflare.com/mcp`
      - Complete Access login and OAuth authorization.
    - Expected signals:
-     - The tool list appears only after login/authorization.
-     - `./scripts/mcp-cf.sh --portal-url https://dns-analytics.mcp.cloudflare.com/mcp` (no token) outputs:
-       - `WARN: Portal reachable; authorization required`
+     - Tool list appears only after Access login and OAuth.
+     - `./scripts/mcp-cf.sh --portal-url https://dns-analytics.mcp.cloudflare.com/mcp` returns `WARN: Portal reachable; authorization required`.
 
 3) Capture and reuse a bearer token
    - Purpose: Determine whether token reuse is practical for automation.
@@ -164,7 +122,7 @@ The steps below validate our assumptions and drive iteration on `mcp-cf.sh`, wit
      - Run:
        - `./scripts/mcp-cf.sh --portal-url https://dns-analytics.mcp.cloudflare.com/mcp --bearer "$MCP_BEARER_TOKEN"`
    - Expected signals:
-     - `PASS: Portal reachable (authorized)`
+     - `./scripts/mcp-cf.sh --portal-url https://dns-analytics.mcp.cloudflare.com/mcp --bearer "$MCP_BEARER_TOKEN"` returns `PASS: Portal reachable (authorized)`.
 
 4) Validate token lifetime settings (short + long)
    - Purpose: Confirm Access session duration controls portal token validity.
@@ -174,9 +132,9 @@ The steps below validate our assumptions and drive iteration on `mcp-cf.sh`, wit
      - Set the maximum allowed duration in the same settings location.
      - Obtain a new token and verify it remains valid across repeated checks.
    - Expected signals:
-     - After expiry: `WARN: Portal reachable; authorization required`
-     - Before expiry: `PASS: Portal reachable (authorized)`
-   - Reference: Access session management documentation: `https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/`
+     - After expiry, `mcp-cf.sh` returns `WARN: Portal reachable; authorization required`.
+     - Before expiry, `mcp-cf.sh` returns `PASS: Portal reachable (authorized)`.
+   - Reference: Access session management documentation. [Session management] https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/
 
 5) Iterate `mcp-cf.sh` for authenticated access
    - Purpose: Convert validated authentication behavior into reliable checks and tests.
@@ -188,7 +146,7 @@ The steps below validate our assumptions and drive iteration on `mcp-cf.sh`, wit
      - Report `401` vs `403` vs `5xx` with distinct, actionable messages.
      - Extend `test_mcp.sh` to cover new options and JSON output parsing.
 
-## Proposal: Script Structure for MCP Verification and Operations
+## Script Plan
 A dedicated MCP script can help record evidence, reduce manual re-checks, and (when permitted) carry out limited write operations. Because Cloudflare does not document public API endpoints for MCP portal management, the script must be explicit about which steps are automated, which are manual, and which require elevated permissions or an OAuth-based MCP session.
 
 Proposed script: `scripts/mcp-cf.sh` (verification + optional write operations)
@@ -217,9 +175,9 @@ Implementation details (current script):
   - `0` for a clean run with no hard failures.
   - Non-zero if required inputs are missing or a mandatory check fails.
 - Read-only scope (substantiation):
-  - `mcp-cf.sh` performs only a JSON-RPC `initialize` POST to the portal URL (see “Portal Connectivity Check” under “Read-Only Capabilities”).
+  - `mcp-cf.sh` performs only a JSON-RPC `initialize` POST to the portal URL (see “Portal Connectivity Check” under “Read Only”).
   - It does not call Cloudflare REST API endpoints or modify Access configuration.
-  - No mutation endpoints or write operations are present in the script or in the “Optional Write Operations” section below.
+  - No mutation endpoints or write operations are present in the script or in the “Write Ops” section below.
 
 Usage examples (Stage 1):
 - `./scripts/mcp-cf.sh --catalog`
@@ -227,7 +185,7 @@ Usage examples (Stage 1):
 - `./scripts/mcp-cf.sh --portal-url https://mcp.example.com/mcp --bearer $TOKEN`
 - `MCP_PORTAL_URL=mcp.example.com ./scripts/mcp-cf.sh`
 
-### Read-Only Capabilities (baseline)
+### Read Only
 - Preflight
   - Require `curl` only when probing a portal URL.
   - Load `CF_AUTH_FILE` and apply CLI overrides for future REST API use.
@@ -245,7 +203,7 @@ Usage examples (Stage 1):
 - Output Format
   - For each check, emit PASS/WARN/INFO with a short reason and the command or UI path to repeat.
 
-### Optional Write Operations (guarded)
+### Write Ops
 Write operations should be disabled by default and require an explicit `--apply` (or `--write`) flag plus a confirmation step. This prevents accidental changes when using the script for routine verification.
 
 Planned write operations (only if Cloudflare exposes documented APIs or MCP methods):
@@ -255,7 +213,7 @@ Planned write operations (only if Cloudflare exposes documented APIs or MCP meth
 
 These operations should only be implemented once Cloudflare documents the relevant endpoints or MCP tooling, and the script should refuse to run them without explicit confirmation.
 
-## Staged Implementation Plan
+## Implementation
 The MCP workflow is new and still evolving in Cloudflare’s documentation, so the script should be delivered in small, safe stages.
 
 Stage 1: Read-only verification (now)
