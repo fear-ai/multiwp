@@ -22,6 +22,7 @@ CF_API_EMAIL_CLI=""
 CF_API_KEY_CLI=""
 CF_CA_KEY_CLI=""
 CF_ZONE_ID_CLI=""
+CF_AUTH_CLI=""
 
 usage() {
     cat <<'EOF'
@@ -29,13 +30,14 @@ verify-cf-auth.sh - Validate Cloudflare API credentials.
 Example: verify-cf-auth.sh [OPTIONS]
 
 Options:
-  --zone-id ID [CF_ZONE_ID]  Override CF_ZONE_ID for Origin CA key verification
+  --zone-id ID [CF_ZONE_ID]  Set CF_ZONE_ID for Origin CA key verification
   --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
-  --account ID [CF_ACCOUNT_ID]  Override CF_ACCOUNT_ID for account API token verification
-  --token TOKEN [CF_API_TOKEN]  Override CF_API_TOKEN (account API token)
-  --email EMAIL [CF_API_EMAIL]  Override CF_API_EMAIL (global API key email)
-  --key KEY [CF_API_KEY]  Override CF_API_KEY (global API key)
-  --ca-key KEY [CF_CA_KEY]  Override CF_CA_KEY (Origin CA User Service Key)
+  --auth token|key|auto [CF_AUTH]  Select which credential to use (default: auto)
+  --account ID [CF_ACCOUNT_ID]  Set CF_ACCOUNT_ID for account API token verification
+  --token TOKEN [CF_API_TOKEN]  Set CF_API_TOKEN (account API token)
+  --email EMAIL [CF_API_EMAIL]  Set CF_API_EMAIL (global API key email)
+  --key KEY [CF_API_KEY]  Set CF_API_KEY (global API key)
+  --ca-key KEY [CF_CA_KEY]  Set CF_CA_KEY (Origin CA User Service Key)
   --help  Show this help
 
 Notes:
@@ -72,20 +74,25 @@ while getopts ":-:" opt; do
 done
 shift $((OPTIND-1))
 
-require_cmd curl
+require_cmds curl
 
 if [ -n "$AUTH_FILE_CLI" ]; then
-    load_cloudflare_auth "$AUTH_FILE_CLI"
+    cf_init_auth "$AUTH_FILE_CLI"
 else
-    load_cloudflare_auth
+    cf_init_auth
 fi
 
-CF_ACCOUNT_ID="${CF_ACCOUNT_ID_CLI:-${CF_ACCOUNT_ID:-}}"
-CF_API_TOKEN="${CF_API_TOKEN_CLI:-${CF_API_TOKEN:-}}"
-CF_API_EMAIL="${CF_API_EMAIL_CLI:-${CF_API_EMAIL:-}}"
-CF_API_KEY="${CF_API_KEY_CLI:-${CF_API_KEY:-}}"
-CF_CA_KEY="${CF_CA_KEY_CLI:-${CF_CA_KEY:-}}"
-CF_ZONE_ID="${CF_ZONE_ID_CLI:-${CF_ZONE_ID:-}}"
+AUTH_PREF="$(tolower "${CF_AUTH:-auto}")"
+case "$AUTH_PREF" in
+    ""|auto|token|key) ;;
+    *) err "Invalid auth mode: $AUTH_PREF (expected token, key, or auto)" ;;
+esac
+if [ "$AUTH_PREF" = "token" ] && [ -z "${CF_API_TOKEN:-}" ]; then
+    err "CF_API_TOKEN required when --auth token is set"
+fi
+if [ "$AUTH_PREF" = "key" ] && { [ -z "${CF_API_KEY:-}" ] || [ -z "${CF_API_EMAIL:-}" ]; }; then
+    err "CF_API_KEY+CF_API_EMAIL required when --auth key is set"
+fi
 
 token_checked=false
 key_checked=false
@@ -94,7 +101,7 @@ token_ok=false
 key_ok=false
 ca_ok=false
 
-if [ -n "${CF_API_TOKEN:-}" ]; then
+if [ -n "${CF_API_TOKEN:-}" ] && [ "$AUTH_PREF" != "key" ]; then
     token_checked=true
     if [ -n "${CF_ACCOUNT_ID:-}" ]; then
         log "Verifying account API token against account $CF_ACCOUNT_ID"
@@ -125,7 +132,7 @@ if [ -n "${CF_API_TOKEN:-}" ]; then
     fi
 fi
 
-if [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ]; then
+if [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ] && [ "$AUTH_PREF" != "token" ]; then
     key_checked=true
     log "Verifying global API key for $CF_API_EMAIL"
     key_resp=$(cf_api_request_mode key GET "/user")

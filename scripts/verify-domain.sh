@@ -24,10 +24,10 @@ Example: verify-domain.sh [OPTIONS] domain1 [domain2...]
 
 Options:
   --api  Enable Cloudflare API checks in check-edge.sh
-  --hsts=true|false  Require Strict-Transport-Security header in check-edge.sh
+$(cli_usage_hsts)
 $(cli_usage_domain)
-  --apache-dir DIR [APACHE_DIR] (default: /etc/apache2/sites-available)  Apache sites-available dir
-  --http-timeout SECONDS [HTTP_TIMEOUT] (default: 10)  HTTP timeout for edge checks
+$(cli_usage_apache_dir)
+$(cli_usage_http_timeout)
 $(cli_usage_wp_root)
 $(cli_usage_ssl_dir)
 $(cli_usage_common_priv)
@@ -41,19 +41,12 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 api) EDGE_ARGS+=("--api") ;;
-                hsts=*)
-                    if ! HSTS_CLI="$(parse_bool "${OPTARG#*=}")"; then
-                        err "--hsts must be true or false"
+                hsts|hsts=*)
+                    if cli_hsts_opt "${OPTARG}" HSTS_CLI "${!OPTIND-}"; then
+                        EDGE_ARGS+=("--hsts=${HSTS_CLI}")
+                    else
+                        usage; exit 1
                     fi
-                    EDGE_ARGS+=("--hsts=${HSTS_CLI}")
-                    ;;
-                hsts)
-                    [ -n "${!OPTIND-}" ] || err "--hsts requires true or false"
-                    if ! HSTS_CLI="$(parse_bool "${!OPTIND}")"; then
-                        err "--hsts must be true or false"
-                    fi
-                    EDGE_ARGS+=("--hsts=${HSTS_CLI}")
-                    OPTIND=$((OPTIND+1))
                     ;;
                 ssl-dir|ssl-dir=*)
                     if cli_ssl_dir_opt "${OPTARG}" SSL_DIR_CLI "" "" "${!OPTIND-}"; then
@@ -63,14 +56,11 @@ while getopts ":-:" opt; do
                     fi
                     ;;
                 apache-dir|apache-dir=*)
-                    if [ "${OPTARG}" = "apache-dir" ]; then
-                        [ -n "${!OPTIND-}" ] || err "--apache-dir requires a value"
-                        APACHE_DIR_CLI="${!OPTIND}"
-                        OPTIND=$((OPTIND+1))
+                    if cli_apache_dir_opt "${OPTARG}" APACHE_DIR_CLI "${!OPTIND-}"; then
+                        ORIGIN_ARGS+=("--apache-dir=${APACHE_DIR_CLI}")
                     else
-                        APACHE_DIR_CLI="${OPTARG#*=}"
+                        usage; exit 1
                     fi
-                    ORIGIN_ARGS+=("--apache-dir=${APACHE_DIR_CLI}")
                     ;;
                 wp-root|wp-root=*)
                     if cli_wp_root_opt "${OPTARG}" WORDPRESS_ROOT_CLI "${!OPTIND-}"; then
@@ -80,11 +70,12 @@ while getopts ":-:" opt; do
                         usage; exit 1
                     fi
                     ;;
-                http-timeout=*) EDGE_ARGS+=("--http-timeout=${OPTARG#*=}") ;;
-                http-timeout)
-                    [ -n "${!OPTIND-}" ] || err "--http-timeout requires a value"
-                    EDGE_ARGS+=("--http-timeout=${!OPTIND}")
-                    OPTIND=$((OPTIND+1))
+                http-timeout|http-timeout=*)
+                    if cli_http_timeout_opt "${OPTARG}" HTTP_TIMEOUT_CLI "${!OPTIND-}"; then
+                        EDGE_ARGS+=("--http-timeout=${HTTP_TIMEOUT_CLI}")
+                    else
+                        usage; exit 1
+                    fi
                     ;;
                 *)
                     if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then

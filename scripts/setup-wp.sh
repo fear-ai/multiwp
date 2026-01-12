@@ -64,14 +64,7 @@ if [ "$USER" = "root" ]; then
     err "Do not run as root. Run as a user with sudo privileges."
 fi
 
-require_cmd grep
-require_cmd tee
-require_cmd a2enmod
-require_cmd apache2ctl
-require_cmd systemctl
-require_cmd wget
-require_cmd tar
-require_cmd sed
+require_cmds grep tee a2enmod apache2ctl systemctl wget tar sed
 
 ## Apache Configuratione
 echo "Step 2: Configuring Apache prerequisites"

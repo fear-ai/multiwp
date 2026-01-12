@@ -15,6 +15,7 @@ CF_ACCOUNT_ID_CLI=""
 CF_API_TOKEN_CLI=""
 CF_API_EMAIL_CLI=""
 CF_API_KEY_CLI=""
+CF_AUTH_CLI=""
 DOMAINS=()
 CREATE_ONLY=false
 UPDATE_ONLY=false
@@ -37,6 +38,7 @@ Options:
   --token TOKEN [CF_API_TOKEN]  Cloudflare account API token
   --key KEY [CF_API_KEY]  Cloudflare global API key
   --email EMAIL [CF_API_EMAIL]  Cloudflare API key email
+  --auth token|key|auto [CF_AUTH]  Select which credential to use (default: auto)
   --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
   --help  Show this help
 
@@ -95,24 +97,11 @@ IPV4="$1"
 validate_ipv4 "$IPV4" || exit 1
 
 load_cloudflare_auth
-
-if [ -n "${CF_ACCOUNT_ID_CLI:-}" ]; then
-  CF_ACCOUNT_ID="$CF_ACCOUNT_ID_CLI"
-fi
-if [ -n "${CF_API_TOKEN_CLI:-}" ]; then
-  CF_API_TOKEN="$CF_API_TOKEN_CLI"
-fi
-if [ -n "${CF_API_EMAIL_CLI:-}" ]; then
-  CF_API_EMAIL="$CF_API_EMAIL_CLI"
-fi
-if [ -n "${CF_API_KEY_CLI:-}" ]; then
-  CF_API_KEY="$CF_API_KEY_CLI"
-fi
+cf_init_auth
 
 [ -n "${CF_ACCOUNT_ID:-}" ] || err "CF_ACCOUNT_ID required (env or --account)"
 cf_require_auth
-require_cmd curl
-require_cmd jq
+require_cmds curl jq
 
 log "Ensuring zone exists: $DOMAIN"
 zone_resp=$(cf_api_request GET "/zones?name=${DOMAIN}")

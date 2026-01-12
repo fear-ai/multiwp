@@ -9,9 +9,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/common.sh"
 . "$SCRIPTS_DIR/cli.sh"
-require_cmd a2ensite
-require_cmd apache2ctl
-require_cmd systemctl
+require_cmds a2ensite apache2ctl systemctl
 
 # Configuration (overridable via args/env)
 TEMPLATE_DIR="${TEMPLATE_DIR}"
@@ -36,7 +34,7 @@ Options:
   --ssl  Create only SSL virtual hosts
 $(cli_usage_domain)
   --template PATH [TEMPLATE_DIR] (default: $TEMPLATE_DIR)  Templates directory
-  --apache-dir DIR [APACHE_DIR] (default: /etc/apache2/sites-available)  Apache sites-available dir
+$(cli_usage_apache_dir)
 $(cli_usage_wp_root)
 $(cli_usage_ssl_dir)
   --help  Show this help
@@ -209,11 +207,12 @@ while getopts ":-:" opt; do
                     TEMPLATE_DIR="${!OPTIND}"
                     OPTIND=$((OPTIND+1))
                     ;;
-                apache-dir=*) APACHE_DIR="${OPTARG#*=}" ;;
-                apache-dir)
-                    [ -n "${!OPTIND-}" ] || err "--apache-dir requires a value"
-                    APACHE_DIR="${!OPTIND}"
-                    OPTIND=$((OPTIND+1))
+                apache-dir|apache-dir=*)
+                    if cli_apache_dir_opt "${OPTARG}" APACHE_DIR "${!OPTIND-}"; then
+                        :
+                    else
+                        usage; exit 1
+                    fi
                     ;;
                 ssl-dir|ssl-dir=*)
                     if cli_ssl_dir_opt "${OPTARG}" SSL_DIR SSL_CERT_DIR SSL_KEY_DIR "${!OPTIND-}"; then

@@ -19,6 +19,7 @@ APPLY=false
 YES=false
 PORTAL_URL=""
 MCP_BEARER_TOKEN="${MCP_BEARER_TOKEN-}"
+CF_AUTH_CLI=""
 
 usage() {
     cat <<'USAGE'
@@ -32,10 +33,11 @@ Options:
   --apply  Enable write operations (not implemented)
   --yes  Confirm write operations (required with --apply)
   --auth-file PATH [CF_AUTH_FILE]  Auth file to load
-  --token TOKEN [CF_API_TOKEN]  Override CF_API_TOKEN (account API token)
-  --key KEY [CF_API_KEY]  Override CF_API_KEY (global API key)
-  --email EMAIL [CF_API_EMAIL]  Override CF_API_EMAIL (global API key email)
-  --account ID [CF_ACCOUNT_ID]  Override CF_ACCOUNT_ID
+  --auth token|key|auto [CF_AUTH]  Select which credential to use (default: auto)
+  --token TOKEN [CF_API_TOKEN]  Set CF_API_TOKEN (account API token)
+  --key KEY [CF_API_KEY]  Set CF_API_KEY (global API key)
+  --email EMAIL [CF_API_EMAIL]  Set CF_API_EMAIL (global API key email)
+  --account ID [CF_ACCOUNT_ID]  Set CF_ACCOUNT_ID
   --help  Show this help
 
 Notes:
@@ -120,22 +122,7 @@ if [ -n "${MCP_PORTAL_URL-}" ] && [ -z "$PORTAL_URL" ]; then
     PORTAL_URL="$MCP_PORTAL_URL"
 fi
 
-if [ -n "${CF_AUTH_FILE-}" ]; then
-    load_cloudflare_auth "$CF_AUTH_FILE"
-fi
-
-if [ -n "${CF_ACCOUNT_ID_CLI-}" ]; then
-    CF_ACCOUNT_ID="$CF_ACCOUNT_ID_CLI"
-fi
-if [ -n "${CF_API_TOKEN_CLI-}" ]; then
-    CF_API_TOKEN="$CF_API_TOKEN_CLI"
-fi
-if [ -n "${CF_API_EMAIL_CLI-}" ]; then
-    CF_API_EMAIL="$CF_API_EMAIL_CLI"
-fi
-if [ -n "${CF_API_KEY_CLI-}" ]; then
-    CF_API_KEY="$CF_API_KEY_CLI"
-fi
+cf_init_auth "${CF_AUTH_FILE-}"
 
 if [ "$APPLY" = true ]; then
     [ "$YES" = true ] || err "--apply requires --yes"
@@ -149,7 +136,7 @@ fi
 overall_ok=true
 
 if [ -n "$PORTAL_URL" ]; then
-    require_cmd curl
+    require_cmds curl
     if ! PORTAL_URL="$(mcp_normalize_portal_url "$PORTAL_URL")"; then
         err "Invalid portal URL"
     fi

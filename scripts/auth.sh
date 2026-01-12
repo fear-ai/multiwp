@@ -11,6 +11,7 @@ load_cloudflare_auth() {
     local prev_api_token="${CF_API_TOKEN-}"
     local prev_api_email="${CF_API_EMAIL-}"
     local prev_api_key="${CF_API_KEY-}"
+    local prev_auth="${CF_AUTH-}"
     local prev_zone_id="${CF_ZONE_ID-}"
     local prev_zone="${CF_ZONE-}"
     local prev_ca_key="${CF_CA_KEY-}"
@@ -45,6 +46,9 @@ load_cloudflare_auth() {
     if [ -n "$prev_api_key" ]; then
         CF_API_KEY="$prev_api_key"
     fi
+    if [ -n "$prev_auth" ]; then
+        CF_AUTH="$prev_auth"
+    fi
     if [ -n "$prev_zone_id" ]; then
         CF_ZONE_ID="$prev_zone_id"
     elif [ -n "$first_zone_id" ]; then
@@ -53,7 +57,19 @@ load_cloudflare_auth() {
     if [ -n "$prev_zone_ids" ]; then
         CF_ZONE_IDS="$prev_zone_ids"
     elif [ -n "$all_zone_ids" ]; then
-        CF_ZONE_IDS=$(printf '%s\n' "$all_zone_ids" | paste -sd ' ' -)
+        CF_ZONE_IDS=$(printf '%s\n' "$all_zone_ids" | paste -sd ',' -)
+    fi
+    if [ -n "${CF_ZONE_IDS:-}" ] && [[ "$CF_ZONE_IDS" == *","* ]]; then
+        if declare -f parse_comma_list >/dev/null 2>&1; then
+            local zone_list=()
+            if parse_comma_list "$CF_ZONE_IDS" zone_list "CF_ZONE_IDS"; then
+                CF_ZONE_IDS=$(IFS=','; printf '%s' "${zone_list[*]}")
+            else
+                err "CF_ZONE_IDS contains empty values"
+            fi
+        else
+            err "CF_ZONE_IDS uses commas but parse_comma_list is unavailable"
+        fi
     fi
     if [ -n "$prev_zone" ]; then
         CF_ZONE="$prev_zone"
@@ -67,16 +83,46 @@ load_cloudflare_auth() {
     fi
 }
 
+cf_parse_auth_mode() {
+    local val="${1-}"
+    val="$(tolower "$val")"
+    case "$val" in
+        auto|token|key) printf '%s' "$val"; return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 cf_auth_mode() {
-    if [ -n "${CF_API_TOKEN:-}" ]; then
-        CF_AUTH_MODE="token"
-        return 0
+    local mode="${CF_AUTH:-auto}"
+    if [ -n "$mode" ]; then
+        mode="$(tolower "$mode")"
     fi
-    if [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ]; then
-        CF_AUTH_MODE="key"
-        return 0
-    fi
-    return 1
+    case "$mode" in
+        ""|auto)
+            if [ -n "${CF_API_TOKEN:-}" ]; then
+                CF_AUTH_MODE="token"
+                return 0
+            fi
+            if [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ]; then
+                CF_AUTH_MODE="key"
+                return 0
+            fi
+            return 1
+            ;;
+        token)
+            [ -n "${CF_API_TOKEN:-}" ] || err "CF_API_TOKEN required when --auth token is set"
+            CF_AUTH_MODE="token"
+            return 0
+            ;;
+        key)
+            [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ] || err "CF_API_KEY+CF_API_EMAIL required when --auth key is set"
+            CF_AUTH_MODE="key"
+            return 0
+            ;;
+        *)
+            err "Invalid auth mode: $mode (expected token, key, or auto)"
+            ;;
+    esac
 }
 
 cf_require_auth() {
@@ -114,6 +160,17 @@ cf_auth_opt() {
     local opt="$1"
     local val="${2-}"
     case "$opt" in
+        auth=*)
+            val="$(cf_parse_auth_mode "${opt#*=}")" || err "auth requires token, key, or auto"
+            CF_AUTH_CLI="$val"
+            return 0
+            ;;
+        auth)
+            [ -n "$val" ] || err "auth requires token, key, or auto"
+            val="$(cf_parse_auth_mode "$val")" || err "auth requires token, key, or auto"
+            CF_AUTH_CLI="$val"
+            return 0
+            ;;
         account=*) CF_ACCOUNT_ID_CLI="${opt#*=}"; return 0 ;;
         account)
             [ -n "$val" ] || err "account requires a value"
@@ -148,6 +205,27 @@ cf_auth_opt() {
     return 1
 }
 
+cf_init_auth() {
+    local auth_file="${1-}"
+
+    if [ -n "$auth_file" ]; then
+        CF_AUTH_FILE="$auth_file"
+        load_cloudflare_auth "$auth_file"
+    else
+        load_cloudflare_auth
+    fi
+
+    [ -n "${CF_AUTH_CLI:-}" ] && CF_AUTH="$CF_AUTH_CLI"
+    [ -n "${CF_API_TOKEN_CLI:-}" ] && CF_API_TOKEN="$CF_API_TOKEN_CLI"
+    [ -n "${CF_API_KEY_CLI:-}" ] && CF_API_KEY="$CF_API_KEY_CLI"
+    [ -n "${CF_API_EMAIL_CLI:-}" ] && CF_API_EMAIL="$CF_API_EMAIL_CLI"
+    [ -n "${CF_CA_KEY_CLI:-}" ] && CF_CA_KEY="$CF_CA_KEY_CLI"
+    [ -n "${CF_ACCOUNT_ID_CLI:-}" ] && CF_ACCOUNT_ID="$CF_ACCOUNT_ID_CLI"
+    [ -n "${CF_ZONE_ID_CLI:-}" ] && CF_ZONE_ID="$CF_ZONE_ID_CLI"
+    [ -n "${CF_ZONE_CLI:-}" ] && CF_ZONE="$CF_ZONE_CLI"
+    return 0
+}
+
 cf_api_headers_mode() {
     local mode="$1"
     CF_API_HEADERS=("-H" "Content-Type: application/json")
@@ -177,11 +255,63 @@ cf_api_request_mode() {
     curl -sS -X "$method" "${CF_API_HEADERS[@]}" "$CF_API_BASE$path"
 }
 
+cf_api_request_mode_checked() {
+    local mode="$1"
+    local method="$2"
+    local path="$3"
+    local data="${4-}"
+    local tmp status curl_status=0
+    cf_api_headers_mode "$mode"
+    tmp=$(mktemp)
+    if [ -n "$data" ]; then
+        if ! status=$(curl -sS -o "$tmp" -w '%{http_code}' -X "$method" "${CF_API_HEADERS[@]}" --data "$data" "$CF_API_BASE$path"); then
+            curl_status=$?
+        fi
+    else
+        if ! status=$(curl -sS -o "$tmp" -w '%{http_code}' -X "$method" "${CF_API_HEADERS[@]}" "$CF_API_BASE$path"); then
+            curl_status=$?
+        fi
+    fi
+    CF_API_LAST_STATUS="${status:-000}"
+    CF_API_LAST_BODY=$(cat "$tmp")
+    rm -f "$tmp"
+    CF_API_LAST_SUCCESS="$(cf_api_success "$CF_API_LAST_BODY")"
+    if [ "$curl_status" -ne 0 ]; then
+        return 1
+    fi
+    if [ "$CF_API_LAST_STATUS" -lt 200 ] || [ "$CF_API_LAST_STATUS" -ge 300 ]; then
+        return 1
+    fi
+    if [ "$CF_API_LAST_SUCCESS" != "true" ]; then
+        return 1
+    fi
+    return 0
+}
+
 cf_api_request() {
     local method="$1"
     local path="$2"
     local data="${3-}"
+    local checked="${4-}"
     cf_auth_mode || err "Account API token (CF_API_TOKEN) or Global API Key + email (CF_API_KEY+CF_API_EMAIL) required"
+    if [ "$checked" = "checked" ]; then
+        local body
+        if ! cf_api_request_mode_checked "$CF_AUTH_MODE" "$method" "$path" "$data"; then
+            body="${CF_API_LAST_BODY-}"
+            local errors
+            errors=$(cf_api_error_messages "$body")
+            if [ -n "$errors" ]; then
+                fail "Cloudflare API request failed: $errors"
+            else
+                fail "Cloudflare API request failed (status ${CF_API_LAST_STATUS:-unknown})"
+            fi
+            echo "$body"
+            return 1
+        fi
+        body="${CF_API_LAST_BODY-}"
+        echo "$body"
+        return 0
+    fi
     cf_api_request_mode "$CF_AUTH_MODE" "$method" "$path" "$data"
 }
 

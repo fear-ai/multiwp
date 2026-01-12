@@ -14,6 +14,7 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 MODE="auto"
 FORCE=false
 DOMAINS=()
+CF_AUTH_CLI=""
 
 usage() {
     cat <<EOF
@@ -28,11 +29,12 @@ Modes:
 Options:
 $(cli_usage_domain)
   --force  Overwrite existing files without prompt
+  --auth token|key|auto [CF_AUTH]  Select which credential to use (default: auto)
   --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
-  --token TOKEN [CF_API_TOKEN]  Override CF_API_TOKEN (account API token)
-  --key KEY [CF_API_KEY]  Override CF_API_KEY (global API key)
-  --email EMAIL [CF_API_EMAIL]  Override CF_API_EMAIL (global API key email)
-  --ca-key KEY [CF_CA_KEY]  Override CF_CA_KEY (Origin CA User Service Key)
+  --token TOKEN [CF_API_TOKEN]  Set CF_API_TOKEN (account API token)
+  --key KEY [CF_API_KEY]  Set CF_API_KEY (global API key)
+  --email EMAIL [CF_API_EMAIL]  Set CF_API_EMAIL (global API key email)
+  --ca-key KEY [CF_CA_KEY]  Set CF_CA_KEY (Origin CA User Service Key)
 $(cli_usage_ssl_dir)
   --help  Show this help
 
@@ -80,23 +82,11 @@ done
 finalize_domains DOMAINS || { usage; exit 1; }
 [ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
 
-require_cmd openssl
+require_cmds openssl
 
-load_cloudflare_auth
+cf_init_auth
 
 AUTH_MODE=""
-if [ -n "${CF_CA_KEY_CLI:-}" ]; then
-    CF_CA_KEY="$CF_CA_KEY_CLI"
-fi
-if [ -n "${CF_API_TOKEN_CLI:-}" ]; then
-    CF_API_TOKEN="$CF_API_TOKEN_CLI"
-fi
-if [ -n "${CF_API_EMAIL_CLI:-}" ]; then
-    CF_API_EMAIL="$CF_API_EMAIL_CLI"
-fi
-if [ -n "${CF_API_KEY_CLI:-}" ]; then
-    CF_API_KEY="$CF_API_KEY_CLI"
-fi
 
 if [ "$MODE" = "auto" ] || [ "$MODE" = "api" ]; then
     if [ -n "${CF_CA_KEY:-}" ]; then
@@ -116,8 +106,7 @@ fi
 
 if [ "$MODE" = "api" ]; then
     [ -n "$AUTH_MODE" ] || err "API auth required: Origin CA key (CF_CA_KEY), account API token (CF_API_TOKEN), or global API key + email (CF_API_KEY+CF_API_EMAIL)"
-    require_cmd curl
-    require_cmd jq
+    require_cmds curl jq
 fi
 
 priv mkdir -p "$SSL_CERT_DIR" "$SSL_KEY_DIR"

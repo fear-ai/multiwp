@@ -14,7 +14,9 @@ TEMPLATE_DIR="${TEMPLATE_DIR:-$ROOT_DIR/templates}"
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 err() { echo "[$(date +%H:%M:%S)] ERROR: $*" >&2; exit 1; }
 warn() { echo "[$(date +%H:%M:%S)] Warning: $*" >&2; }
+fail() { echo "[$(date +%H:%M:%S)] FAIL: $*" >&2; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || err "Missing command: $1"; }
+require_cmds() { for cmd in "$@"; do require_cmd "$cmd"; done; }
 
 # priv() is a thin wrapper for running commands with sudo.
 # Set SUDO_BIN to an empty string to disable sudo while keeping the call pattern.
@@ -33,6 +35,27 @@ priv() {
 
 tolower() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 safe_name() { echo "$1" | sed 's/[.-]//g'; }
+parse_comma_list() {
+    local raw="${1-}"
+    local -n out="$2"
+    local label="${3:-list}"
+    out=()
+    IFS=',' read -r -a parts <<<"$raw"
+    local ok=true
+    local part trimmed
+    for part in "${parts[@]}"; do
+        trimmed="${part#"${part%%[![:space:]]*}"}"
+        trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+        if [ -z "$trimmed" ]; then
+            fail "${label} contains an empty value"
+            ok=false
+            continue
+        fi
+        out+=("$trimmed")
+    done
+    $ok || return 1
+    return 0
+}
 parse_bool() {
     local raw="${1:-}"
     local val
@@ -60,17 +83,50 @@ auth_file_var() {
 
 load_dns_redirects() {
     DNS_REDIRECT_LIST=()
-    local redirect="${DNS_REDIRECT-}"
-    if [ -z "$redirect" ] && [ -n "${CF_AUTH_FILE-}" ]; then
-        redirect=$(auth_file_var "$CF_AUTH_FILE" "DNS_REDIRECT")
+    declare -gA DNS_REDIRECT_TARGETS=()
+    local csv="${DOMAINS_CSV:-$ROOT_DIR/domains.csv}"
+    [ -f "$csv" ] || return 0
+    local redirect_list=""
+    if command -v python3 >/dev/null 2>&1; then
+        redirect_list=$(python3 - "$csv" <<'PY'
+import csv
+import sys
+
+path = sys.argv[1]
+with open(path, newline="") as fh:
+    reader = csv.DictReader(fh)
+    for row in reader:
+        site_type = (row.get("site_type") or "").strip().lower()
+        if site_type.startswith("redirect"):
+            domain = (row.get("domain") or "").strip()
+            target = (row.get("redirect_url") or "").strip()
+            if domain:
+                print(f"{domain}\t{target}")
+PY
+)
+    else
+        warn "python3 not available; parsing redirects from $csv with awk"
+        redirect_list=$(awk -F, 'NR==1{for(i=1;i<=NF;i++){if($i=="domain")d=i;if($i=="site_type")s=i;if($i=="redirect_url")r=i}next} {t=tolower($s); if(t ~ /^redirect/) print $d "\t" $r}' "$csv")
     fi
-    if [ -z "$redirect" ]; then
-        return 0
+    if [ -n "$redirect_list" ]; then
+        local domain target normalized
+        while IFS=$'\t' read -r domain target; do
+            [ -n "$domain" ] || continue
+            DNS_REDIRECT_LIST+=("$domain")
+            target="${target#"${target%%[![:space:]]*}"}"
+            target="${target%"${target##*[![:space:]]}"}"
+            if [ -n "$target" ]; then
+                normalized=$(normalize_domain "$domain")
+                DNS_REDIRECT_TARGETS["$normalized"]="$target"
+            fi
+        done <<<"$redirect_list"
+        finalize_domains DNS_REDIRECT_LIST || return 1
     fi
-    redirect="${redirect//,/ }"
-    read -r -a DNS_REDIRECT_LIST <<<"$redirect"
-    finalize_domains DNS_REDIRECT_LIST || return 1
 }
+
+# TODO: Consider per-domain WordPress URL expectations (siteurl/home) when needed.
+# Common cases: WordPress core installed in a subdirectory (siteurl has /wp),
+# or non-standard ports (siteurl/home include :8443).
 
 is_redirect_domain() {
     local domain
@@ -82,6 +138,12 @@ is_redirect_domain() {
         fi
     done
     return 1
+}
+
+redirect_target() {
+    local domain
+    domain=$(normalize_domain "$1")
+    echo "${DNS_REDIRECT_TARGETS[$domain]-}"
 }
 
 normalize_domain() {
@@ -174,7 +236,7 @@ validate_ipv4() {
         return 1
     fi
     if [ "${octets[3]}" -eq 0 ] || [ "${octets[3]}" -eq 255 ]; then
-        echo "Warning: IPv4 address ends in .0 or .255; verify it is not a network or broadcast address" >&2
+        warn "IPv4 address ends in .0 or .255; verify it is not a network or broadcast address"
     fi
     if [ "${octets[0]}" -ge 224 ]; then
         echo "Error: IPv4 address in multicast/experimental range not allowed"
@@ -205,6 +267,6 @@ finalize_domains() {
 
     domains_ref=("${unique[@]}")
     if [ "${#dupes[@]}" -gt 0 ]; then
-        log "Warning: duplicate domains ignored: ${dupes[*]}"
+        warn "duplicate domains ignored: ${dupes[*]}"
     fi
 }

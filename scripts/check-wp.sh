@@ -31,8 +31,8 @@ $(cli_usage_common_priv)
   --help  Show this help
 
 Notes:
-  - DNS_REDIRECT lists redirect-only domains; WordPress checks are skipped for those domains.
-  - If DNS_REDIRECT is unset and CF_AUTH_FILE is set, DNS_REDIRECT is read from that file.
+  - Redirect-only domains (from domains.csv) are skipped.
+  - Set DOMAINS_CSV to change the default domains.csv location.
 EOF
 }
 
@@ -73,11 +73,9 @@ done
 finalize_domains DOMAINS || { usage; exit 1; }
 [ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
 load_dns_redirects || { usage; exit 1; }
-
 cli_require_non_root
 
-require_cmd wp
-require_cmd awk
+require_cmds wp awk
 
 if [ "$MODE" = "auto" ]; then
     if priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" core is-installed --network 2>/dev/null; then
@@ -117,13 +115,17 @@ check_domain_multisite() {
     echo ""
     log "WordPress checks for: $domain"
 
+    local expected_siteurl expected_home
+    expected_siteurl="https://$domain"
+    expected_home="$expected_siteurl"
+
     local site_csv
     site_csv=$(priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" site list --fields=blog_id,url,domain,path --format=csv)
     local site_line
     site_line=$(echo "$site_csv" | awk -F, -v domain="$domain" 'NR>1 && $3==domain {print $0; exit}')
 
     if [ -z "$site_line" ]; then
-        echo "Error: Domain not found in wp site list"
+        fail "Domain not found in wp site list"
         return 1
     fi
 
@@ -137,12 +139,12 @@ check_domain_multisite() {
     echo "Path: $path"
 
     if [ "$path" != "/" ]; then
-        echo "Error: Expected path '/' in wp_blogs, found '$path'"
+        fail "Expected path '/' in wp_blogs, found '$path'"
         ok=false
     fi
 
-    if [[ "$url" != "https://$domain" && "$url" != "https://$domain/" ]]; then
-        echo "Error: Site URL does not match https://$domain"
+    if [[ "$url" != "$expected_siteurl" && "$url" != "${expected_siteurl%/}/" ]]; then
+        fail "Site URL does not match $expected_siteurl"
         ok=false
     fi
 
@@ -155,30 +157,37 @@ check_domain_multisite() {
     db_path=$(echo "$blog_row" | awk '{print $2}')
 
     if [ "$db_domain" != "$domain" ] || [ "$db_path" != "/" ]; then
-        echo "Error: wp_blogs mismatch (domain='$db_domain', path='$db_path')"
+        fail "wp_blogs mismatch (domain='$db_domain', path='$db_path')"
         ok=false
     else
         echo "wp_blogs mapping ok"
     fi
 
+    local options_table
+    if [ "$blog_id" = "1" ]; then
+        options_table="${TABLE_PREFIX}options"
+    else
+        options_table="${TABLE_PREFIX}${blog_id}_options"
+    fi
+
     local options
     options=$(priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" db query \
-        "SELECT option_name, option_value FROM ${TABLE_PREFIX}${blog_id}_options WHERE option_name IN ('siteurl','home');" \
+        "SELECT option_name, option_value FROM ${options_table} WHERE option_name IN ('siteurl','home');" \
         --skip-column-names)
 
     local siteurl home
     siteurl=$(echo "$options" | awk '$1=="siteurl" {print $2}')
     home=$(echo "$options" | awk '$1=="home" {print $2}')
 
-    if [ "$siteurl" != "https://$domain" ]; then
-        echo "Error: siteurl is '$siteurl' (expected 'https://$domain')"
+    if [ "$siteurl" != "$expected_siteurl" ]; then
+        fail "siteurl is '$siteurl' (expected '$expected_siteurl')"
         ok=false
     else
         echo "siteurl ok"
     fi
 
-    if [ "$home" != "https://$domain" ]; then
-        echo "Error: home is '$home' (expected 'https://$domain')"
+    if [ "$home" != "$expected_home" ]; then
+        fail "home is '$home' (expected '$expected_home')"
         ok=false
     else
         echo "home ok"
@@ -189,10 +198,10 @@ check_domain_multisite() {
         if priv grep -q "define( *'MULTISITE'" "$wp_config"; then
             echo "wp-config.php multisite constants detected"
         else
-            echo "Warning: MULTISITE constant not found in wp-config.php"
+            warn "MULTISITE constant not found in wp-config.php"
         fi
     else
-        echo "Warning: wp-config.php not readable at $wp_config"
+        warn "wp-config.php not readable at $wp_config"
     fi
 
     local htaccess="$WORDPRESS_ROOT_LOCAL/.htaccess"
@@ -200,10 +209,10 @@ check_domain_multisite() {
         if priv grep -q "RewriteRule" "$htaccess"; then
             echo ".htaccess rewrite rules detected"
         else
-            echo "Warning: .htaccess rewrite rules not detected"
+            warn ".htaccess rewrite rules not detected"
         fi
     else
-        echo "Warning: .htaccess not readable at $htaccess"
+        warn ".htaccess not readable at $htaccess"
     fi
 
     if [ "$ok" = true ]; then
@@ -228,27 +237,31 @@ check_domain_single() {
     echo ""
     log "WordPress checks for: $domain"
 
+    local expected_siteurl expected_home
+    expected_siteurl="https://$domain"
+    expected_home="$expected_siteurl"
+
     local siteurl home
     siteurl=$(priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" option get siteurl 2>/dev/null || true)
     home=$(priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" option get home 2>/dev/null || true)
 
     if [ -z "$siteurl" ] || [ -z "$home" ]; then
-        echo "Error: Unable to read siteurl/home options"
+        fail "Unable to read siteurl/home options"
         ok=false
     else
         echo "siteurl: $siteurl"
         echo "home: $home"
     fi
 
-    if [ "$siteurl" != "https://$domain" ] && [ "$siteurl" != "https://$domain/" ]; then
-        echo "Error: siteurl is '$siteurl' (expected 'https://$domain')"
+    if [ "$siteurl" != "$expected_siteurl" ] && [ "$siteurl" != "${expected_siteurl%/}/" ]; then
+        fail "siteurl is '$siteurl' (expected '$expected_siteurl')"
         ok=false
     else
         echo "siteurl ok"
     fi
 
-    if [ "$home" != "https://$domain" ] && [ "$home" != "https://$domain/" ]; then
-        echo "Error: home is '$home' (expected 'https://$domain')"
+    if [ "$home" != "$expected_home" ] && [ "$home" != "${expected_home%/}/" ]; then
+        fail "home is '$home' (expected '$expected_home')"
         ok=false
     else
         echo "home ok"

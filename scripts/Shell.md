@@ -30,7 +30,7 @@ The repository standard is a single heredoc for `usage()` and a short title plus
 
 ## Configuration Processing
 
-Configuration flows are layered so defaults are predictable and overrides are explicit. Scripts should apply these patterns consistently so operators can reason about outcomes without reading implementation details.
+Configuration flows are layered so defaults are predictable and priority is explicit. Scripts should apply these patterns consistently so operators can reason about outcomes without reading implementation details.
 
 Priority (lowest to highest):
 - Code defaults
@@ -38,11 +38,11 @@ Priority (lowest to highest):
 - Environment variables
 - CLI options
 
-Auth files are inputs of convenience, not authority. Values loaded from an auth file must yield to environment variables and CLI options so automation can override state without editing files.
+Auth files are inputs of convenience, not authority. Values loaded from an auth file must yield to environment variables and CLI options so automation can set values without editing files.
 
 Boolean handling is centralized in `common.sh` via `parse_bool`. Scripts must normalize auth-file or environment booleans to `true|false`, reject unknown tokens, and treat empty values as “use the default.” For option inputs, prefer value-style `--name=true|false` so the priority is explicit.
 
-Domain handling is centralized in `common.sh`: `normalize_domain` trims and lowercases; `validate_domain` enforces label rules; `finalize_domains` normalizes, validates, and de-duplicates lists. Redirect-only domains are loaded from `DNS_REDIRECT` via `load_dns_redirects` and checked with `is_redirect_domain` so origin/WP validators can skip expected redirects.
+Domain handling is centralized in `common.sh`: `normalize_domain` trims and lowercases; `validate_domain` enforces label rules; `finalize_domains` normalizes, validates, and de-duplicates lists. Redirect-only domains are loaded from `domains.csv` via `load_dns_redirects` and checked with `is_redirect_domain` so origin/WP validators can skip expected redirects.
 
 ## Shared Helpers and Common Options
 

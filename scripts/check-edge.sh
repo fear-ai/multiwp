@@ -19,6 +19,7 @@ DOMAINS=()
 HSTS_REQUIRED="${HSTS_REQUIRED-}"
 HSTS_REQUIRED_CLI=""
 AUTH_LOADED=false
+CF_AUTH_CLI=""
 
 usage() {
     cat <<'USAGE'
@@ -27,13 +28,14 @@ Example: check-edge.sh [OPTIONS] domain1 [domain2...]
 
 Options:
   --domain NAME  Domain to process (repeatable; positional also accepted)
-  --http-timeout SECONDS [HTTP_TIMEOUT] (default: 10)  HTTP timeout for curl
-  --hsts=true|false  Require Strict-Transport-Security header
+$(cli_usage_http_timeout)
+$(cli_usage_hsts)
   --api  Enable Cloudflare API checks (optional; requires CF_ZONE_ID and either account API token CF_API_TOKEN or Global API Key + email CF_API_KEY+CF_API_EMAIL)
+  --auth token|key|auto [CF_AUTH]  Select which credential to use (default: auto)
   --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
-  --token TOKEN [CF_API_TOKEN]  Override CF_API_TOKEN (account API token)
-  --key KEY [CF_API_KEY]  Override CF_API_KEY (global API key)
-  --email EMAIL [CF_API_EMAIL]  Override CF_API_EMAIL (global API key email)
+  --token TOKEN [CF_API_TOKEN]  Set CF_API_TOKEN (account API token)
+  --key KEY [CF_API_KEY]  Set CF_API_KEY (global API key)
+  --email EMAIL [CF_API_EMAIL]  Set CF_API_EMAIL (global API key email)
   --help  Show this help
 
 Notes:
@@ -41,6 +43,7 @@ Notes:
   - Validates WordPress asset markers (/wp-content or /wp-includes) on the canonical HTTPS response.
   - Cloudflare API checks run only when --api is provided.
   - Accepts a www A record when Cloudflare CNAME flattening hides the CNAME.
+  - Redirect-only domains (from domains.csv) skip HTTPS and Cloudflare API checks.
 USAGE
 }
 
@@ -50,23 +53,19 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 api) API_CHECKS=true ;;
-                hsts=*)
-                    if ! HSTS_REQUIRED_CLI="$(parse_bool "${OPTARG#*=}")"; then
-                        err "--hsts must be true or false"
+                hsts|hsts=*)
+                    if cli_hsts_opt "${OPTARG}" HSTS_REQUIRED_CLI "${!OPTIND-}"; then
+                        :
+                    else
+                        usage; exit 1
                     fi
                     ;;
-                hsts)
-                    [ -n "${!OPTIND-}" ] || err "--hsts requires true or false"
-                    if ! HSTS_REQUIRED_CLI="$(parse_bool "${!OPTIND}")"; then
-                        err "--hsts must be true or false"
+                http-timeout|http-timeout=*)
+                    if cli_http_timeout_opt "${OPTARG}" HTTP_TIMEOUT "${!OPTIND-}"; then
+                        :
+                    else
+                        usage; exit 1
                     fi
-                    OPTIND=$((OPTIND+1))
-                    ;;
-                http-timeout=*) HTTP_TIMEOUT="${OPTARG#*=}" ;;
-                http-timeout)
-                    [ -n "${!OPTIND-}" ] || err "--http-timeout requires a value"
-                    HTTP_TIMEOUT="${!OPTIND}"
-                    OPTIND=$((OPTIND+1))
                     ;;
                 *)
                     if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
@@ -93,7 +92,7 @@ finalize_domains DOMAINS || { usage; exit 1; }
 if [ -n "${HSTS_REQUIRED_CLI-}" ]; then
     HSTS_REQUIRED="$HSTS_REQUIRED_CLI"
 elif [ -z "${HSTS_REQUIRED-}" ] && [ -n "${CF_AUTH_FILE-}" ]; then
-    load_cloudflare_auth "$CF_AUTH_FILE"
+    cf_init_auth "$CF_AUTH_FILE"
     AUTH_LOADED=true
 fi
 
@@ -105,12 +104,16 @@ else
     HSTS_REQUIRED=false
 fi
 
-require_cmd curl
-require_cmd dig
+require_cmds curl dig
+load_dns_redirects || { usage; exit 1; }
 
 if [ "$API_CHECKS" = true ]; then
     if [ "$AUTH_LOADED" = false ]; then
-        load_cloudflare_auth
+        if [ -n "${CF_AUTH_FILE-}" ]; then
+            cf_init_auth "$CF_AUTH_FILE"
+        else
+            cf_init_auth
+        fi
         AUTH_LOADED=true
     fi
     cf_require_auth "for --api"
@@ -119,7 +122,7 @@ if [ "$API_CHECKS" = true ]; then
 fi
 
 if [ "$API_CHECKS" = true ] && [ ${#DOMAINS[@]} -gt 1 ]; then
-    log "Warning: --api uses a single CF_ZONE_ID for all domains. Ensure it matches each domain."
+    warn "--api uses a single CF_ZONE_ID for all domains. Ensure it matches each domain."
 fi
 
 cf_get_setting() {
@@ -140,9 +143,26 @@ check_domain() {
     local canonical_domain="${domain#www.}"
     local www_domain="www.${canonical_domain}"
     local ok=true
+    local redirect_only=false
+    local redirect_target=""
+
+    if is_redirect_domain "$domain" || is_redirect_domain "$canonical_domain"; then
+        redirect_only=true
+    fi
 
     echo ""
     log "Edge checks for: $domain (canonical: $canonical_domain)"
+    if [ "$redirect_only" = true ]; then
+        log "Redirect-only domain; skipping HTTPS and Cloudflare API checks"
+        redirect_target=$(redirect_target "$domain")
+        if [ -z "$redirect_target" ]; then
+            redirect_target=$(redirect_target "$canonical_domain")
+        fi
+        if [ -z "$redirect_target" ]; then
+            warn "Redirect target not set; using https://$canonical_domain"
+            redirect_target="https://$canonical_domain"
+        fi
+    fi
 
     fetch_headers() {
         local url="$1"
@@ -156,7 +176,7 @@ check_domain() {
         local label="$4"
         local headers
         if ! headers=$(fetch_headers "$url"); then
-            echo "Error: HTTP request failed for $url"
+            fail "HTTP request failed for $url"
             ok=false
             return
         fi
@@ -168,11 +188,11 @@ check_domain() {
             if [[ "$location" == "${expected_prefix}"* ]] || { [ -n "$alt_prefix" ] && [[ "$location" == "${alt_prefix}"* ]]; }; then
                 echo "${label}: 301 -> ${location}"
             else
-                echo "Error: ${label} redirect target mismatch (Location: $location)"
+                fail "${label} redirect target mismatch (Location: $location)"
                 ok=false
             fi
         else
-            echo "Error: ${label} expected 301 (status: ${status})"
+            fail "${label} expected 301 (status: ${status})"
             ok=false
         fi
     }
@@ -180,7 +200,7 @@ check_domain() {
     local a_records
     a_records=$(dig +short A "$canonical_domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
     if [ -z "$a_records" ]; then
-        echo "Error: DNS A records not found for $canonical_domain"
+        fail "DNS A records not found for $canonical_domain"
         ok=false
     else
         echo "DNS A: $a_records"
@@ -196,7 +216,7 @@ check_domain() {
         if [ -n "$www_a_records" ]; then
             echo "DNS A (www): $www_a_records"
         else
-            echo "Error: DNS CNAME or A record not found for $www_domain"
+            fail "DNS CNAME or A record not found for $www_domain"
             ok=false
         fi
     fi
@@ -213,95 +233,106 @@ check_domain() {
         echo "DNS AAAA: $aaaa_records"
     fi
 
-    check_redirect "http://$canonical_domain" "https://$canonical_domain" "" "HTTP apex"
-    check_redirect "http://$www_domain" "https://$canonical_domain" "https://$www_domain" "HTTP www"
-    check_redirect "https://$www_domain" "https://$canonical_domain" "" "HTTPS www"
-
-    local https_headers
-    if ! https_headers=$(fetch_headers "https://$canonical_domain"); then
-        echo "Error: HTTPS request failed for https://$canonical_domain"
-        ok=false
+    if [ "$redirect_only" = true ]; then
+        check_redirect "http://$canonical_domain" "$redirect_target" "" "HTTP apex"
+        check_redirect "http://$www_domain" "$redirect_target" "" "HTTP www"
     else
-        local https_status
-        https_status=$(echo "$https_headers" | awk 'NR==1 {print $2}')
-        if [ "$https_status" = "200" ]; then
-            echo "HTTPS apex status: 200"
-        else
-            echo "Error: HTTPS apex expected 200 (status: ${https_status})"
+        check_redirect "http://$canonical_domain" "https://$canonical_domain" "" "HTTP apex"
+        check_redirect "http://$www_domain" "https://$canonical_domain" "https://$www_domain" "HTTP www"
+    fi
+    if [ "$redirect_only" != true ]; then
+        check_redirect "https://$www_domain" "https://$canonical_domain" "" "HTTPS www"
+    fi
+
+    if [ "$redirect_only" != true ]; then
+        local https_headers
+        if ! https_headers=$(fetch_headers "https://$canonical_domain"); then
+            fail "HTTPS request failed for https://$canonical_domain"
             ok=false
-        fi
-
-        local cf_ray
-        cf_ray=$(echo "$https_headers" | awk -F': ' 'tolower($1)=="cf-ray" {print $2}' | tail -n 1 | tr -d '\r')
-        local server_header
-        server_header=$(echo "$https_headers" | awk -F': ' 'tolower($1)=="server" {print $2}' | tail -n 1 | tr -d '\r')
-
-        if [ -n "$cf_ray" ] || echo "$server_header" | grep -qi "cloudflare"; then
-            echo "Cloudflare proxy detected"
         else
-            echo "Warning: Cloudflare proxy headers not detected"
-        fi
-
-        local required_headers=(
-            "x-content-type-options"
-            "x-frame-options"
-            "referrer-policy"
-        )
-        local optional_headers=(
-            "x-xss-protection"
-            "expect-ct"
-        )
-        if [ "$HSTS_REQUIRED" = true ]; then
-            required_headers+=("strict-transport-security")
-        fi
-
-        local header
-        for header in "${required_headers[@]}"; do
-            if echo "$https_headers" | grep -qi "^${header}:"; then
-                echo "Header present: ${header}"
+            local https_status
+            https_status=$(echo "$https_headers" | awk 'NR==1 {print $2}')
+            if [ "$https_status" = "200" ]; then
+                echo "HTTPS apex status: 200"
             else
-                echo "Error: Missing required header: ${header}"
+                fail "HTTPS apex expected 200 (status: ${https_status})"
                 ok=false
             fi
-        done
 
-        for header in "${optional_headers[@]}"; do
-            if echo "$https_headers" | grep -qi "^${header}:"; then
-                echo "Header present: ${header}"
+            local cf_ray
+            cf_ray=$(echo "$https_headers" | awk -F': ' 'tolower($1)=="cf-ray" {print $2}' | tail -n 1 | tr -d '\r')
+            local server_header
+            server_header=$(echo "$https_headers" | awk -F': ' 'tolower($1)=="server" {print $2}' | tail -n 1 | tr -d '\r')
+
+            if [ -n "$cf_ray" ] || echo "$server_header" | grep -qi "cloudflare"; then
+                echo "Cloudflare proxy detected"
             else
-                echo "Warning: Optional header not found: ${header}"
+                warn "Cloudflare proxy headers not detected"
             fi
-        done
 
-        if [ "$HSTS_REQUIRED" = false ] && echo "$https_headers" | grep -qi "^strict-transport-security:"; then
-            echo "Header present: strict-transport-security"
+            local required_headers=(
+                "x-content-type-options"
+                "x-frame-options"
+                "referrer-policy"
+            )
+            local optional_headers=(
+                "x-xss-protection"
+                "expect-ct"
+            )
+            if [ "$HSTS_REQUIRED" = true ]; then
+                required_headers+=("strict-transport-security")
+            fi
+
+            local header
+            for header in "${required_headers[@]}"; do
+                if echo "$https_headers" | grep -qi "^${header}:"; then
+                    echo "Header present: ${header}"
+                else
+                    fail "Missing required header: ${header}"
+                    ok=false
+                fi
+            done
+
+            for header in "${optional_headers[@]}"; do
+                if echo "$https_headers" | grep -qi "^${header}:"; then
+                    echo "Header present: ${header}"
+                else
+                    warn "Optional header not found: ${header}"
+                fi
+            done
+
+            if [ "$HSTS_REQUIRED" = false ] && echo "$https_headers" | grep -qi "^strict-transport-security:"; then
+                echo "Header present: strict-transport-security"
+            fi
         fi
     fi
 
-    local html_body
-    if ! html_body=$(curl -sS --compressed --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_TIMEOUT" -L "https://$canonical_domain"); then
-        echo "Error: HTTPS body fetch failed for https://$canonical_domain"
-        ok=false
-    else
-        if grep -qiE '/wp-(content|includes)/' <<<"$html_body"; then
-            echo "WordPress asset markers present"
-        else
-            echo "Error: WordPress asset markers not found"
+    if [ "$redirect_only" != true ]; then
+        local html_body
+        if ! html_body=$(curl -sS --compressed --connect-timeout "$HTTP_TIMEOUT" --max-time "$HTTP_TIMEOUT" -L "https://$canonical_domain"); then
+            fail "HTTPS body fetch failed for https://$canonical_domain"
             ok=false
+        else
+            if grep -qiE '/wp-(content|includes)/' <<<"$html_body"; then
+                echo "WordPress asset markers present"
+            else
+                fail "WordPress asset markers not found"
+                ok=false
+            fi
         fi
     fi
 
-    if [ "$API_CHECKS" = true ]; then
+    if [ "$API_CHECKS" = true ] && [ "$redirect_only" != true ]; then
         local ssl_mode
         if ssl_mode=$(cf_get_setting "ssl"); then
             if [ "$ssl_mode" = "strict" ]; then
                 echo "Cloudflare SSL mode: strict"
             else
-                echo "Error: Cloudflare SSL mode is '$ssl_mode' (expected 'strict')"
+                fail "Cloudflare SSL mode is '$ssl_mode' (expected 'strict')"
                 ok=false
             fi
         else
-            echo "Error: Cloudflare API check failed for SSL mode"
+            fail "Cloudflare API check failed for SSL mode"
             ok=false
         fi
 
@@ -310,11 +341,11 @@ check_domain() {
             if [ "$always_https" = "on" ]; then
                 echo "Cloudflare Always Use HTTPS: on"
             else
-                echo "Error: Cloudflare Always Use HTTPS is '$always_https' (expected 'on')"
+                fail "Cloudflare Always Use HTTPS is '$always_https' (expected 'on')"
                 ok=false
             fi
         else
-            echo "Error: Cloudflare API check failed for Always Use HTTPS"
+            fail "Cloudflare API check failed for Always Use HTTPS"
             ok=false
         fi
     fi

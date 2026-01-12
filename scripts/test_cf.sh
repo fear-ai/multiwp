@@ -58,8 +58,8 @@ assert_status() {
 
 reset_auth_env() {
     unset CF_API_TOKEN CF_API_KEY CF_API_EMAIL CF_CA_KEY
-    unset CF_ACCOUNT_ID CF_ZONE_ID CF_ZONE CF_ZONE_MAIN CF_ZONE_IDS CF_AUTH_MODE
-    unset CF_API_TOKEN_CLI CF_API_KEY_CLI CF_API_EMAIL_CLI CF_ACCOUNT_ID_CLI CF_CA_KEY_CLI
+    unset CF_ACCOUNT_ID CF_ZONE_ID CF_ZONE CF_ZONE_MAIN CF_ZONE_IDS CF_AUTH_MODE CF_AUTH
+    unset CF_API_TOKEN_CLI CF_API_KEY_CLI CF_API_EMAIL_CLI CF_ACCOUNT_ID_CLI CF_CA_KEY_CLI CF_AUTH_CLI
     unset CF_AUTH_FILE
 }
 
@@ -86,6 +86,30 @@ CF_API_KEY="key123"
 CF_API_EMAIL="user@example.com"
 cf_auth_mode
 assert_equal "key" "$CF_AUTH_MODE" "cf_auth_mode uses key when token missing"
+
+reset_auth_env
+CF_AUTH="token"
+CF_API_TOKEN="token123"
+cf_auth_mode
+assert_equal "token" "$CF_AUTH_MODE" "cf_auth_mode honors CF_AUTH=token"
+
+reset_auth_env
+CF_AUTH="key"
+CF_API_TOKEN="token123"
+CF_API_KEY="key123"
+CF_API_EMAIL="user@example.com"
+cf_auth_mode
+assert_equal "key" "$CF_AUTH_MODE" "cf_auth_mode honors CF_AUTH=key"
+
+reset_auth_env
+CF_AUTH="token"
+run_subshell cf_auth_mode >/dev/null
+assert_status 1 $? "cf_auth_mode fails when CF_AUTH=token and token missing"
+
+reset_auth_env
+CF_AUTH="key"
+run_subshell cf_auth_mode >/dev/null
+assert_status 1 $? "cf_auth_mode fails when CF_AUTH=key and key/email missing"
 
 reset_auth_env
 run_subshell cf_auth_mode >/dev/null
@@ -128,7 +152,7 @@ reset_auth_env
 load_cloudflare_auth "$auth_file_multi"
 assert_equal "zone-alpha" "$CF_ZONE_ID" "load_cloudflare_auth uses first CF_ZONE_ID by default"
 assert_equal "alpha.example" "$CF_ZONE" "load_cloudflare_auth prefers CF_ZONE_MAIN for zone name"
-assert_equal "zone-alpha zone-beta" "$CF_ZONE_IDS" "load_cloudflare_auth collects multiple zone ids"
+assert_equal "zone-alpha,zone-beta" "$CF_ZONE_IDS" "load_cloudflare_auth collects multiple zone ids"
 
 auth_file_first="$TMP_DIR/auth-first"
 cat <<'AUTH' > "$auth_file_first"
@@ -142,7 +166,7 @@ reset_auth_env
 load_cloudflare_auth "$auth_file_first"
 assert_equal "zone-first" "$CF_ZONE_ID" "load_cloudflare_auth uses first CF_ZONE_ID when no CF_ZONE_MAIN"
 assert_equal "first.example" "$CF_ZONE" "load_cloudflare_auth uses first CF_ZONE when no CF_ZONE_MAIN"
-assert_equal "zone-first zone-second" "$CF_ZONE_IDS" "load_cloudflare_auth keeps zone id list"
+assert_equal "zone-first,zone-second" "$CF_ZONE_IDS" "load_cloudflare_auth keeps zone id list"
 
 reset_auth_env
 CF_ZONE_ID="env-zone"
@@ -204,6 +228,10 @@ reset_auth_env
 cf_auth_opt "ca-key" "cakey789"
 assert_equal "cakey789" "$CF_CA_KEY_CLI" "cf_auth_opt parses --ca-key"
 
+reset_auth_env
+cf_auth_opt "auth" "token"
+assert_equal "token" "$CF_AUTH_CLI" "cf_auth_opt parses --auth token"
+
 
 echo "== cf_api_headers_mode =="
 reset_auth_env
@@ -258,6 +286,49 @@ CF_API_EMAIL="user@example.com"
 output=$(cf_origin_ca_request "GET" "/certificates?zone_id=abc")
 assert_contains "$output" "X-Auth-Key: key123" "cf_origin_ca_request uses X-Auth-Key when CA key missing"
 assert_contains "$output" "X-Auth-Email: user@example.com" "cf_origin_ca_request uses X-Auth-Email when CA key missing"
+
+echo "== cf_api_request checked =="
+cat <<'STUB' > "$STUB_BIN/curl"
+#!/bin/bash
+out=""
+fmt=""
+status="200"
+body='{"success":true,"errors":[]}'
+for arg in "$@"; do
+    case "$arg" in
+        *"/fail"*) status="403"; body='{"success":false,"errors":[{"message":"denied"}]}' ;;
+    esac
+done
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o) out="$2"; shift 2 ;;
+        -w) fmt="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+if [ -n "$out" ]; then
+    printf '%s' "$body" > "$out"
+fi
+printf '%s' "$status"
+STUB
+chmod +x "$STUB_BIN/curl"
+
+reset_auth_env
+CF_API_TOKEN="token123"
+tmp_out="$TMP_DIR/cf-api-checked-ok"
+cf_api_request "GET" "/zones" "" "checked" >"$tmp_out"
+output=$(cat "$tmp_out")
+assert_contains "$output" "\"success\":true" "cf_api_request checked returns body"
+assert_equal "200" "$CF_API_LAST_STATUS" "cf_api_request checked sets status"
+assert_equal "true" "$CF_API_LAST_SUCCESS" "cf_api_request checked sets success"
+
+reset_auth_env
+CF_API_TOKEN="token123"
+output=$(run_subshell cf_api_request "GET" "/fail" "" "checked")
+status=$?
+assert_status 1 "$status" "cf_api_request checked fails on non-2xx or success false"
+assert_contains "$output" "FAIL:" "cf_api_request checked reports failure"
+assert_contains "$output" "denied" "cf_api_request checked includes API error"
 
 echo "== cf_api_request / cf_origin_ca_request error paths =="
 reset_auth_env

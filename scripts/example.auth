@@ -28,6 +28,3 @@ CF_CA_SCOPE="user"
 CF_ZONE_MAIN=""
 CF_ZONE=""
 CF_ZONE_ID=""
-
-# Redirect-only domains (space or comma separated)
-DNS_REDIRECT=""

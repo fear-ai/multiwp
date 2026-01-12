@@ -164,17 +164,45 @@ assert_status 1 $? "parse_bool rejects t"
 parse_bool "f" >/dev/null 2>&1
 assert_status 1 $? "parse_bool rejects f"
 
+echo "== parse_comma_list =="
+LIST=()
+parse_comma_list "alpha, beta,gamma" LIST "list"
+assert_equal "3" "${#LIST[@]}" "parse_comma_list splits three tokens"
+assert_equal "alpha" "${LIST[0]}" "parse_comma_list trims leading tokens"
+assert_equal "beta" "${LIST[1]}" "parse_comma_list trims whitespace"
+assert_equal "gamma" "${LIST[2]}" "parse_comma_list keeps last token"
+
+output=$(run_subshell parse_comma_list "alpha,,gamma" LIST "list")
+status=$?
+assert_contains "$output" "FAIL:" "parse_comma_list reports empty token"
+assert_status 1 "$status" "parse_comma_list fails on empty token"
+
+echo "== warn =="
+output=$(run_subshell warn "test warning")
+assert_contains "$output" "Warning:" "warn prefixes output"
+assert_contains "$output" "test warning" "warn includes message"
+
+echo "== fail =="
+output=$(run_subshell fail "test failure")
+assert_contains "$output" "FAIL:" "fail prefixes output"
+assert_contains "$output" "test failure" "fail includes message"
+
 echo "== load_dns_redirects / is_redirect_domain =="
-auth_file="$TMP_DIR/redirects.auth"
-cat <<'AUTH' > "$auth_file"
-DNS_REDIRECT="Example.com, www.example.com"
-AUTH
-unset DNS_REDIRECT
-CF_AUTH_FILE="$auth_file"
+domains_csv="$TMP_DIR/domains.csv"
+cat <<'CSV' > "$domains_csv"
+domain,site_type,redirect_url
+example.com,redirect,https://target.example/
+www.example.com,redirect,https://alt.example/path
+other.example.com,standalone,
+CSV
+DOMAINS_CSV="$domains_csv"
 load_dns_redirects
-assert_equal "2" "${#DNS_REDIRECT_LIST[@]}" "load_dns_redirects loads redirect list from auth file"
+assert_equal "2" "${#DNS_REDIRECT_LIST[@]}" "load_dns_redirects loads redirect list from domains.csv"
 assert_equal "example.com" "${DNS_REDIRECT_LIST[0]}" "load_dns_redirects normalizes redirect list"
 assert_equal "www.example.com" "${DNS_REDIRECT_LIST[1]}" "load_dns_redirects keeps list order"
+assert_equal "https://target.example/" "$(redirect_target example.com)" "redirect_target returns apex target"
+assert_equal "https://alt.example/path" "$(redirect_target WWW.EXAMPLE.COM)" "redirect_target normalizes domain"
+assert_equal "" "$(redirect_target other.example.com)" "redirect_target empty for non-redirect"
 is_redirect_domain "WWW.EXAMPLE.COM"
 assert_status 0 $? "is_redirect_domain matches normalized domain"
 is_redirect_domain "other.example.com"

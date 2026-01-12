@@ -59,6 +59,7 @@ assert_status() {
 
 reset_env() {
     unset ALLOW_ROOT
+    unset CF_AUTH CF_AUTH_CLI
     unset CF_AUTH_FILE CF_ACCOUNT_ID_CLI CF_API_TOKEN_CLI CF_API_EMAIL_CLI CF_API_KEY_CLI CF_CA_KEY_CLI
 }
 
@@ -108,6 +109,24 @@ assert_equal "2" "$OPTIND" "cli_wp_root_opt advances OPTIND for --wp-root VAL"
 output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/WP/multiwp/scripts/cli.sh; OPTIND=1; cli_wp_root_opt wp-root ROOT_VAR ""' 2>&1)
 assert_contains "$output" "--wp-root requires a value" "cli_wp_root_opt errors on missing value"
 
+echo "== cli_apache_dir_opt =="
+reset_env
+OPTIND=1
+APACHE_DIR_LOCAL=""
+cli_apache_dir_opt "apache-dir=/etc/apache2/sites-available" APACHE_DIR_LOCAL
+assert_equal "/etc/apache2/sites-available" "$APACHE_DIR_LOCAL" "cli_apache_dir_opt parses --apache-dir=VAL"
+assert_equal "1" "$OPTIND" "cli_apache_dir_opt does not advance OPTIND for --apache-dir=VAL"
+
+reset_env
+OPTIND=1
+APACHE_DIR_LOCAL=""
+cli_apache_dir_opt "apache-dir" APACHE_DIR_LOCAL "/srv/apache"
+assert_equal "/srv/apache" "$APACHE_DIR_LOCAL" "cli_apache_dir_opt parses --apache-dir VAL"
+assert_equal "2" "$OPTIND" "cli_apache_dir_opt advances OPTIND for --apache-dir VAL"
+
+output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/WP/multiwp/scripts/cli.sh; OPTIND=1; cli_apache_dir_opt apache-dir APACHE_DIR_LOCAL ""' 2>&1)
+assert_contains "$output" "--apache-dir requires a value" "cli_apache_dir_opt errors on missing value"
+
 echo "== cli_ssl_dir_opt =="
 reset_env
 OPTIND=1
@@ -131,6 +150,45 @@ assert_equal "2" "$OPTIND" "cli_ssl_dir_opt advances OPTIND for --ssl-dir VAL"
 
 output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/WP/multiwp/scripts/cli.sh; OPTIND=1; cli_ssl_dir_opt ssl-dir SSL_DIR' 2>&1)
 assert_contains "$output" "--ssl-dir requires a value" "cli_ssl_dir_opt errors on missing value"
+
+echo "== cli_hsts_opt =="
+reset_env
+OPTIND=1
+HSTS_REQUIRED=""
+cli_hsts_opt "hsts=true" HSTS_REQUIRED
+assert_equal "true" "$HSTS_REQUIRED" "cli_hsts_opt parses --hsts=true"
+assert_equal "1" "$OPTIND" "cli_hsts_opt does not advance OPTIND for --hsts=true"
+
+reset_env
+OPTIND=1
+HSTS_REQUIRED=""
+cli_hsts_opt "hsts" HSTS_REQUIRED "false"
+assert_equal "false" "$HSTS_REQUIRED" "cli_hsts_opt parses --hsts false"
+assert_equal "2" "$OPTIND" "cli_hsts_opt advances OPTIND for --hsts false"
+
+output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/WP/multiwp/scripts/cli.sh; OPTIND=1; cli_hsts_opt hsts HSTS_REQUIRED ""' 2>&1)
+assert_contains "$output" "--hsts requires true or false" "cli_hsts_opt errors on missing value"
+
+output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/WP/multiwp/scripts/cli.sh; OPTIND=1; cli_hsts_opt hsts HSTS_REQUIRED maybe' 2>&1)
+assert_contains "$output" "--hsts must be true or false" "cli_hsts_opt errors on invalid value"
+
+echo "== cli_http_timeout_opt =="
+reset_env
+OPTIND=1
+HTTP_TIMEOUT=""
+cli_http_timeout_opt "http-timeout=5" HTTP_TIMEOUT
+assert_equal "5" "$HTTP_TIMEOUT" "cli_http_timeout_opt parses --http-timeout=VAL"
+assert_equal "1" "$OPTIND" "cli_http_timeout_opt does not advance OPTIND for --http-timeout=VAL"
+
+reset_env
+OPTIND=1
+HTTP_TIMEOUT=""
+cli_http_timeout_opt "http-timeout" HTTP_TIMEOUT "12"
+assert_equal "12" "$HTTP_TIMEOUT" "cli_http_timeout_opt parses --http-timeout VAL"
+assert_equal "2" "$OPTIND" "cli_http_timeout_opt advances OPTIND for --http-timeout VAL"
+
+output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/WP/multiwp/scripts/cli.sh; OPTIND=1; cli_http_timeout_opt http-timeout HTTP_TIMEOUT ""' 2>&1)
+assert_contains "$output" "--http-timeout requires a value" "cli_http_timeout_opt errors on missing value"
 
 echo "== cli_domain_opt =="
 reset_env
@@ -168,6 +226,18 @@ OPTIND=1
 cli_cf_auth_opt "auth-file=/tmp/auth" ""
 assert_equal "/tmp/auth" "$CF_AUTH_FILE" "cli_cf_auth_opt parses --auth-file=VAL"
 assert_equal "1" "$OPTIND" "cli_cf_auth_opt does not advance OPTIND for --auth-file=VAL"
+
+reset_env
+OPTIND=1
+cli_cf_auth_opt "auth=token" ""
+assert_equal "token" "$CF_AUTH_CLI" "cli_cf_auth_opt parses --auth=token"
+assert_equal "1" "$OPTIND" "cli_cf_auth_opt does not advance OPTIND for --auth=token"
+
+reset_env
+OPTIND=1
+cli_cf_auth_opt "auth" "key"
+assert_equal "key" "$CF_AUTH_CLI" "cli_cf_auth_opt parses --auth key"
+assert_equal "2" "$OPTIND" "cli_cf_auth_opt advances OPTIND for --auth key"
 
 reset_env
 OPTIND=1

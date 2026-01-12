@@ -27,15 +27,15 @@ Example: check-origin.sh [OPTIONS] domain1 [domain2...]
 
 Options:
 $(cli_usage_domain)
-  --apache-dir DIR [APACHE_DIR] (default: /etc/apache2/sites-available)  Apache sites-available dir
+$(cli_usage_apache_dir)
 $(cli_usage_wp_root)
 $(cli_usage_ssl_dir)
 $(cli_usage_common_priv)
   --help  Show this help
 
 Notes:
-  - DNS_REDIRECT lists redirect-only domains; origin checks are skipped for those domains.
-  - If DNS_REDIRECT is unset and CF_AUTH_FILE is set, DNS_REDIRECT is read from that file.
+  - Redirect-only domains (from domains.csv) are skipped.
+  - Set DOMAINS_CSV to change the default domains.csv location.
 EOF
 }
 
@@ -52,12 +52,10 @@ while getopts ":-:" opt; do
                     fi
                     ;;
                 apache-dir|apache-dir=*)
-                    if [ "${OPTARG}" = "apache-dir" ]; then
-                        [ -n "${!OPTIND-}" ] || err "--apache-dir requires a value"
-                        APACHE_DIR_LOCAL="${!OPTIND}"
-                        OPTIND=$((OPTIND+1))
+                    if cli_apache_dir_opt "${OPTARG}" APACHE_DIR_LOCAL "${!OPTIND-}"; then
+                        :
                     else
-                        APACHE_DIR_LOCAL="${OPTARG#*=}"
+                        usage; exit 1
                     fi
                     ;;
                 wp-root|wp-root=*)
@@ -92,18 +90,14 @@ load_dns_redirects || { usage; exit 1; }
 
 cli_require_non_root
 
-require_cmd openssl
-require_cmd apache2ctl
-require_cmd systemctl
-require_cmd stat
-require_cmd grep
+require_cmds openssl apache2ctl systemctl stat grep
 
 check_module() {
     local module="$1"
     if priv apache2ctl -M | grep -q "${module}_module"; then
         echo "Apache module enabled: ${module}"
     else
-        echo "Error: Apache module missing: ${module}"
+        fail "Apache module missing: ${module}"
         return 1
     fi
 }
@@ -114,11 +108,11 @@ check_file_perms() {
     local actual
     actual=$(priv stat -c "%U:%G %a" "$path" 2>/dev/null || true)
     if [ -z "$actual" ]; then
-        echo "Warning: Unable to read permissions for $path"
+        warn "Unable to read permissions for $path"
         return 0
     fi
     if [ "$actual" != "$expected" ]; then
-        echo "Error: $path permissions are $actual (expected $expected)"
+        fail "$path permissions are $actual (expected $expected)"
         return 1
     fi
     echo "Permissions ok: $path ($actual)"
@@ -145,14 +139,14 @@ check_domain() {
     if priv test -r "$cert_file"; then
         echo "Certificate found: $cert_file"
     else
-        echo "Error: Certificate missing or unreadable: $cert_file"
+        fail "Certificate missing or unreadable: $cert_file"
         ok=false
     fi
 
     if priv test -r "$key_file"; then
         echo "Key found: $key_file"
     else
-        echo "Error: Key missing or unreadable: $key_file"
+        fail "Key missing or unreadable: $key_file"
         ok=false
     fi
 
@@ -165,44 +159,45 @@ check_domain() {
         check_file_perms "$key_file" "root:ssl-cert 640" || ok=false
     fi
 
+    # TODO: allow per-domain vhost overrides (e.g., from domains.csv) when needed.
     local http_conf="$APACHE_DIR_LOCAL/${safe}.conf"
     local ssl_conf="$APACHE_DIR_LOCAL/${safe}-ssl.conf"
 
     if priv test -f "$http_conf"; then
         echo "HTTP vhost present: $http_conf"
         if ! priv grep -q "ServerName $domain" "$http_conf"; then
-            echo "Error: HTTP vhost missing ServerName $domain"
+            fail "HTTP vhost missing ServerName $domain"
             ok=false
         fi
         if ! priv grep -q "DocumentRoot $WORDPRESS_ROOT_LOCAL" "$http_conf"; then
-            echo "Error: HTTP vhost DocumentRoot mismatch (expected $WORDPRESS_ROOT_LOCAL)"
+            fail "HTTP vhost DocumentRoot mismatch (expected $WORDPRESS_ROOT_LOCAL)"
             ok=false
         fi
     else
-        echo "Error: HTTP vhost missing: $http_conf"
+        fail "HTTP vhost missing: $http_conf"
         ok=false
     fi
 
     if priv test -f "$ssl_conf"; then
         echo "SSL vhost present: $ssl_conf"
         if ! priv grep -q "ServerName $domain" "$ssl_conf"; then
-            echo "Error: SSL vhost missing ServerName $domain"
+            fail "SSL vhost missing ServerName $domain"
             ok=false
         fi
         if ! priv grep -q "DocumentRoot $WORDPRESS_ROOT_LOCAL" "$ssl_conf"; then
-            echo "Error: SSL vhost DocumentRoot mismatch (expected $WORDPRESS_ROOT_LOCAL)"
+            fail "SSL vhost DocumentRoot mismatch (expected $WORDPRESS_ROOT_LOCAL)"
             ok=false
         fi
         if ! priv grep -q "SSLCertificateFile $cert_file" "$ssl_conf"; then
-            echo "Error: SSL vhost missing SSLCertificateFile $cert_file"
+            fail "SSL vhost missing SSLCertificateFile $cert_file"
             ok=false
         fi
         if ! priv grep -q "SSLCertificateKeyFile $key_file" "$ssl_conf"; then
-            echo "Error: SSL vhost missing SSLCertificateKeyFile $key_file"
+            fail "SSL vhost missing SSLCertificateKeyFile $key_file"
             ok=false
         fi
     else
-        echo "Error: SSL vhost missing: $ssl_conf"
+        fail "SSL vhost missing: $ssl_conf"
         ok=false
     fi
 
@@ -219,14 +214,14 @@ system_ok=true
 if priv apache2ctl configtest; then
     echo "Apache configtest passed"
 else
-    echo "Error: Apache configtest failed"
+    fail "Apache configtest failed"
     system_ok=false
 fi
 
 if systemctl is-active --quiet apache2; then
     echo "Apache service is active"
 else
-    echo "Error: Apache service is not active"
+    fail "Apache service is not active"
     system_ok=false
 fi
 

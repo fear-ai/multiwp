@@ -15,12 +15,12 @@ CF_ZONE_CLI=""
 CF_ZONE_ID_CLI=""
 CF_ZONE_INPUT_RAW=""
 CF_ZONE_API=""
+CF_AUTH_CLI=""
 
 expects=()
 show_keys=()
 raw=false
 note() { echo "Note: $*" >&2; }
-warn() { echo "Warning: $*" >&2; }
 
 usage() {
     cat <<'EOF'
@@ -31,16 +31,17 @@ Options:
   -e key=val  Check that a setting matches the expected value (repeatable)
   -s key[,key]  Show only selected settings (repeatable)
   --raw  Print raw settings JSON
-  --zone name [CF_ZONE]  Override CF_ZONE (zone apex, e.g., example.com)
-  --zone-id id [CF_ZONE_ID]  Override CF_ZONE_ID
+  --zone name [CF_ZONE]  Set CF_ZONE (zone apex, e.g., example.com)
+  --zone-id id [CF_ZONE_ID]  Set CF_ZONE_ID
 
 Auth options (choose one):
   - Account API Token (recommended): CF_API_TOKEN=... [--token TOKEN]
   - Global API Key + email (user): CF_API_KEY=... CF_API_EMAIL=... [--key KEY --email EMAIL]
+  --auth token|key|auto [CF_AUTH]  Select which credential to use (default: auto)
   --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
-  --token TOKEN [CF_API_TOKEN]  Override CF_API_TOKEN (account API token)
-  --key KEY [CF_API_KEY]  Override CF_API_KEY (global API key)
-  --email EMAIL [CF_API_EMAIL]  Override CF_API_EMAIL (global API key email)
+  --token TOKEN [CF_API_TOKEN]  Set CF_API_TOKEN (account API token)
+  --key KEY [CF_API_KEY]  Set CF_API_KEY (global API key)
+  --email EMAIL [CF_API_EMAIL]  Set CF_API_EMAIL (global API key email)
   --help  Show this help
 
 Notes:
@@ -52,12 +53,10 @@ while getopts ":e:s:-:" opt; do
     case "$opt" in
         e) expects+=("$OPTARG") ;;
         s)
-            IFS=',' read -r -a parts <<<"${OPTARG-}"
-            for p in "${parts[@]}"; do
-                p="${p#"${p%%[![:space:]]*}"}"
-                p="${p%"${p##*[![:space:]]}"}"
-                [ -n "$p" ] && show_keys+=("$p")
-            done
+            if ! parse_comma_list "${OPTARG-}" parts "-s list"; then
+                usage; exit 1
+            fi
+            show_keys+=("${parts[@]}")
             ;;
         -)
             case "${OPTARG}" in
@@ -97,26 +96,9 @@ if [ $# -eq 1 ]; then
     CF_ZONE_CLI="$1"
 fi
 
-require_cmd curl
-require_cmd jq
+require_cmds curl jq
 
-load_cloudflare_auth
-
-if [ -n "${CF_API_TOKEN_CLI:-}" ]; then
-    CF_API_TOKEN="$CF_API_TOKEN_CLI"
-fi
-if [ -n "${CF_API_EMAIL_CLI:-}" ]; then
-    CF_API_EMAIL="$CF_API_EMAIL_CLI"
-fi
-if [ -n "${CF_API_KEY_CLI:-}" ]; then
-    CF_API_KEY="$CF_API_KEY_CLI"
-fi
-if [ -n "$CF_ZONE_ID_CLI" ]; then
-    CF_ZONE_ID="$CF_ZONE_ID_CLI"
-fi
-if [ -n "$CF_ZONE_CLI" ]; then
-    CF_ZONE="$CF_ZONE_CLI"
-fi
+cf_init_auth
 if [ -n "${CF_ZONE:-}" ]; then
     CF_ZONE_INPUT_RAW="$CF_ZONE"
     CF_ZONE=$(normalize_domain "$CF_ZONE_INPUT_RAW")
@@ -185,7 +167,7 @@ else
     if [ -n "$managed_headers_status" ]; then
         settings_map=$(echo "$settings_map" | jq -c --arg v "$managed_headers_status" '. + {managed_add_security_headers: $v}')
     else
-        warn "Managed headers response missing expected key"
+    warn "Managed headers response did not include expected key"
     fi
 fi
 
@@ -198,7 +180,7 @@ else
     if [ -n "$leaked_status" ]; then
         settings_map=$(echo "$settings_map" | jq -c --arg v "$leaked_status" '. + {leaked_credential_checks: $v}')
     else
-        warn "Leaked credential checks response missing expected key"
+    warn "Leaked credential checks response did not include expected key"
     fi
 fi
 
@@ -228,7 +210,7 @@ else
     for key in "${show_keys[@]}"; do
         val=$(echo "$settings_map" | jq -r --arg k "$key" '.[$k] // empty')
         if [ -z "$val" ]; then
-            echo "${key}=<missing>"
+            echo "${key}=<unknown>"
         else
             echo "${key}=${val}"
         fi
@@ -242,7 +224,7 @@ if [ "${#expects[@]}" -gt 0 ]; then
         want="${exp#*=}"
         got=$(echo "$settings_map" | jq -r --arg k "$key" '.[$k] // empty')
         if [ -z "$got" ]; then
-            echo "FAIL: ${key} missing (expected ${want})" >&2
+            echo "FAIL: ${key} unknown (expected ${want})" >&2
             failures=$((failures + 1))
         elif [ "$got" != "$want" ]; then
             echo "FAIL: ${key}=${got} (expected ${want})" >&2

@@ -10,7 +10,7 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/common.sh"
 . "$SCRIPTS_DIR/cli.sh"
 
-require_cmd wp
+require_cmds wp
 
 WORDPRESS_ROOT_LOCAL="$WORDPRESS_ROOT"
 DOMAINS=()

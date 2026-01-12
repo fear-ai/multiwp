@@ -44,12 +44,97 @@ Orchestration scripts combine multiple checks in a single run.
 
 - `verify-domain.sh` — verification (read-only)
 
+### Smoke
+
+The `smoke.sh` wrapper provides a light-weight entry point for read-only validation across multiple domains. It is intended to standardize how we run syntax checks, unit tests, and edge/DNS checks without requiring operators to remember the underlying script order or domain selection details.
+
+Needs and requirements are grouped below so that future changes can be evaluated against the same constraints.
+
+Needs:
+- A single entry point that can run `syn`, `unit`, `edge`, `dns`, `origin`, `wp`, and `mysql` in a predictable order.
+- Domain selection driven by `domains.csv` or an explicit list of domains provided on the command line.
+- Support for filtering by `status_cf` and `site_type` while avoiding `status_cf=ignore` by default.
+
+Requirements:
+- Read-only behavior only; no API writes and no origin or WordPress mutations.
+- Clear exit codes: syntax/unit failures should cause a non-zero exit, while edge/DNS checks should continue across domains.
+- Consistent selection rules across all commands so a single invocation can be trusted as a “smoke run.”
+
+Design notes:
+- `smoke.sh` reads `domains.csv` once and applies filters only when explicit domains are not supplied.
+- `edge` uses `check-edge.sh` (with `--api` when requested) and `dns` uses `check-cf.sh`.
+- `origin` uses `check-origin.sh`, `wp` uses `check-wp.sh`, and `mysql` uses WP-CLI `db check` against selected roots.
+- `--auth-file` overrides the per-domain auth file from `domains.csv` for edge/DNS API calls.
+- Origin, WordPress, and MySQL checks are read-only and depend on local filesystem access.
+
+Implementation plan:
+1) Parse commands and options; reject runs without at least one command.
+2) Load domain metadata when needed and select the domain set (explicit list or filtered list).
+3) Execute each command in the requested order, collecting failures without aborting domain loops.
+4) Return a non-zero status if any syntax or unit test fails.
+
 ### Support and Tests
 
 The test scripts and helper libraries are intentionally minimal. They do not parse options and should be run directly from the `scripts/` directory.
 
 - `test_common.sh`, `test_cli.sh`, `test_cf.sh` run unit checks for shared helpers.
 - `common.sh`, `cli.sh`, `auth.sh` provide shared logic and should not be executed directly.
+
+## Settings
+
+This section documents the Cloudflare and edge behaviors that the read-only checks validate today. It is intended to be a practical guide for operators so the script outputs can be interpreted consistently, while keeping the authoritative option behavior in the `usage()` output of each script.
+
+Before applying the settings below, ensure the dependencies are met: the zone is active in Cloudflare, nameservers are pointed at Cloudflare, and the scripts have access to a valid auth file with the required credentials and `CF_ZONE_ID`.
+
+### DNS and Proxy
+
+The edge checks assume Cloudflare is proxying the apex and `www` hostnames. The DNS layer must exist and be proxied before HTTPS or header checks will behave as expected.
+
+- Apex: an **A** record for `@` pointing to the origin IPv4 address, with the proxy (orange cloud) enabled.
+- `www`: a **CNAME** to the apex. If CNAME flattening hides the CNAME, an **A** record for `www` is acceptable and will be treated as valid by `check-edge.sh`.
+- Optional: a wildcard `*` CNAME to the apex when you want Cloudflare to catch stray hostnames.
+
+### Redirect Behavior
+
+`check-edge.sh` validates canonical redirects and will fail if the redirect targets do not match the expected behavior. Redirect-only domains use `redirect_url` from `domains.csv` and skip HTTPS and API checks.
+
+- Standard sites: `http://apex` should 301 to `https://apex`, and `https://www` should 301 to `https://apex`.
+- Redirect-only sites: use a Cloudflare Redirect Rule that applies to all incoming requests and points to the configured `redirect_url`.
+
+### SSL/TLS Mode
+
+When `check-edge.sh --api` runs, it requires the SSL mode to be **Full (strict)**. This is a Cloudflare zone setting and is validated via the API.
+
+- Path: `SSL/TLS` → `Overview` → set “SSL/TLS encryption mode” to **Full (strict)**.
+
+### Edge HTTPS Features
+
+The redirect expectations rely on Always Use HTTPS being enabled for standard WordPress sites.
+
+- Path: `SSL/TLS` → `Edge Certificates` → enable “Always Use HTTPS”.
+- HSTS is optional by default; if `--hsts=true` is supplied to `check-edge.sh`, the script will require the `strict-transport-security` header.
+
+### Response Headers
+
+`check-edge.sh` requires several security headers on the HTTPS apex response. You can provide these either at the origin or by enabling Cloudflare’s managed headers.
+
+- Required headers: `x-content-type-options`, `x-frame-options`, `referrer-policy`.
+- Optional headers (warn only): `x-xss-protection`, `expect-ct`.
+- Path (Cloudflare managed headers): `Rules` → `Settings` → `Managed Transforms` → `HTTP Response Headers` → “Add security headers”.
+
+### WordPress Markers
+
+For non-redirect domains, `check-edge.sh` fetches HTML and expects WordPress markers (`/wp-content` or `/wp-includes`). Cloudflare Pages or Workers sites will not satisfy this check; mark those zones as `status_cf=worker` so they are skipped unless explicitly included.
+
+### API-Visible Settings (check-cf)
+
+`check-cf.sh` prints the full Cloudflare settings map and DNS records. It only enforces values when `-e key=value` is supplied. The settings most commonly enforced alongside edge checks include:
+
+- `ssl=strict`
+- `always_use_https=on`
+- `min_tls_version=1.2`
+- `managed_add_security_headers=true`
+- `leaked_credential_checks=false`
 
 ## Part B: Option and Environment Reference (canonical)
 
@@ -79,6 +164,9 @@ Option ordering:
 - Root and SSL path options next.
 - Common privilege options next.
 - `--help` always last.
+
+List handling:
+- Comma-separated lists are split on commas, whitespace is trimmed around each token, and empty tokens are treated as failures.
 
 ### Boolean handling
 
@@ -125,12 +213,11 @@ Redirect-only domains:
 Redirect-only domains are managed with a single source of truth so validation scripts can distinguish “edge-only” domains from full origin-backed sites.
 
 Status (current behavior):
-- `DNS_REDIRECT` (env or auth file referenced by `CF_AUTH_FILE`) lists domains that should not have origin or WordPress presence.
-- `check-origin.sh` and `check-wp.sh` skip origin/WP checks for domains listed in `DNS_REDIRECT` and treat absence as expected.
-- `check-edge.sh` continues to validate redirects and security headers for all domains, including redirect-only entries.
+- Redirect-only domains are derived from `domains.csv` (`site_type=redirect`) and loaded by `load_dns_redirects`.
+- `check-origin.sh` and `check-wp.sh` skip origin/WP checks for redirect-only domains and treat absence as expected.
+- `check-edge.sh` validates DNS and HTTP redirect behavior for redirect-only domains but skips HTTPS and Cloudflare API checks.
 
 Next steps:
-- Skip edge header checks for domains listed in `DNS_REDIRECT` while still validating HTTP→HTTPS redirects and Cloudflare proxy signals.
 - Add redirect-focused provisioning support to `cloud-dns.sh` (for example, record patterns or options suitable for edge-only redirect zones).
 
 Examples:
@@ -176,7 +263,10 @@ Auth variables:
 - `CF_API_KEY` + `CF_API_EMAIL` (global API key, user-scoped)
 - `CF_CA_KEY` (Origin CA User Service Key, user-scoped)
 - `CF_ACCOUNT_ID` (account identifier)
+- `CF_AUTH` (`auto`, `token`, or `key`) selects the credential type (default: `auto`)
+- CLI-supplied values are stored in `*_CLI` variables (for example, `CF_API_TOKEN_CLI`) before being applied as the highest-priority values.
 
+- `--auth token|key|auto [CF_AUTH]` selects the credential type (default: `auto`).
 - `--auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)` points to the auth file to load.
 - `--account ID [CF_ACCOUNT_ID]` sets the account ID with highest priority for account-scoped calls.
 - `--token TOKEN [CF_API_TOKEN]` sets the account API token.
@@ -190,10 +280,31 @@ Cloudflare zone selection:
 - `CF_ZONE_MAIN` (env) is preferred when multiple zones exist in the auth file.
 - `CF_ZONE` and `CF_ZONE_ID` (env) are read from the auth file, with the first `CF_ZONE_ID` chosen by default.
 Notes:
-- `CF_ZONE` must be an apex (for example, `example.com`, not `www.example.com`); auth files may list multiple `CF_ZONE_ID` values—scripts use the first by default and retain the list in `CF_ZONE_IDS`.
+- `CF_ZONE` must be an apex (for example, `example.com`, not `www.example.com`); auth files may list multiple `CF_ZONE_ID` values—scripts use the first by default and retain the list in `CF_ZONE_IDS` (comma-separated).
 TODO:
 - Consider adding a per-domain zone mapping for `check-edge.sh` and `verify-domain.sh` to support multi-zone runs without relying on a single `CF_ZONE_ID`.
+
+### Knowledge
+
+This section summarizes which Cloudflare APIs are used for which operations and which credentials are expected to work. It reflects the current scripts and observed behavior in this repo, and it is intended to reduce confusion when a token succeeds for one endpoint but fails for another.
+
+Read-only checks:
+- `check-cf.sh` and `check-edge.sh --api` call zone settings and DNS read endpoints. These work with an account API token (preferred) or the global API key + email. Use the least-privileged token that grants zone read for settings and DNS.
+- `verify-cf-auth.sh` validates credentials against account or user endpoints. It can use either token or global key.
+
+Provisioning and write operations:
+- `cloud-dns.sh` creates or updates DNS records. It requires DNS edit access for the zone. An account token with Zone DNS Edit scope is preferred, but the global API key works when the token lacks permissions.
+- Redirect Rules use the Rulesets API (`http_request_dynamic_redirect`). A token must include Rulesets Edit on the zone; otherwise use the global API key.
+- Page Rules are a legacy API (`/pagerules`). Account tokens do not work on this endpoint; you must use the global API key + email for Page Rules read or write.
+- Origin CA certificate requests (`get-cert.sh --api`) prefer `CF_CA_KEY` (Origin CA User Service Key). If that is absent, the scripts fall back to account token or global key where the endpoint allows it.
+
+Practical guidance:
+- Prefer account API tokens for regular read/write operations and scope them to the minimal required permissions.
+- Use the global API key only for Page Rules or when a token is missing the required scope.
+- When a call fails with “Authentication error,” verify the required scope for that endpoint before assuming the zone ID or account is wrong.
 - Allow `check-cf.sh` to iterate `CF_ZONE_IDS` when no `--zone` or `--zone-id` is supplied.
+- Validate `check-cf.sh` `-s`/`-e` keys against a known allowlist while keeping forward compatibility.
+- Define a clear, explicit CLI mechanism to clear CF_* values (empty values are currently ignored).
 
 ### Read-Only Scripts and Safe Options
 
@@ -205,7 +316,7 @@ Safe options for read-only scripts:
 - `--http-timeout SECONDS`
 - `--domain NAME` / positional domains
 - `--zone-id ID`
-- `--auth-file PATH`, `--token TOKEN`, `--key KEY`, `--email EMAIL`, `--ca-key KEY`
+- `--auth token|key|auto`, `--auth-file PATH`, `--token TOKEN`, `--key KEY`, `--email EMAIL`, `--ca-key KEY`
 - `--allow-root`, `--no-sudo`
 
 ### Cloudflare Layer Interfaces
@@ -222,6 +333,7 @@ Options (script-specific):
 - `--zone-id ID [CF_ZONE_ID]` supplies a zone ID for Origin CA key validation.
 
 Options (auth and shared):
+- `--auth token|key|auto [CF_AUTH]`
 - `--auth-file PATH [CF_AUTH_FILE]`
 - `--account ID [CF_ACCOUNT_ID]`
 - `--token TOKEN [CF_API_TOKEN]`
@@ -252,6 +364,7 @@ Options (script-specific):
 - `--update` only updates existing DNS records; errors if a record is missing.
 
 Options (auth and shared):
+- `--auth token|key|auto [CF_AUTH]`
 - `--account ACCOUNT_ID [CF_ACCOUNT_ID]`
 - `--token TOKEN [CF_API_TOKEN]`
 - `--key KEY [CF_API_KEY]`
@@ -267,8 +380,8 @@ Notes:
 - By default, DNS records are created or updated to avoid duplicates.
 - IPv4 must be publicly routable; RFC1918, link-local, loopback, and multicast ranges are rejected.
 - IPv4 addresses ending in `.0` or `.255` are accepted but produce a warning to prompt verification.
-- `warn()` is used for non-fatal conditions; `err()` emits a fatal error and exits non-zero when a required condition fails. In `cloud-dns.sh`, duplicate A records are fatal while duplicate CNAME records emit a warning.
-- Planned: support marking zones as redirect-only (for example, via `DNS_REDIRECT`) so cloud-dns can provision redirect-focused DNS without origin dependencies.
+- `warn()` is used for non-fatal conditions; `fail()` reports a non-fatal check failure while allowing the script to continue; `err()` emits a fatal error and exits non-zero when a required condition fails. In `cloud-dns.sh`, duplicate A records are fatal while duplicate CNAME records emit a warning.
+- Planned: support marking zones as redirect-only (from `domains.csv`) so cloud-dns can provision redirect-focused DNS without origin dependencies.
 
 #### get-cert.sh (production/installation)
 
@@ -286,6 +399,7 @@ Options (script-specific):
 - `--domain NAME` adds a domain to the list (repeatable).
 
 Options (auth and shared):
+- `--auth token|key|auto [CF_AUTH]`
 - `--auth-file PATH [CF_AUTH_FILE]`
 - `--token TOKEN [CF_API_TOKEN]`
 - `--key KEY [CF_API_KEY]`
@@ -311,12 +425,13 @@ Arguments:
 
 Options (script-specific):
 - `-e key=val` asserts that a setting matches the expected value (repeatable).
-- `-s key[,key]` prints only selected settings (repeatable).
+- `-s key[,key]` prints only selected settings (repeatable). Empty entries are rejected.
 - `--raw` prints the raw settings JSON.
 - `--zone name [CF_ZONE]` selects a zone by name.
 - `--zone-id id [CF_ZONE_ID]` selects a zone by ID.
 
 Options (auth and shared):
+- `--auth token|key|auto [CF_AUTH]`
 - `--auth-file PATH [CF_AUTH_FILE]`
 - `--token TOKEN [CF_API_TOKEN]`
 - `--key KEY [CF_API_KEY]`
@@ -330,6 +445,7 @@ Notes:
 - Zone names are normalized and validated before lookup. `check-cf.sh` warns (case-sensitive) if the provided zone name differs from the Cloudflare API response.
 - DNS A and CNAME records are listed after the zone header to make edge-to-origin alignment visible alongside settings.
 - Derived keys are added for assertion and filtering: `managed_add_security_headers` and `leaked_credential_checks`.
+- Unknown keys are reported as `<unknown>`; validation of allowed keys is deferred.
 
 #### check-edge.sh (verification/investigation)
 
@@ -346,6 +462,7 @@ Options (script-specific):
 - `--hsts=true|false` requires the Strict-Transport-Security header.
 
 Options (auth and shared):
+- `--auth token|key|auto [CF_AUTH]`
 - `--auth-file PATH [CF_AUTH_FILE]`
 - `--token TOKEN [CF_API_TOKEN]`
 - `--key KEY [CF_API_KEY]`
@@ -523,22 +640,23 @@ This cross-reference lists options alphabetically and the scripts that implement
 
 - `-e` (check-cf.sh)
 - `-s` (check-cf.sh)
-- `--account` (cloud-dns.sh, verify-cf-auth.sh)
+- `--account` (cloud-dns.sh, mcp-cf.sh, verify-cf-auth.sh)
 - `--allow-root` (check-origin.sh, check-wp.sh, verify-domain.sh)
 - `--api` (check-edge.sh, get-cert.sh, verify-domain.sh)
 - `--apache-dir` (apache-vhost.sh, check-origin.sh, verify-domain.sh)
-- `--auth-file` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh)
+- `--auth` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, verify-cf-auth.sh)
+- `--auth-file` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, verify-cf-auth.sh)
 - `--auto` (get-cert.sh)
 - `--autosite` (check-wp.sh)
 - `--ca-key` (get-cert.sh, verify-cf-auth.sh)
 - `--domain` (apache-vhost.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, verify-domain.sh)
-- `--email` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh)
+- `--email` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, verify-cf-auth.sh)
 - `--force` (get-cert.sh)
-- `--help` (apache-vhost.sh, check-cf.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, setup-wp.sh, verify-cf-auth.sh, verify-domain.sh)
+- `--help` (apache-vhost.sh, check-cf.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, mcp-cf.sh, setup-wp.sh, verify-cf-auth.sh, verify-domain.sh)
 - `--http` (apache-vhost.sh)
 - `--http-timeout` (check-edge.sh, verify-domain.sh)
 - `--hsts=true|false` (check-edge.sh, verify-domain.sh)
-- `--key` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh)
+- `--key` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, verify-cf-auth.sh)
 - `--manual` (get-cert.sh)
 - `--multisite` (check-wp.sh)
 - `--no-sudo` (check-origin.sh, check-wp.sh, verify-domain.sh)
@@ -548,7 +666,7 @@ This cross-reference lists options alphabetically and the scripts that implement
 - `--ssl` (apache-vhost.sh)
 - `--ssl-dir` (apache-vhost.sh, check-origin.sh, get-cert.sh, verify-domain.sh)
 - `--template` (apache-vhost.sh)
-- `--token` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, verify-cf-auth.sh)
+- `--token` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, verify-cf-auth.sh)
 - `--zone` (check-cf.sh)
 - `--zone-id` (check-cf.sh, verify-cf-auth.sh)
 
