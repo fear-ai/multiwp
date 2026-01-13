@@ -43,7 +43,7 @@ Options:
 Notes:
   - Account API tokens are verified against the account endpoint when CF_ACCOUNT_ID is set.
   - Global API keys are verified with X-Auth-Email + X-Auth-Key against /user.
-  - Origin CA keys are verified with a read-only GET to /certificates?zone_id=...
+  - Origin CA keys are verified with a read-only GET to /certificates?zone_id=...; if CF_ZONE is set and token/key credentials are available, the script resolves CF_ZONE_ID before verifying.
 EOF
 }
 
@@ -87,10 +87,10 @@ case "$AUTH_PREF" in
     ""|auto|token|key) ;;
     *) err "Invalid auth mode: $AUTH_PREF (expected token, key, or auto)" ;;
 esac
-if [ "$AUTH_PREF" = "token" ] && [ -z "${CF_API_TOKEN:-}" ]; then
+if [ "$AUTH_PREF" = "token" ] && ! cf_has_token; then
     err "CF_API_TOKEN required when --auth token is set"
 fi
-if [ "$AUTH_PREF" = "key" ] && { [ -z "${CF_API_KEY:-}" ] || [ -z "${CF_API_EMAIL:-}" ]; }; then
+if [ "$AUTH_PREF" = "key" ] && ! cf_has_key; then
     err "CF_API_KEY+CF_API_EMAIL required when --auth key is set"
 fi
 
@@ -101,9 +101,9 @@ token_ok=false
 key_ok=false
 ca_ok=false
 
-if [ -n "${CF_API_TOKEN:-}" ] && [ "$AUTH_PREF" != "key" ]; then
+if cf_has_token && [ "$AUTH_PREF" != "key" ]; then
     token_checked=true
-    if [ -n "${CF_ACCOUNT_ID:-}" ]; then
+    if cf_has_account_id; then
         log "Verifying account API token against account $CF_ACCOUNT_ID"
         token_resp=$(cf_api_request_mode token GET "/accounts/$CF_ACCOUNT_ID/tokens/verify")
         token_success=$(cf_api_success "$token_resp")
@@ -116,7 +116,7 @@ if [ -n "${CF_API_TOKEN:-}" ] && [ "$AUTH_PREF" != "key" ]; then
         log "API token valid"
         token_ok=true
     else
-        if [ -n "${CF_ACCOUNT_ID:-}" ]; then
+        if cf_has_account_id; then
             log "Account API token verify failed; attempting user token verify"
             token_resp=$(cf_api_request_mode token GET "/user/tokens/verify")
             token_success=$(cf_api_success "$token_resp")
@@ -132,7 +132,7 @@ if [ -n "${CF_API_TOKEN:-}" ] && [ "$AUTH_PREF" != "key" ]; then
     fi
 fi
 
-if [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ] && [ "$AUTH_PREF" != "token" ]; then
+if cf_has_key && [ "$AUTH_PREF" != "token" ]; then
     key_checked=true
     log "Verifying global API key for $CF_API_EMAIL"
     key_resp=$(cf_api_request_mode key GET "/user")
@@ -145,10 +145,18 @@ if [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ] && [ "$AUTH_PREF" != "
     fi
 fi
 
-if [ -n "${CF_CA_KEY:-}" ]; then
+if cf_has_ca_key; then
     ca_checked=true
-    if [ -z "${CF_ZONE_ID:-}" ]; then
-        log "Origin CA key present but CF_ZONE_ID missing; cannot verify CA key"
+    if ! cf_has_zone_id; then
+        if [ -n "${CF_ZONE:-}" ] && { cf_has_token || cf_has_key; }; then
+            require_cmds jq
+            cf_require_zone_id "to verify Origin CA key"
+        else
+            log "Origin CA key present but CF_ZONE_ID missing; cannot verify CA key"
+        fi
+    fi
+    if ! cf_has_zone_id; then
+        :
     else
         log "Verifying Origin CA key against zone $CF_ZONE_ID"
         ca_resp=$(cf_origin_ca_request GET "/certificates?zone_id=${CF_ZONE_ID}")

@@ -86,7 +86,7 @@ The test scripts and helper libraries are intentionally minimal. They do not par
 
 This section documents the Cloudflare and edge behaviors that the read-only checks validate today. It is intended to be a practical guide for operators so the script outputs can be interpreted consistently, while keeping the authoritative option behavior in the `usage()` output of each script.
 
-Before applying the settings below, ensure the dependencies are met: the zone is active in Cloudflare, nameservers are pointed at Cloudflare, and the scripts have access to a valid auth file with the required credentials and `CF_ZONE_ID`.
+Before applying the settings below, ensure the dependencies are met: the zone is active in Cloudflare, nameservers are pointed at Cloudflare, and the scripts have access to a valid auth file with the required credentials and `CF_ZONE_ID` or `CF_ZONE`.
 
 ### DNS and Proxy
 
@@ -229,7 +229,7 @@ Examples:
 - `cloud-dns.sh example.com 203.0.113.10`
 
 Status columns:
-The `status_*` columns in `domains.csv` record the latest confirmed stage for each layer. The value `none` indicates that no tests for that layer have passed yet. These values are used for filtering and reporting rather than as authoritative configuration, and `status_cf=worker` is treated the same as `status_cf=ignore` unless explicitly included. In practice, `status_cf=https` means the standard edge checks for a full HTTPS site are confirmed, while `status_cf=redirect` means the redirect-only edge behavior is confirmed. For the origin layer, the implemented check group maps to `status_origin=apache` when `check-origin.sh` succeeds. For WordPress, `check-wp.sh` validates installation and configuration; a separate load test would be required before recording `status_wp=load`, so that value should remain unused until such a test is implemented.
+The `status_*` columns in `domains.csv` record the latest confirmed stage for each layer. The value `none` indicates that no tests for that layer have passed yet, and `status_cf=added` indicates the zone exists but is not yet active. These values are used for filtering and reporting rather than as authoritative configuration, and `status_cf=worker` is treated the same as `status_cf=ignore` unless explicitly included. In practice, `status_cf=https` means the standard edge checks for a full HTTPS site are confirmed, while `status_cf=redirect` means the redirect-only edge behavior is confirmed. For the origin layer, the implemented check group maps to `status_origin=apache` when `check-origin.sh` succeeds. For WordPress, `check-wp.sh` validates installation and configuration; a separate load test would be required before recording `status_wp=load`, so that value should remain unused until such a test is implemented.
 
 #### IP address inputs
 
@@ -311,7 +311,8 @@ Provisioning and write operations:
 - `cloud-dns.sh` creates or updates DNS records. It requires DNS edit access for the zone. An account token with Zone DNS Edit scope is preferred, but the global API key works when the token lacks permissions.
 - Redirect Rules use the Rulesets API (`http_request_dynamic_redirect`). A token must include Rulesets Edit on the zone; otherwise use the global API key.
 - Page Rules are a legacy API (`/pagerules`). Account tokens do not work on this endpoint; you must use the global API key + email for Page Rules read or write.
-- Origin CA certificate requests (`get-cert.sh --api`) prefer `CF_CA_KEY` (Origin CA User Service Key). If that is absent, the scripts fall back to account token or global key where the endpoint allows it.
+- Origin CA certificate requests (`get-cert.sh --api`) require `CF_CA_KEY` (Origin CA User Service Key). Token/key credentials do not apply to Origin CA requests in this tooling.
+- The Origin CA key is not valid for standard zone endpoints (for example, `/zones`, `/settings`, or `/dns_records`) and will return auth errors; use token or global key for those APIs.
 
 Practical guidance:
 - Prefer account API tokens for regular read/write operations and scope them to the minimal required permissions.
@@ -360,7 +361,7 @@ Environment variables:
 Notes:
 - Account API tokens are verified against the account endpoint when `CF_ACCOUNT_ID` is available.
 - Global API keys are verified with X-Auth-Email + X-Auth-Key against `/user`.
-- Origin CA keys are verified with a read-only GET to `/certificates?zone_id=...`.
+- Origin CA keys are verified with a read-only GET to `/certificates?zone_id=...`. If `CF_ZONE_ID` is missing but `CF_ZONE` is present, the script will attempt to resolve the zone ID using available API credentials.
 
 #### cloud-dns.sh (production/installation)
 
@@ -408,7 +409,7 @@ Arguments:
 Options (script-specific):
 - `--domain NAME` adds a domain to the list (repeatable).
 - `--ip IP [IP]` sets the IPv4 address for the apex A record (default: `104.238.140.248`).
-- `--site-type TYPE` sets the inventory `site_type` (`standalone`, `multisite`, or `redirect`); default is `standalone` when no CSV value exists.
+- `--site-type TYPE` sets the inventory `site_type` (`singlesite`, `multisite`, or `redirect`); default is `singlesite` when no CSV value exists.
 - `--multisite-domain NAME` sets the inventory multisite domain when `site_type=multisite`.
 - `--redirect-url URL` sets the inventory redirect target when `site_type=redirect`.
 - `--registrar NAME` sets the inventory registrar (default: `Unknown`).
@@ -466,7 +467,7 @@ Environment variables:
 - `SSL_DIR` (and derived cert/key paths) and Cloudflare auth variables.
 
 Notes:
-- API mode prefers `CF_CA_KEY` when available and falls back to `CF_API_TOKEN` or `CF_API_KEY` + `CF_API_EMAIL`.
+- API mode requires `CF_CA_KEY` for Origin CA issuance; token/key credentials are not used for that endpoint.
 - Manual mode writes to the SSL directories derived from `SSL_DIR`.
 
 #### check-cf.sh (verification/investigation)
@@ -511,7 +512,7 @@ Arguments:
 
 Options (script-specific):
 - `--http-timeout SECONDS [HTTP_TIMEOUT] (default: 10)` controls curl timeouts.
-- `--api` enables Cloudflare API checks and requires `CF_ZONE_ID` plus valid credentials.
+- `--api` enables Cloudflare API checks and requires `CF_ZONE_ID` or `CF_ZONE` plus valid credentials.
 - `--domain NAME` adds a domain to the list (repeatable).
 - `--hsts=true|false` requires the Strict-Transport-Security header.
 
@@ -528,7 +529,7 @@ Environment variables:
 - Cloudflare auth variables when `--api` is used.
 
 Notes:
-- `--api` performs Cloudflare setting checks using the single `CF_ZONE_ID` value; use separate runs if you need to validate multiple zones with different IDs.
+- `--api` performs Cloudflare setting checks using the single `CF_ZONE_ID` value (resolved from `CF_ZONE` when needed); use separate runs if you need to validate multiple zones with different IDs.
 - DNS checks report A records (required) and also report CNAME and AAAA records when present.
 - `HSTS_REQUIRED` can be set to `true` or `false` in the environment or auth file to require Strict-Transport-Security without passing `--hsts=true|false`.
 - Behavioral checks assume apex is canonical, require 301 redirects for HTTP and www, and verify WordPress asset markers (`/wp-content` or `/wp-includes`) on the canonical HTTPS response.
@@ -713,7 +714,7 @@ This cross-reference lists options alphabetically and the scripts that implement
 - `--email` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, verify-cf-auth.sh)
 - `--force` (get-cert.sh)
 - `--help` (apache-vhost.sh, check-cf.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, mcp-cf.sh, onboard-zone.sh, smoke.sh, verify-cf-auth.sh, verify-domain.sh)
-- `--hsts=true|false` (check-edge.sh, verify-domain.sh)
+- `--hsts` (check-edge.sh, verify-domain.sh)
 - `--http` (apache-vhost.sh)
 - `--http-timeout` (check-edge.sh, verify-domain.sh)
 - `--include-ignore` (smoke.sh)
@@ -737,7 +738,6 @@ This cross-reference lists options alphabetically and the scripts that implement
 - `--token` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, verify-cf-auth.sh)
 - `--update` (cloud-dns.sh)
 - `--wp-root` (apache-vhost.sh, check-origin.sh, check-wp.sh, install-site.sh, smoke.sh, verify-domain.sh)
-- `--yes` (mcp-cf.sh)
 - `--zone` (check-cf.sh)
 - `--zone-id` (check-cf.sh, verify-cf-auth.sh)
 
@@ -749,3 +749,11 @@ This cross-reference lists helper scripts and the programs or tests that source 
 - `cli.sh`: apache-vhost.sh, check-cf.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, mcp-cf.sh, onboard-zone.sh, smoke.sh, test_cli.sh, verify-cf-auth.sh, verify-domain.sh
 - `auth.sh`: check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, test_cf.sh, test_cli.sh, verify-cf-auth.sh
 - `mcp.sh`: mcp-cf.sh, test_mcp.sh
+
+## TODO (Revisit)
+
+The items below capture small, implementation-focused follow-ups that keep helper behavior and option parsing consistent as the script surface grows.
+
+- Helper predicates: document the shared `cf_has_env`/`cf_has_all` pattern used by `cf_has_*` helpers so future additions follow the same empty-vs-unset semantics and avoid divergent checks.
+- Enum parsing: evaluate whether option values with limited sets (for example `--site-type`, `--singlesite|--multisite|--autosite`, or `--api|--manual|--auto`) should accept environment equivalents with explicit enum validation, and if so, keep CLI/env/auth error messaging aligned.
+- Origin cert auth policy: revisit whether `get-cert.sh` should prefer the global API key for Origin CA issuance, with `CF_CA_KEY` as a fallback, and document the rationale and any security tradeoffs before changing the default.

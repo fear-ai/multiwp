@@ -114,7 +114,8 @@ Cloudflare API access is needed only when you run API-backed scripts or optional
 Credential terminology and where to find it in the Cloudflare UI:
 - Account API token (`CF_API_TOKEN`): created under **Manage Account** → **API Tokens** (account-scoped tokens). Use this for most API scripts.
 - Global API Key (`CF_API_KEY`) + email (`CF_API_EMAIL`): user-level key found under **My Profile** → **API Tokens**.
-- Origin CA Key (`CF_CA_KEY`): user-level **Origin CA User Service Key** found under **My Profile** → **API Tokens**. This is used by `scripts/get-cert.sh --api`.
+- Origin CA Key (`CF_CA_KEY`): user-level **Origin CA User Service Key** found under **My Profile** → **API Tokens**. This is required by `scripts/get-cert.sh --api`.
+- Origin CA keys only authenticate Origin CA endpoints (for example `/certificates?zone_id=...`). They do not work for standard zone settings or DNS endpoints, which require an API token or global key.
 
 These keys and tokens are not per-zone; access is controlled by account membership and permissions. If you track scope hints in the auth file (for example, `CF_TOKEN_SCOPE="account"` or `CF_KEY_SCOPE="user"`), treat them as operator notes only; scripts do not enforce or parse those hints.
 
@@ -125,7 +126,7 @@ Recommended approach:
 
 Expected variables in the auth file or environment:
 - `CF_API_TOKEN` (account API token; preferred) or `CF_API_KEY` + `CF_API_EMAIL` (global API key + user email).
-- `CF_CA_KEY` (Origin CA User Service Key; required for `get-cert.sh --api` unless an API token with Origin CA permission is used).
+- `CF_CA_KEY` (Origin CA User Service Key; required for `get-cert.sh --api`).
 - `CF_ACCOUNT_ID` (required for zone creation).
 - `CF_ZONE_ID` (required for optional API validation checks).
 

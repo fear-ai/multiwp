@@ -126,7 +126,7 @@ while getopts ":-:" opt; do
                     WP_MODE_FROM_CLI=true
                     ;;
                 singlesite)
-                    WP_MODE="single"
+                    WP_MODE="singlesite"
                     WP_MODE_FROM_CLI=true
                     ;;
                 autosite)
@@ -325,8 +325,8 @@ resolve_wp_root() {
         echo "$WORDPRESS_ROOT_LOCAL"
         return 0
     fi
-    if [ "${site_type}" = "standalone" ]; then
-        warn "Standalone domain $domain missing wp_root; pass --wp-root to run checks"
+    if [ "${site_type}" = "singlesite" ]; then
+        warn "Singlesite domain $domain missing wp_root; pass --wp-root to run checks"
         return 1
     fi
     echo "$WORDPRESS_ROOT_LOCAL"
@@ -338,14 +338,14 @@ wp_mode_flag_for() {
     if [ "$WP_MODE_FROM_CLI" = true ]; then
         case "$WP_MODE" in
             multisite) echo "--multisite" ;;
-            single) echo "--singlesite" ;;
+            singlesite) echo "--singlesite" ;;
             auto) echo "--autosite" ;;
         esac
         return 0
     fi
     case "$site_type" in
         multisite) echo "--multisite" ;;
-        standalone) echo "--singlesite" ;;
+        singlesite) echo "--singlesite" ;;
         *) echo "--autosite" ;;
     esac
 }

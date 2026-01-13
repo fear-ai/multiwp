@@ -50,7 +50,7 @@ For the canonical, step-by-step onboarding and troubleshooting guidance, referen
 - Rules → Transform Rules → Managed Transforms → "Add security headers"
 
 #### Issue and install Cloudflare origin certificate
-You can issue origin certificates via the Cloudflare UI or through the API, and in both cases the installation is handled by the same helper. The manual path uses the UI for issuance and then uses `get-cert.sh --manual` to install the certificate safely; the API path uses `get-cert.sh --api` and does not require any UI steps.
+You can issue origin certificates via the Cloudflare UI or through the API, and in both cases the installation is handled by the same helper. The manual path uses the UI for issuance and then uses `get-cert.sh --manual` to install the certificate safely; the API path uses `get-cert.sh --api` and requires an Origin CA key (`CF_CA_KEY`).
 
 UI issuance + manual install:
 - SSL/TLS → Origin Server → Create Certificate

@@ -30,7 +30,7 @@ Options:
   --domain NAME  Domain to process (repeatable; positional also accepted)
 $(cli_usage_http_timeout)
 $(cli_usage_hsts)
-  --api  Enable Cloudflare API checks (optional; requires CF_ZONE_ID and either account API token CF_API_TOKEN or Global API Key + email CF_API_KEY+CF_API_EMAIL)
+  --api  Enable Cloudflare API checks (optional; requires CF_ZONE_ID or CF_ZONE and either account API token CF_API_TOKEN or Global API Key + email CF_API_KEY+CF_API_EMAIL)
   --auth token|key|auto [CF_AUTH]  Select which credential to use (default: auto)
   --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
   --token TOKEN [CF_API_TOKEN]  Set CF_API_TOKEN (account API token)
@@ -117,8 +117,12 @@ if [ "$API_CHECKS" = true ]; then
         AUTH_LOADED=true
     fi
     cf_require_auth "for --api"
-    [ -n "${CF_ZONE_ID:-}" ] || err "CF_ZONE_ID required for --api"
-    require_cmd jq
+    require_cmds jq
+    zone_domain=""
+    if [ ${#DOMAINS[@]} -eq 1 ]; then
+        zone_domain="${DOMAINS[0]}"
+    fi
+    cf_require_zone_id "for --api" "$zone_domain"
 fi
 
 if [ "$API_CHECKS" = true ] && [ ${#DOMAINS[@]} -gt 1 ]; then

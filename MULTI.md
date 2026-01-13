@@ -161,7 +161,7 @@ Host ~100 independent client sites on shared infrastructure while keeping each s
 
 **Implications:**
 - Each new domain requires issuing Cloudflare Origin certificate (manual or API)
-- Certificates are stored on the origin server with restricted permissions; see ConfigServers.md for the exact paths and ownership rules.
+- Certificates are stored on the origin server with restricted permissions; see Operations.md for the exact paths and ownership rules.
 - Apache vhost must reference the correct certificate and key for each domain
 - Cloudflare SSL/TLS mode must be "Full (strict)" for origin validation
 
@@ -310,7 +310,7 @@ Host ~100 independent client sites on shared infrastructure while keeping each s
 - Shared resources (database connections, PHP workers)
 - One site's traffic spike can affect others
 - Requires careful resource monitoring
-- Consider separating high-traffic sites to standalone installs
+- Consider separating high-traffic sites to single-site installs
 
 ---
 
@@ -320,7 +320,7 @@ Host ~100 independent client sites on shared infrastructure while keeping each s
 - WordPress runtime needs a web server-owned tree for uploads and read access to code
 - Scripts run as the deployment user with sudo, not as root
 - Certificate files must be readable by validation scripts without granting full root access
-- See ConfigServers.md for the exact ownership and permission model
+- See Operations.md for the exact ownership and permission model
 
 **Why This Matters:**
 - Scripts need to read certificates for validation
@@ -401,7 +401,7 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 
 **Cause**: deployment user lacked the documented certificate read access, so cert files were unreadable.
 
-**Fix**: grant access per ConfigServers.md and log out/in to refresh group membership.
+**Fix**: grant access per Operations.md and log out/in to refresh group membership.
 
 **Lesson**: Certificate read access is required for validation. Sudo alone doesn't grant group access. Always verify access during server setup.
 
@@ -611,7 +611,7 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 **Investigation:**
 - Baseline current performance (response times, database queries)
 - Monitor resource usage as sites are added
-- Define thresholds for moving sites to standalone installs
+- Define thresholds for moving sites to single-site installs
 - Test object caching impact on multisite
 
 ---

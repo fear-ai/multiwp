@@ -5,6 +5,55 @@ set -euo pipefail
 
 CF_API_BASE="${CF_API_BASE:-https://api.cloudflare.com/client/v4}"
 
+cf_has_env() {
+    local var="$1"
+    [ -n "${!var:-}" ]
+}
+
+cf_has_all() {
+    local var
+    for var in "$@"; do
+        cf_has_env "$var" || return 1
+    done
+    return 0
+}
+
+cf_has_token() { cf_has_env CF_API_TOKEN; }
+cf_has_key() { cf_has_all CF_API_KEY CF_API_EMAIL; }
+cf_has_ca_key() { cf_has_env CF_CA_KEY; }
+cf_has_account_id() { cf_has_env CF_ACCOUNT_ID; }
+cf_has_zone_id() { cf_has_env CF_ZONE_ID; }
+
+cf_require_token() {
+    local context="${1:-}"
+    if ! cf_has_token; then
+        if [ -n "$context" ]; then
+            err "CF_API_TOKEN required $context"
+        fi
+        err "CF_API_TOKEN required"
+    fi
+}
+
+cf_require_key() {
+    local context="${1:-}"
+    if ! cf_has_key; then
+        if [ -n "$context" ]; then
+            err "CF_API_KEY+CF_API_EMAIL required $context"
+        fi
+        err "CF_API_KEY+CF_API_EMAIL required"
+    fi
+}
+
+cf_require_ca_key() {
+    local context="${1:-}"
+    if ! cf_has_ca_key; then
+        if [ -n "$context" ]; then
+            err "CF_CA_KEY required $context"
+        fi
+        err "CF_CA_KEY required"
+    fi
+}
+
 load_cloudflare_auth() {
     local auth_file="${1:-${CF_AUTH_FILE:-$HOME/.config/cloudflare/default.auth}}"
     local prev_account_id="${CF_ACCOUNT_ID-}"
@@ -103,10 +152,10 @@ cf_auth_mode() {
     fi
     local has_token=false
     local has_key=false
-    if [ -n "${CF_API_TOKEN:-}" ]; then
+    if cf_has_token; then
         has_token=true
     fi
-    if [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ]; then
+    if cf_has_key; then
         has_key=true
     fi
     case "$mode" in
@@ -128,7 +177,7 @@ cf_auth_mode() {
             if [ "$has_key" = true ]; then
                 warn "CF_AUTH=token set; ignoring CF_API_KEY/CF_API_EMAIL"
             fi
-            [ -n "${CF_API_TOKEN:-}" ] || err "CF_API_TOKEN required when --auth token is set"
+            cf_require_token "when --auth token is set"
             CF_AUTH_MODE="token"
             return 0
             ;;
@@ -136,7 +185,7 @@ cf_auth_mode() {
             if [ "$has_token" = true ]; then
                 warn "CF_AUTH=key set; ignoring CF_API_TOKEN"
             fi
-            [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ] || err "CF_API_KEY+CF_API_EMAIL required when --auth key is set"
+            cf_require_key "when --auth key is set"
             CF_AUTH_MODE="key"
             return 0
             ;;
@@ -176,14 +225,63 @@ cf_resolve_account_name() {
 
 cf_require_account_id() {
     local context="${1:-}"
-    if [ -z "${CF_ACCOUNT_ID:-}" ] && [ -n "${CF_ACCOUNT_NAME:-}" ]; then
+    if ! cf_has_account_id && [ -n "${CF_ACCOUNT_NAME:-}" ]; then
         CF_ACCOUNT_ID=$(cf_resolve_account_name "$CF_ACCOUNT_NAME")
     fi
-    if [ -z "${CF_ACCOUNT_ID:-}" ]; then
+    if ! cf_has_account_id; then
         if [ -n "$context" ]; then
             err "CF_ACCOUNT_ID required $context"
         fi
         err "CF_ACCOUNT_ID required"
+    fi
+}
+
+cf_resolve_zone_id() {
+    local name="$1"
+    [ -n "$name" ] || err "zone name is empty"
+    cf_require_auth "to resolve zone name"
+    local resp
+    resp=$(cf_api_request GET "/zones?name=${name}&status=active")
+    if [ "$(cf_api_success "$resp")" != "true" ]; then
+        err "Failed to query zones: $(cf_api_error_messages "$resp")"
+    fi
+    local zone_id
+    zone_id=$(echo "$resp" | jq -r '.result[0].id // empty')
+    [ -n "$zone_id" ] || err "No active zone found for name: $name"
+    local zone_name
+    zone_name=$(echo "$resp" | jq -r '.result[0].name // empty')
+    if [ -n "$zone_name" ]; then
+        CF_ZONE="$zone_name"
+    fi
+    echo "$zone_id"
+}
+
+cf_require_zone_id() {
+    local context="${1:-}"
+    local domain="${2:-}"
+    local zone_name=""
+    if cf_has_zone_id; then
+        return 0
+    fi
+    if [ -n "${CF_ZONE:-}" ]; then
+        zone_name="$CF_ZONE"
+    elif [ -n "$domain" ]; then
+        zone_name="${domain#www.}"
+        if [ "$zone_name" != "$domain" ]; then
+            warn "Zone name derived from domain by stripping www: $zone_name"
+        fi
+    fi
+    if [ -n "$zone_name" ]; then
+        if command -v normalize_domain >/dev/null 2>&1; then
+            zone_name=$(normalize_domain "$zone_name")
+        fi
+        CF_ZONE_ID=$(cf_resolve_zone_id "$zone_name")
+    fi
+    if ! cf_has_zone_id; then
+        if [ -n "$context" ]; then
+            err "CF_ZONE_ID required $context"
+        fi
+        err "CF_ZONE_ID required"
     fi
 }
 
@@ -281,10 +379,10 @@ cf_init_auth() {
     [ -n "${CF_ACCOUNT_NAME_CLI:-}" ] && CF_ACCOUNT_NAME="$CF_ACCOUNT_NAME_CLI"
     [ -n "${CF_ZONE_ID_CLI:-}" ] && CF_ZONE_ID="$CF_ZONE_ID_CLI"
     [ -n "${CF_ZONE_CLI:-}" ] && CF_ZONE="$CF_ZONE_CLI"
-    if [ -n "${CF_ACCOUNT_ID:-}" ] && [ -n "${CF_ACCOUNT_NAME:-}" ]; then
+    if cf_has_account_id && [ -n "${CF_ACCOUNT_NAME:-}" ]; then
         warn "CF_ACCOUNT_ID and CF_ACCOUNT_NAME are both set; using CF_ACCOUNT_ID"
     fi
-    if [ -n "${CF_ZONE_ID:-}" ] && [ -n "${CF_ZONE:-}" ]; then
+    if cf_has_zone_id && [ -n "${CF_ZONE:-}" ]; then
         warn "CF_ZONE_ID and CF_ZONE are both set; using CF_ZONE_ID"
     fi
     return 0
@@ -294,12 +392,12 @@ cf_api_headers_mode() {
     local mode="$1"
     CF_API_HEADERS=("-H" "Content-Type: application/json")
     if [ "$mode" = "token" ]; then
-        [ -n "${CF_API_TOKEN:-}" ] || err "Account API token (CF_API_TOKEN) required for token auth"
+        cf_require_token "for token auth"
         CF_API_HEADERS+=("-H" "Authorization: Bearer $CF_API_TOKEN")
         return 0
     fi
     if [ "$mode" = "key" ]; then
-        [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ] || err "Global API Key + email (CF_API_KEY+CF_API_EMAIL) required for key auth"
+        cf_require_key "for key auth"
         CF_API_HEADERS+=("-H" "X-Auth-Key: $CF_API_KEY" "-H" "X-Auth-Email: $CF_API_EMAIL")
         return 0
     fi
@@ -384,16 +482,8 @@ cf_origin_ca_request() {
     local path="$2"
     local data="${3-}"
     CF_API_HEADERS=("-H" "Content-Type: application/json")
-    if [ -n "${CF_CA_KEY:-}" ]; then
-        CF_API_HEADERS+=("-H" "X-Auth-User-Service-Key: $CF_CA_KEY")
-    else
-        cf_auth_mode || err "Origin CA key (CF_CA_KEY), account API token (CF_API_TOKEN), or Global API Key + email (CF_API_KEY+CF_API_EMAIL) required"
-        if [ "$CF_AUTH_MODE" = "token" ]; then
-            CF_API_HEADERS+=("-H" "Authorization: Bearer $CF_API_TOKEN")
-        else
-            CF_API_HEADERS+=("-H" "X-Auth-Key: $CF_API_KEY" "-H" "X-Auth-Email: $CF_API_EMAIL")
-        fi
-    fi
+    cf_require_ca_key "for Origin CA requests"
+    CF_API_HEADERS+=("-H" "X-Auth-User-Service-Key: $CF_CA_KEY")
     if [ -n "$data" ]; then
         curl -sS -X "$method" "${CF_API_HEADERS[@]}" --data "$data" "$CF_API_BASE$path"
         return

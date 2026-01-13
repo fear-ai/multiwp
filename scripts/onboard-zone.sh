@@ -36,7 +36,7 @@ Example: onboard-zone.sh --domain example.com --ip 203.0.113.10
 Options:
   --domain NAME  Domain to provision (repeatable; positional also accepted)
   --ip IP [IP]  IPv4 address for the apex A record (default: 104.238.140.248)
-  --site-type TYPE  Inventory site_type (standalone, multisite, redirect; default: standalone)
+  --site-type TYPE  Inventory site_type (singlesite, multisite, redirect; default: singlesite)
   --multisite-domain NAME  Inventory multisite domain (used when site_type=multisite)
   --redirect-url URL  Inventory redirect target (used when site_type=redirect)
   --registrar NAME  Inventory registrar (default: Unknown)
@@ -153,28 +153,6 @@ fi
 
 require_cmds curl jq python3
 
-resolve_account_id() {
-    local name="$1"
-    [ -n "$name" ] || err "account name is empty"
-    cf_require_auth "to resolve account name"
-    local encoded
-    encoded=$(python3 - <<'PY' "$name"
-import sys
-import urllib.parse
-print(urllib.parse.quote(sys.argv[1]))
-PY
-)
-    local resp
-    resp=$(cf_api_request GET "/accounts?name=${encoded}")
-    if [ "$(cf_api_success "$resp")" != "true" ]; then
-        err "Failed to query accounts: $(cf_api_error_messages "$resp")"
-    fi
-    local acct_id
-    acct_id=$(echo "$resp" | jq -r '.result[0].id // empty')
-    [ -n "$acct_id" ] || err "No account found for name: $name"
-    echo "$acct_id"
-}
-
 csv_lookup() {
     local domain="$1"
     [ -f "$DOMAINS_FILE" ] || return 1
@@ -218,16 +196,9 @@ update_csv() {
     local redirect_url="${11}"
     local registrar="${12}"
     local dns_provider="${13}"
-
-    local notes_append=""
+    local status_cf_update=""
     if [ -n "$zone_status" ] && [ "$zone_status" != "active" ]; then
-        if [ -n "$name_servers" ]; then
-            notes_append="zone pending; ns: $name_servers"
-        else
-            notes_append="zone pending"
-        fi
-    elif [ -n "$name_servers" ]; then
-        notes_append="ns: $name_servers"
+        status_cf_update="added"
     fi
 
     DOMAIN_ORIG="$domain" \
@@ -243,7 +214,8 @@ update_csv() {
     REDIRECT_URL="$redirect_url" \
     REGISTRAR="$registrar" \
     DNS_PROVIDER="$dns_provider" \
-    NOTES_APPEND="$notes_append" \
+    NAME_SERVERS="$name_servers" \
+    STATUS_CF_UPDATE="$status_cf_update" \
     python3 - "$DOMAINS_FILE" <<'PY'
 import csv
 import os
@@ -266,8 +238,9 @@ updates = {
     "site_type": os.environ.get("SITE_TYPE", ""),
     "multisite_domain": os.environ.get("MULTISITE_DOMAIN", ""),
     "redirect_url": os.environ.get("REDIRECT_URL", ""),
+    "name_servers": os.environ.get("NAME_SERVERS", ""),
 }
-notes_append = (os.environ.get("NOTES_APPEND", "") or "").strip()
+status_cf_update = (os.environ.get("STATUS_CF_UPDATE", "") or "").strip()
 
 if not os.path.exists(path):
     raise SystemExit(f"domains.csv not found at {path}")
@@ -287,10 +260,10 @@ for row in rows:
         for key, val in updates.items():
             if val:
                 row[key] = val
-        if notes_append:
-            existing = (row.get("notes") or "").strip()
-            if notes_append not in existing:
-                row["notes"] = f"{existing}; {notes_append}" if existing else notes_append
+        if status_cf_update and "status_cf" in row:
+            existing = (row.get("status_cf") or "").strip().lower()
+            if not existing or existing == "none":
+                row["status_cf"] = status_cf_update
         break
 
 if not found:
@@ -298,8 +271,8 @@ if not found:
     for key, val in updates.items():
         if key in new_row and val:
             new_row[key] = val
-    if notes_append and "notes" in new_row:
-        new_row["notes"] = notes_append
+    if status_cf_update and "status_cf" in new_row:
+        new_row["status_cf"] = status_cf_update
     rows.append(new_row)
 
 with open(path, "w", newline="") as fh:
@@ -336,18 +309,14 @@ for domain in "${DOMAINS[@]}"; do
 
     cf_init_auth "$auth_file"
     [ -n "${CF_AUTH_CLI:-}" ] && CF_AUTH="$CF_AUTH_CLI"
-
-    account_id="${CF_ACCOUNT_ID:-}"
     if [ -n "${CF_ACCOUNT_ID_CLI:-}" ]; then
-        account_id="$CF_ACCOUNT_ID_CLI"
+        CF_ACCOUNT_ID="$CF_ACCOUNT_ID_CLI"
     fi
-    if [ -z "$account_id" ]; then
-        account_id="$csv_account_id"
+    if [ -z "${CF_ACCOUNT_ID:-}" ] && [ -n "$csv_account_id" ]; then
+        CF_ACCOUNT_ID="$csv_account_id"
     fi
-    if [ -z "$account_id" ] && [ -n "${CF_ACCOUNT_NAME:-}" ]; then
-        account_id=$(resolve_account_id "$CF_ACCOUNT_NAME")
-    fi
-    [ -n "$account_id" ] || err "CF_ACCOUNT_ID required (env, --account, or domains.csv)"
+    cf_require_account_id "for zone provisioning"
+    account_id="$CF_ACCOUNT_ID"
 
     ip_addr="$IP"
     if [ -z "$ip_addr" ]; then
@@ -364,12 +333,12 @@ for domain in "${DOMAINS[@]}"; do
         site_type="$csv_site_type"
     fi
     if [ -z "$site_type" ]; then
-        site_type="standalone"
+        site_type="singlesite"
     fi
     site_type="$(tolower "$site_type")"
     case "$site_type" in
-        standalone|multisite|redirect) ;;
-        *) err "Invalid --site-type: $site_type (expected standalone, multisite, redirect)" ;;
+        singlesite|multisite|redirect) ;;
+        *) err "Invalid --site-type: $site_type (expected singlesite, multisite, redirect)" ;;
     esac
 
     multisite_domain="$MULTISITE_DOMAIN"
@@ -417,8 +386,16 @@ for domain in "${DOMAINS[@]}"; do
     fi
     zone_id=$(echo "$zone_resp" | jq -r '.result[0].id // empty')
     zone_status=$(echo "$zone_resp" | jq -r '.result[0].status // empty')
-    name_servers=$(echo "$zone_resp" | jq -r '.result[0].name_servers[]?')
-    name_servers=$(echo "$name_servers" | paste -sd ' ' -)
+    name_servers_full=$(echo "$zone_resp" | jq -r '.result[0].name_servers[]?')
+    name_servers_full=$(echo "$name_servers_full" | paste -sd ' ' -)
+    name_servers=""
+    if [ -n "$name_servers_full" ]; then
+        name_servers_list=()
+        for ns in $name_servers_full; do
+            name_servers_list+=("${ns%%.*}")
+        done
+        name_servers=$(IFS=' '; printf '%s' "${name_servers_list[*]}")
+    fi
 
     account_email="$csv_account_email"
     if [ -n "${CF_API_EMAIL:-}" ]; then
@@ -453,7 +430,7 @@ for domain in "${DOMAINS[@]}"; do
     fi
 
     log "Zone ready: $domain ($zone_id, status=$zone_status)"
-    if [ -n "$name_servers" ]; then
-        log "Nameservers: $name_servers"
+    if [ -n "$name_servers_full" ]; then
+        log "Nameservers: $name_servers_full"
     fi
 done

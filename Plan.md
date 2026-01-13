@@ -31,17 +31,18 @@ The items below are active but not yet completed.
 Define and document the input format for batch runs, including Cloudflare account mapping, redirect-only markers, and per-domain overrides. The current working header is stored in `domains.csv` at the repo root and is the format to build around.
 
 Current header (CSV):
-`domain,registrar,dns_provider,ip,auth_file,zone_id,zone_name,account_id,account_email,site_type,multisite_domain,redirect_url,wp_blog_id,vhost,db_name,db_user,wp_root,wp_admin,wp_config,status_cf,status_origin,status_wp,notes`
+`domain,registrar,dns_provider,ip,auth_file,zone_id,zone_name,account_id,account_email,site_type,multisite_domain,redirect_url,wp_blog_id,vhost,db_name,db_user,wp_root,wp_admin,wp_config,status_cf,status_origin,status_wp,name_servers,notes`
 
 Field notes:
 - `account_id` and `account_email`: cached account identifiers for auditing. These must match the `.auth` file referenced by `auth_file` and should be treated as optional caches rather than authoritative data.
-- `site_type`: classify each domain as `multisite`, `standalone`, or `redirect` to drive which checks and provisioning steps are applied.
+- `site_type`: classify each domain as `multisite`, `singlesite`, or `redirect` to drive which checks and provisioning steps are applied.
 - `multisite_domain`: the primary network domain for multisite mapping (for example, `alphaeos.net`).
 - `redirect_url`: non-empty means redirect-only; use this to drive DNS redirect lists and to skip origin/WP checks.
 - `wp_blog_id`: optional cached blog ID from `wp_blogs` for mapped multisite domains.
-- `status_cf`: track the latest confirmed Cloudflare state. Use `none` before any tests pass, `redirect` for redirect-only domains with passing edge behavior, `worker` for Cloudflare Pages/Workers sites, `https` for standard sites with passing edge checks, and `ignore` for excluded domains.
+- `status_cf`: track the latest confirmed Cloudflare state. Use `none` before any tests pass, `added` for zones that exist but are not yet active, `redirect` for redirect-only domains with passing edge behavior, `worker` for Cloudflare Pages/Workers sites, `https` for standard sites with passing edge checks, and `ignore` for excluded domains.
 - `status_origin`: track the latest confirmed origin state. Use `none` before any tests pass and `apache` once `check-origin.sh` succeeds for the domain.
 - `status_wp`: track the latest confirmed WordPress state. Use `none` before any tests pass, `install` after WordPress is detected as installed, `config` after `check-wp.sh` validations pass, and `load` once the home page is verified via WP-CLI and via curl.
+- `name_servers`: Cloudflare-assigned nameserver labels (space-separated, store only the first label such as `doug kimora`).
 - `notes`: free-form operational notes per domain.
 
 This format supports both step 3 (read-only validation) and step 4 (batch provisioning) without additional sidecar files.
@@ -67,7 +68,7 @@ Define and document the install-time output fields that are recorded for later C
 - WordPress: `blog_id` (from site create or `wp_blogs`), `wp_blogs` row (domain/path), `siteurl` and `home` values, and the affected `wp_<blog_id>_options` table name.
 - Origin: vhost filenames created/enabled, origin cert/key paths, and Apache config test status.
 - Cloudflare: resolved zone ID, DNS record creation results (A + CNAME), and edge setting status after changes.
-- Operational summary: whether the domain is multisite, standalone, or redirect-only, plus a short success/failure summary.
+- Operational summary: whether the domain is multisite, singlesite, or redirect-only, plus a short success/failure summary.
 
 5) Cloudflare interface enhancements
 Evaluate whether to add redirect validation options to `check-edge.sh` (expected status and Location) once the current redirect-only behavior is stable.
@@ -82,7 +83,7 @@ Consider adding explicit handling for clearing CF_* variables on the CLI, and wh
 These items require investigation or a policy decision before they can be closed.
 
 1) WordPress roots
-Document single-domain WordPress roots (for example, `/var/www/html/zero.directory`) in Operations.md so operators know when to set `--wp-root` or `WORDPRESS_ROOT` for standalone installs.
+Document single-domain WordPress roots (for example, `/var/www/html/zero.directory`) in Operations.md so operators know when to set `--wp-root` or `WORDPRESS_ROOT` for single-site installs.
 
 2) Origin CA key format guidance
 Decide whether to add a warn-only validator for Origin CA keys based on the current observed format (`v1.0-` prefix with hex segments) and document where that warning should appear in script output.

@@ -39,7 +39,7 @@ $(cli_usage_ssl_dir)
   --help  Show this help
 
 Notes:
-  - API mode requires an Origin CA key (preferred) or Cloudflare API credentials.
+  - API mode requires an Origin CA key (CF_CA_KEY).
   - Manual mode prompts for certificate and key blocks and writes into SSL_DIR.
 EOF
 }
@@ -86,18 +86,8 @@ require_cmds openssl
 
 cf_init_auth
 
-AUTH_MODE=""
-
-if [ "$MODE" = "auto" ] || [ "$MODE" = "api" ]; then
-    if [ -n "${CF_CA_KEY:-}" ]; then
-        AUTH_MODE="ca-key"
-    elif cf_auth_mode; then
-        AUTH_MODE="$CF_AUTH_MODE"
-    fi
-fi
-
 if [ "$MODE" = "auto" ]; then
-    if [ -n "$AUTH_MODE" ]; then
+    if cf_has_ca_key; then
         MODE="api"
     else
         MODE="manual"
@@ -105,7 +95,7 @@ if [ "$MODE" = "auto" ]; then
 fi
 
 if [ "$MODE" = "api" ]; then
-    [ -n "$AUTH_MODE" ] || err "API auth required: Origin CA key (CF_CA_KEY), account API token (CF_API_TOKEN), or global API key + email (CF_API_KEY+CF_API_EMAIL)"
+    cf_require_ca_key
     require_cmds curl jq
 fi
 

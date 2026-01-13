@@ -16,7 +16,6 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 
 CATALOG=false
 APPLY=false
-YES=false
 PORTAL_URL=""
 MCP_BEARER_TOKEN="${MCP_BEARER_TOKEN-}"
 CF_AUTH_CLI=""
@@ -31,7 +30,6 @@ Options:
   --bearer TOKEN [MCP_BEARER_TOKEN]  Bearer token for MCP portal auth
   --catalog  Print the managed MCP server catalog reference list
   --apply  Enable write operations (not implemented)
-  --yes  Confirm write operations (required with --apply)
   --auth-file PATH [CF_AUTH_FILE]  Auth file to load
   --auth token|key|auto [CF_AUTH]  Select which credential to use (default: auto)
   --token TOKEN [CF_API_TOKEN]  Set CF_API_TOKEN (account API token)
@@ -90,7 +88,6 @@ while getopts ":-:" opt; do
                 help) usage; exit 0 ;;
                 catalog) CATALOG=true ;;
                 apply) APPLY=true ;;
-                yes) YES=true ;;
                 portal-url=*) PORTAL_URL="${OPTARG#*=}" ;;
                 portal-url)
                     [ -n "${!OPTIND-}" ] || err "--portal-url requires a value"
@@ -125,7 +122,6 @@ fi
 cf_init_auth "${CF_AUTH_FILE-}"
 
 if [ "$APPLY" = true ]; then
-    [ "$YES" = true ] || err "--apply requires --yes"
     err "Write operations are not implemented yet"
 fi
 

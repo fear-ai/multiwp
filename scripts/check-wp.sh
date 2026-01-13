@@ -41,7 +41,7 @@ while getopts ":-:" opt; do
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
-                singlesite) MODE="single" ;;
+                singlesite) MODE="singlesite" ;;
                 multisite) MODE="multisite" ;;
                 autosite) MODE="auto" ;;
                 wp-root|wp-root=*)
@@ -81,7 +81,7 @@ if [ "$MODE" = "auto" ]; then
     if priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" core is-installed --network 2>/dev/null; then
         MODE="multisite"
     elif priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" core is-installed 2>/dev/null; then
-        MODE="single"
+        MODE="singlesite"
     else
         err "WordPress not installed at $WORDPRESS_ROOT_LOCAL"
     fi

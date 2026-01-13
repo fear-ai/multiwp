@@ -99,7 +99,7 @@ validate_ip "$IP" || exit 1
 load_cloudflare_auth
 cf_init_auth
 
-[ -n "${CF_ACCOUNT_ID:-}" ] || err "CF_ACCOUNT_ID required (env or --account)"
+cf_require_account_id "for zone creation"
 cf_require_auth
 require_cmds curl jq
 

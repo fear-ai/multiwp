@@ -161,8 +161,7 @@ Implementation details (current script):
   - `--portal-url URL` to probe an MCP portal endpoint (expected `/mcp` path).
   - `--bearer TOKEN` to pass a Bearer token for protected MCP portals.
   - `--catalog` to print the managed MCP server catalog reference list.
-  - `--apply` (future) to enable write operations; requires `--yes` and currently exits with an error.
-  - `--yes` to confirm `--apply` once write operations exist.
+  - `--apply` (future) to enable write operations; currently exits with an error.
   - `--help` for usage.
 - Environment:
   - `CF_AUTH_FILE`, `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `CF_API_KEY`, `CF_API_EMAIL` for optional REST API calls (no REST calls are made yet).

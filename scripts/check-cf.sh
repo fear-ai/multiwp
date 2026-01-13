@@ -107,10 +107,10 @@ fi
 
 cf_require_auth "for Cloudflare settings check"
 
-if [ -n "${CF_ZONE_ID:-}" ] && [ -n "${CF_ZONE:-}" ]; then
+if cf_has_zone_id && [ -n "${CF_ZONE:-}" ]; then
     note "Using CF_ZONE_ID and CF_ZONE; zone ID takes precedence for API calls"
 fi
-if [ -z "${CF_ZONE_ID:-}" ]; then
+if ! cf_has_zone_id; then
     [ -n "${CF_ZONE:-}" ] || err "CF_ZONE or CF_ZONE_ID is required"
     note "Resolving zone ID from zone name: $CF_ZONE"
     zone_resp=$(cf_api_request GET "/zones?name=${CF_ZONE}&status=active")

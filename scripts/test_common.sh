@@ -193,7 +193,7 @@ cat <<'CSV' > "$domains_path"
 domain,site_type,redirect_url
 example.com,redirect,https://target.example/
 www.example.com,redirect,https://alt.example/path
-other.example.com,standalone,
+other.example.com,singlesite,
 CSV
 DOMAINS_FILE="$domains_path"
 load_dns_redirects

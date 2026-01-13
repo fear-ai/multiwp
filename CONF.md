@@ -2,7 +2,7 @@
 Date: January 5, 2026
 
 ## Introduction
-Point-in-time snapshot of the current multisite environment. Procedures and rationale live in ConfigServers.md (origin runbook), CloudflareSettings.md (edge policy), and MULTI.md (architecture).
+Point-in-time snapshot of the current multisite environment. Procedures and rationale live in Operations.md (consolidated runbook) and MULTI.md (architecture).
 
 ## Environment Snapshot
 - Server: Ubuntu 24.04 on Vultr (hostname: laz24), IP `104.238.140.248`
@@ -19,7 +19,7 @@ Point-in-time snapshot of the current multisite environment. Procedures and rati
 6: `recomp.one` (LIVE)
 7: `talkdao.org` (testing)
 
-## Standalone Installations
+## Single-site Installations
 `zero.directory`: independent WordPress at `/var/www/html/zero.directory/` with its own vhost and origin certificate; not part of multisite network.
 
 ## Target Audience

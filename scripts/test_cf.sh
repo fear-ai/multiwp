@@ -115,6 +115,58 @@ reset_auth_env
 run_subshell cf_auth_mode >/dev/null
 assert_status 1 $? "cf_auth_mode fails when no credentials"
 
+echo "== cf_has/cf_require helpers =="
+reset_auth_env
+run_subshell cf_has_token >/dev/null
+assert_status 1 $? "cf_has_token false when missing"
+CF_API_TOKEN="token123"
+run_subshell cf_has_token >/dev/null
+assert_status 0 $? "cf_has_token true when set"
+
+reset_auth_env
+CF_API_KEY="key123"
+CF_API_EMAIL="user@example.com"
+run_subshell cf_has_key >/dev/null
+assert_status 0 $? "cf_has_key true when key+email set"
+
+reset_auth_env
+CF_CA_KEY="v1.0-abc"
+run_subshell cf_has_ca_key >/dev/null
+assert_status 0 $? "cf_has_ca_key true when set"
+
+reset_auth_env
+output=$(run_subshell cf_require_token)
+status=$?
+assert_status 1 "$status" "cf_require_token fails when missing"
+assert_contains "$output" "CF_API_TOKEN required" "cf_require_token message"
+
+reset_auth_env
+output=$(run_subshell cf_require_key)
+status=$?
+assert_status 1 "$status" "cf_require_key fails when missing"
+assert_contains "$output" "CF_API_KEY+CF_API_EMAIL required" "cf_require_key message"
+
+reset_auth_env
+output=$(run_subshell cf_require_ca_key)
+status=$?
+assert_status 1 "$status" "cf_require_ca_key fails when missing"
+assert_contains "$output" "CF_CA_KEY required" "cf_require_ca_key message"
+
+reset_auth_env
+CF_ACCOUNT_ID="acct123"
+run_subshell cf_require_account_id >/dev/null
+assert_status 0 $? "cf_require_account_id succeeds when ID set"
+
+reset_auth_env
+CF_ACCOUNT_ID="acct123"
+run_subshell cf_has_account_id >/dev/null
+assert_status 0 $? "cf_has_account_id true when set"
+
+reset_auth_env
+CF_ZONE_ID="zone123"
+run_subshell cf_has_zone_id >/dev/null
+assert_status 0 $? "cf_has_zone_id true when set"
+
 
 echo "== load_cloudflare_auth =="
 auth_file="$TMP_DIR/auth"
@@ -277,15 +329,16 @@ assert_contains "$output" "X-Auth-User-Service-Key: cakey123" "cf_origin_ca_requ
 
 reset_auth_env
 CF_API_TOKEN="token123"
-output=$(cf_origin_ca_request "GET" "/certificates?zone_id=abc")
-assert_contains "$output" "Authorization: Bearer token123" "cf_origin_ca_request uses bearer token when CA key missing"
+output=$(run_subshell cf_origin_ca_request "GET" "/certificates?zone_id=abc")
+assert_status 1 $? "cf_origin_ca_request fails without CA key even when token is set"
+assert_contains "$output" "CF_CA_KEY required" "cf_origin_ca_request requires Origin CA key"
 
 reset_auth_env
 CF_API_KEY="key123"
 CF_API_EMAIL="user@example.com"
-output=$(cf_origin_ca_request "GET" "/certificates?zone_id=abc")
-assert_contains "$output" "X-Auth-Key: key123" "cf_origin_ca_request uses X-Auth-Key when CA key missing"
-assert_contains "$output" "X-Auth-Email: user@example.com" "cf_origin_ca_request uses X-Auth-Email when CA key missing"
+output=$(run_subshell cf_origin_ca_request "GET" "/certificates?zone_id=abc")
+assert_status 1 $? "cf_origin_ca_request fails without CA key even when key/email are set"
+assert_contains "$output" "CF_CA_KEY required" "cf_origin_ca_request requires Origin CA key"
 
 echo "== cf_api_request checked =="
 cat <<'STUB' > "$STUB_BIN/curl"
@@ -339,7 +392,7 @@ assert_contains "$output" "Account API token" "cf_api_request error mentions acc
 reset_auth_env
 output=$(run_subshell cf_origin_ca_request "GET" "/certificates?zone_id=abc")
 assert_status 1 $? "cf_origin_ca_request fails without credentials"
-assert_contains "$output" "Origin CA key" "cf_origin_ca_request error mentions Origin CA key"
+assert_contains "$output" "CF_CA_KEY required" "cf_origin_ca_request error mentions CF_CA_KEY"
 
 
 echo "== cf_api_success / cf_api_error_messages =="
