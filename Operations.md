@@ -92,7 +92,7 @@ Cloudflare UI is authoritative for SSL mode, redirects, and headers. Automation 
 #### Zone DNS
 Use the zone/DNS script when onboarding a new domain and you want API-driven provisioning.
 
-- Script: `scripts/cloud-dns.sh <domain> <ipv4>`.
+- Script: `scripts/cloud-dns.sh <domain> <ip>`.
 - Fit: onboarding a new domain; uses the Cloudflare API instead of the UI.
 - Does: creates the zone and adds proxied A records for apex+www. Env or options: `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `--token`, `--account`.
 
@@ -299,7 +299,7 @@ The list below covers the standard checks by layer. Use them to confirm configur
 - WordPress state: `sudo -u www-data wp --path=<wp_root> core version`, `wp site list` (example: `/var/www/html/wordpress` on Ubuntu, with `wordpress` as the chosen subdirectory).
 - DB routing tables: `mysql -u <db_user> -p -D <db_name> -e "SELECT blog_id, domain, path FROM wp_blogs;"`.
 - Functional check: browse domain → confirm HTTPS and admin login; create a test site in Network Admin and verify routing; confirm Cloudflare Full (strict) and DNS after each addition.
-- Zone/DNS creation: `scripts/cloud-dns.sh <domain> <ipv4>` (using Cloudflare API when onboarding domains).
+- Zone/DNS creation: `scripts/cloud-dns.sh <domain> <ip>` (using Cloudflare API when onboarding domains).
 
 
 ### Domain Transfer

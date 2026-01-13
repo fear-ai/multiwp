@@ -1,9 +1,9 @@
 # WordPress Multisite Tools
-Date: January 10, 2026
+Date: January 12, 2026
 
 ## Introduction
 This project implements a WordPress multisite network in subdirectory mode with apex domain mapping. Each client site uses its own domain while sharing WordPress core, themes, and plugins for operational efficiency. Cloudflare provides DNS, CDN, and edge security.
-Included are shared VPS server and WordPress multisite installation instructions, tooling, and templates to host many domains via Cloudflare and Apache, with per-domain SSL. See the Documentation Map below for the consolidated runbook and strategic context.
+Included are shared VPS server and WordPress multisite installation instructions, tooling, and templates to host many domains via Cloudflare and Apache, with per-domain SSL. See the Documentation Map below for the consolidated runbook and strategic context. Cloudflare zones are created in the Cloudflare UI; the scripts assume the zone exists before DNS automation begins.
 
 ## Expected Audience
 This documentation is written for several operator roles and is structured so each role can enter at the right layer without losing the dependency chain. System administrators responsible for Ubuntu, Apache, and Cloudflare should start with Operations.md and the verification scripts, while WordPress administrators focused on site mapping and content integrity should use Operations.md sections that cover multisite configuration and validation. Developers adapting or extending the scripts should begin with `scripts/Shell.md` and `scripts/Scripts.md`, then consult MULTI.md for architectural context.
@@ -41,9 +41,10 @@ For the canonical, step-by-step onboarding and troubleshooting guidance, referen
 ### Add Site to the Network
 
 **Access** sudo on the origin Ubuntu host; Cloudflare account for the domains.
-**Goal (not completed yet):** Domain registered, DNS pointed to Cloudflare, Cloudflare zone created, and SSL/TLS configured.
+**Goal:** Domain registered, nameservers pointed to Cloudflare, zone created in Cloudflare, and SSL/TLS configured.
 
 #### Configure Zone on Cloudflare (via UI)
+- Add the domain to Cloudflare and confirm nameservers are delegated.
 - SSL/TLS → Overview → Set "Full (strict)"
 - SSL/TLS → Edge Certificates → "Always Use HTTPS" ON
 - Rules → Transform Rules → Managed Transforms → "Add security headers"
@@ -95,7 +96,7 @@ The documents below describe different layers of the system and are intended to 
 - `Operations.md`: Consolidated runbook for Cloudflare, origin, and WordPress operations in dependency order; use the relevant sections as needed.
 - `scripts/Shell.md`: Conventions for writing scripts in this repository and using shared helpers.
 - `scripts/Scripts.md`: Authoritative script interfaces, options, and environment variables.
-- `CloudflareMCP.md` (optional): MCP portal access, OAuth flows, and how to validate Cloudflare-hosted MCP servers.
+- `CloudflareMCP.md` (optional, experimental): MCP portal access and validation notes; not part of the production flow.
 - `MULTI.md` (optional): Strategic architecture decisions, tradeoffs, and future work.
 - `DNSTerms.md` (optional): DNS and Cloudflare terminology reference.
 
@@ -127,11 +128,13 @@ Program scripts (alphabetical):
 | `check-edge.sh` | Validate Cloudflare edge behavior and headers | Exercised |
 | `check-origin.sh` | Validate origin certs, vhosts, and Apache health | Exercised |
 | `check-wp.sh` | Validate multisite mappings and site URLs | Exercised |
-| `cloud-dns.sh` | Create Cloudflare zone + DNS records via API | Not exercised |
+| `cloud-dns.sh` | Create/update DNS records in an existing Cloudflare zone | Exercised |
 | `get-cert.sh` | Issue or install Cloudflare Origin cert/key (API or manual) | Not exercised |
 | `install-site.sh` | Add site to WordPress multisite, map to apex domain | Exercised |
 | `mcp-cf.sh` | Validate Cloudflare MCP portal access | Exercised |
+| `onboard-zone.sh` | Create or ensure Cloudflare zone + DNS and update domains.csv | Not exercised |
 | `setup-wp.sh` | Bootstrap WordPress multisite base configuration | Not exercised |
+| `smoke.sh` | Run syntax/unit tests and read-only edge/DNS/origin/WP checks | Exercised |
 | `verify-cf-auth.sh` | Validate Cloudflare credentials (token/key) | Exercised |
 | `verify-domain.sh` | End-to-end validation (edge, origin, WP) | Exercised |
 

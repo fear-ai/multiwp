@@ -9,11 +9,7 @@ WordPress multisite hosting project. Read README.md first for project overview a
 
 ## Documentation Philosophy
 
-- **MULTI.md**: Strategic "why" - architecture decisions, tradeoffs, lessons, future work
-- **CloudflareSettings.md, ConfigServers.md**: Operational "how" - procedures and commands
-- **README.md**: Entry point with quick start and script reference
-
-Don't duplicate content from these files. Read them when needed.
+Use the Documentation Map in `README.md` for authoritative sources, and do not duplicate content.
 
 ## Shell Script Conventions
 
@@ -49,10 +45,7 @@ See `scripts/Shell.md` for detailed conventions. Key points:
 
 ## Git Behavior
 
-**Don't run git commands unless explicitly instructed:**
-- No automatic status/add/commit
-- On command failure: report once, ask before retry
-- When user says "stop": halt immediately
+Do not run git commands or update repositories unless explicitly instructed; ask for help instead.
 
 ## Commit Messages
 
