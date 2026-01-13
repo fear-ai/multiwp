@@ -51,7 +51,7 @@ The helper libraries provide common logic for privileges, argument parsing, and 
 Key helpers:
 - `priv()` in `common.sh` centralizes privilege escalation via `sudo`.
 - `safe_name()` in `common.sh` creates safe filenames from domains.
-- `normalize_domain`, `validate_domain`, `finalize_domains`, and `validate_ipv4` in `common.sh` keep domain and IP inputs consistent and safe.
+- `normalize_domain`, `validate_domain`, `finalize_domains`, and `validate_ip` in `common.sh` keep domain and IP inputs consistent and safe.
 - `cli_usage_*`, `cli_*_opt`, and `cli_cf_auth_opt` in `cli.sh` standardize argument parsing and help output.
 - `auth.sh` centralizes Cloudflare auth handling and API request helpers.
 

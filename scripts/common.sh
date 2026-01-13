@@ -84,7 +84,7 @@ auth_file_var() {
 load_dns_redirects() {
     DNS_REDIRECT_LIST=()
     declare -gA DNS_REDIRECT_TARGETS=()
-    local csv="${DOMAINS_CSV:-$ROOT_DIR/domains.csv}"
+    local csv="${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
     [ -f "$csv" ] || return 0
     local redirect_list=""
     if command -v python3 >/dev/null 2>&1; then
@@ -194,7 +194,7 @@ validate_domain() {
     return 0
 }
 
-validate_ipv4() {
+validate_ip() {
     local ip="$1"
     if [[ ! "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
         echo "Error: IPv4 address has invalid format"

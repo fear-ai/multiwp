@@ -35,7 +35,7 @@ $(cli_usage_common_priv)
 
 Notes:
   - Redirect-only domains (from domains.csv) are skipped.
-  - Set DOMAINS_CSV to change the default domains.csv location.
+  - Set DOMAINS_FILE to change the default domains.csv location.
 EOF
 }
 

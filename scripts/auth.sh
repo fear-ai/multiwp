@@ -8,6 +8,7 @@ CF_API_BASE="${CF_API_BASE:-https://api.cloudflare.com/client/v4}"
 load_cloudflare_auth() {
     local auth_file="${1:-${CF_AUTH_FILE:-$HOME/.config/cloudflare/default.auth}}"
     local prev_account_id="${CF_ACCOUNT_ID-}"
+    local prev_account_name="${CF_ACCOUNT_NAME-}"
     local prev_api_token="${CF_API_TOKEN-}"
     local prev_api_email="${CF_API_EMAIL-}"
     local prev_api_key="${CF_API_KEY-}"
@@ -36,6 +37,9 @@ load_cloudflare_auth() {
 
     if [ -n "$prev_account_id" ]; then
         CF_ACCOUNT_ID="$prev_account_id"
+    fi
+    if [ -n "$prev_account_name" ]; then
+        CF_ACCOUNT_NAME="$prev_account_name"
     fi
     if [ -n "$prev_api_token" ]; then
         CF_API_TOKEN="$prev_api_token"
@@ -97,24 +101,41 @@ cf_auth_mode() {
     if [ -n "$mode" ]; then
         mode="$(tolower "$mode")"
     fi
+    local has_token=false
+    local has_key=false
+    if [ -n "${CF_API_TOKEN:-}" ]; then
+        has_token=true
+    fi
+    if [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ]; then
+        has_key=true
+    fi
     case "$mode" in
         ""|auto)
-            if [ -n "${CF_API_TOKEN:-}" ]; then
+            if [ "$has_token" = true ] && [ "$has_key" = true ]; then
+                warn "CF_AUTH=auto with both token and key; using token"
+            fi
+            if [ "$has_token" = true ]; then
                 CF_AUTH_MODE="token"
                 return 0
             fi
-            if [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ]; then
+            if [ "$has_key" = true ]; then
                 CF_AUTH_MODE="key"
                 return 0
             fi
             return 1
             ;;
         token)
+            if [ "$has_key" = true ]; then
+                warn "CF_AUTH=token set; ignoring CF_API_KEY/CF_API_EMAIL"
+            fi
             [ -n "${CF_API_TOKEN:-}" ] || err "CF_API_TOKEN required when --auth token is set"
             CF_AUTH_MODE="token"
             return 0
             ;;
         key)
+            if [ "$has_token" = true ]; then
+                warn "CF_AUTH=key set; ignoring CF_API_TOKEN"
+            fi
             [ -n "${CF_API_KEY:-}" ] && [ -n "${CF_API_EMAIL:-}" ] || err "CF_API_KEY+CF_API_EMAIL required when --auth key is set"
             CF_AUTH_MODE="key"
             return 0
@@ -133,6 +154,36 @@ cf_require_auth() {
         else
             err "Account API token (CF_API_TOKEN) or Global API Key + email (CF_API_KEY+CF_API_EMAIL) required"
         fi
+    fi
+}
+
+cf_resolve_account_name() {
+    local name="$1"
+    [ -n "$name" ] || err "account name is empty"
+    cf_require_auth "to resolve account name"
+    local encoded
+    encoded=$(jq -rn --arg name "$name" '$name|@uri')
+    local resp
+    resp=$(cf_api_request GET "/accounts?name=${encoded}")
+    if [ "$(cf_api_success "$resp")" != "true" ]; then
+        err "Failed to query accounts: $(cf_api_error_messages "$resp")"
+    fi
+    local acct_id
+    acct_id=$(echo "$resp" | jq -r '.result[0].id // empty')
+    [ -n "$acct_id" ] || err "No account found for name: $name"
+    echo "$acct_id"
+}
+
+cf_require_account_id() {
+    local context="${1:-}"
+    if [ -z "${CF_ACCOUNT_ID:-}" ] && [ -n "${CF_ACCOUNT_NAME:-}" ]; then
+        CF_ACCOUNT_ID=$(cf_resolve_account_name "$CF_ACCOUNT_NAME")
+    fi
+    if [ -z "${CF_ACCOUNT_ID:-}" ]; then
+        if [ -n "$context" ]; then
+            err "CF_ACCOUNT_ID required $context"
+        fi
+        err "CF_ACCOUNT_ID required"
     fi
 }
 
@@ -175,6 +226,12 @@ cf_auth_opt() {
         account)
             [ -n "$val" ] || err "account requires a value"
             CF_ACCOUNT_ID_CLI="$val"
+            return 0
+            ;;
+        account-name=*) CF_ACCOUNT_NAME_CLI="${opt#*=}"; return 0 ;;
+        account-name)
+            [ -n "$val" ] || err "account-name requires a value"
+            CF_ACCOUNT_NAME_CLI="$val"
             return 0
             ;;
         token=*) CF_API_TOKEN_CLI="${opt#*=}"; return 0 ;;
@@ -221,8 +278,15 @@ cf_init_auth() {
     [ -n "${CF_API_EMAIL_CLI:-}" ] && CF_API_EMAIL="$CF_API_EMAIL_CLI"
     [ -n "${CF_CA_KEY_CLI:-}" ] && CF_CA_KEY="$CF_CA_KEY_CLI"
     [ -n "${CF_ACCOUNT_ID_CLI:-}" ] && CF_ACCOUNT_ID="$CF_ACCOUNT_ID_CLI"
+    [ -n "${CF_ACCOUNT_NAME_CLI:-}" ] && CF_ACCOUNT_NAME="$CF_ACCOUNT_NAME_CLI"
     [ -n "${CF_ZONE_ID_CLI:-}" ] && CF_ZONE_ID="$CF_ZONE_ID_CLI"
     [ -n "${CF_ZONE_CLI:-}" ] && CF_ZONE="$CF_ZONE_CLI"
+    if [ -n "${CF_ACCOUNT_ID:-}" ] && [ -n "${CF_ACCOUNT_NAME:-}" ]; then
+        warn "CF_ACCOUNT_ID and CF_ACCOUNT_NAME are both set; using CF_ACCOUNT_ID"
+    fi
+    if [ -n "${CF_ZONE_ID:-}" ] && [ -n "${CF_ZONE:-}" ]; then
+        warn "CF_ZONE_ID and CF_ZONE are both set; using CF_ZONE_ID"
+    fi
     return 0
 }
 

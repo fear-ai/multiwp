@@ -96,41 +96,41 @@ DOMAINS=("example..com")
 finalize_domains DOMAINS >/dev/null 2>&1
 assert_status 1 $? "finalize_domains fails on invalid domain"
 
-echo "== validate_ipv4 =="
-validate_ipv4 "192.0.2.10"
-assert_status 0 $? "validate_ipv4 accepts valid IPv4"
-validate_ipv4 "1.1.1.1"
-assert_status 0 $? "validate_ipv4 accepts public IPv4"
-validate_ipv4 "8.8.8.8"
-assert_status 0 $? "validate_ipv4 accepts public resolver IPv4"
-validate_ipv4 "93.184.216.34"
-assert_status 0 $? "validate_ipv4 accepts public example.com IPv4"
-validate_ipv4 "172.15.255.255"
-assert_status 0 $? "validate_ipv4 accepts 172.15.255.255 (outside RFC1918)"
-validate_ipv4 "172.32.0.0"
-assert_status 0 $? "validate_ipv4 accepts 172.32.0.0 (outside RFC1918)"
-validate_ipv4 "192.167.255.255"
-assert_status 0 $? "validate_ipv4 accepts 192.167.255.255 (outside RFC1918)"
-validate_ipv4 "192.169.0.0"
-assert_status 0 $? "validate_ipv4 accepts 192.169.0.0 (outside RFC1918)"
-validate_ipv4 "999.0.0.1" >/dev/null 2>&1
-assert_status 1 $? "validate_ipv4 rejects out of range"
-validate_ipv4 "192.0.2" >/dev/null 2>&1
-assert_status 1 $? "validate_ipv4 rejects invalid format"
-validate_ipv4 "224.0.0.1" >/dev/null 2>&1
-assert_status 1 $? "validate_ipv4 rejects multicast range"
-validate_ipv4 "255.255.255.255" >/dev/null 2>&1
-assert_status 1 $? "validate_ipv4 rejects broadcast"
-validate_ipv4 "10.0.0.1" >/dev/null 2>&1
-assert_status 1 $? "validate_ipv4 rejects RFC1918 10.0.0.0/8"
-validate_ipv4 "172.16.0.1" >/dev/null 2>&1
-assert_status 1 $? "validate_ipv4 rejects RFC1918 172.16.0.0/12"
-validate_ipv4 "192.168.1.1" >/dev/null 2>&1
-assert_status 1 $? "validate_ipv4 rejects RFC1918 192.168.0.0/16"
-validate_ipv4 "169.254.1.1" >/dev/null 2>&1
-assert_status 1 $? "validate_ipv4 rejects link-local 169.254.0.0/16"
-validate_ipv4 "127.0.0.1" >/dev/null 2>&1
-assert_status 1 $? "validate_ipv4 rejects loopback 127.0.0.0/8"
+echo "== validate_ip =="
+validate_ip "192.0.2.10"
+assert_status 0 $? "validate_ip accepts valid IPv4"
+validate_ip "1.1.1.1"
+assert_status 0 $? "validate_ip accepts public IPv4"
+validate_ip "8.8.8.8"
+assert_status 0 $? "validate_ip accepts public resolver IPv4"
+validate_ip "93.184.216.34"
+assert_status 0 $? "validate_ip accepts public example.com IPv4"
+validate_ip "172.15.255.255"
+assert_status 0 $? "validate_ip accepts 172.15.255.255 (outside RFC1918)"
+validate_ip "172.32.0.0"
+assert_status 0 $? "validate_ip accepts 172.32.0.0 (outside RFC1918)"
+validate_ip "192.167.255.255"
+assert_status 0 $? "validate_ip accepts 192.167.255.255 (outside RFC1918)"
+validate_ip "192.169.0.0"
+assert_status 0 $? "validate_ip accepts 192.169.0.0 (outside RFC1918)"
+validate_ip "999.0.0.1" >/dev/null 2>&1
+assert_status 1 $? "validate_ip rejects out of range"
+validate_ip "192.0.2" >/dev/null 2>&1
+assert_status 1 $? "validate_ip rejects invalid format"
+validate_ip "224.0.0.1" >/dev/null 2>&1
+assert_status 1 $? "validate_ip rejects multicast range"
+validate_ip "255.255.255.255" >/dev/null 2>&1
+assert_status 1 $? "validate_ip rejects broadcast"
+validate_ip "10.0.0.1" >/dev/null 2>&1
+assert_status 1 $? "validate_ip rejects RFC1918 10.0.0.0/8"
+validate_ip "172.16.0.1" >/dev/null 2>&1
+assert_status 1 $? "validate_ip rejects RFC1918 172.16.0.0/12"
+validate_ip "192.168.1.1" >/dev/null 2>&1
+assert_status 1 $? "validate_ip rejects RFC1918 192.168.0.0/16"
+validate_ip "169.254.1.1" >/dev/null 2>&1
+assert_status 1 $? "validate_ip rejects link-local 169.254.0.0/16"
+validate_ip "127.0.0.1" >/dev/null 2>&1
+assert_status 1 $? "validate_ip rejects loopback 127.0.0.0/8"
 
 echo "== parse_bool =="
 assert_equal "true" "$(parse_bool "true")" "parse_bool accepts true"
@@ -188,14 +188,14 @@ assert_contains "$output" "FAIL:" "fail prefixes output"
 assert_contains "$output" "test failure" "fail includes message"
 
 echo "== load_dns_redirects / is_redirect_domain =="
-domains_csv="$TMP_DIR/domains.csv"
-cat <<'CSV' > "$domains_csv"
+domains_path="$TMP_DIR/domains.csv"
+cat <<'CSV' > "$domains_path"
 domain,site_type,redirect_url
 example.com,redirect,https://target.example/
 www.example.com,redirect,https://alt.example/path
 other.example.com,standalone,
 CSV
-DOMAINS_CSV="$domains_csv"
+DOMAINS_FILE="$domains_path"
 load_dns_redirects
 assert_equal "2" "${#DNS_REDIRECT_LIST[@]}" "load_dns_redirects loads redirect list from domains.csv"
 assert_equal "example.com" "${DNS_REDIRECT_LIST[0]}" "load_dns_redirects normalizes redirect list"

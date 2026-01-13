@@ -2,7 +2,7 @@
 # cloud-dns.sh - Create a Cloudflare zone via the API and add basic DNS records.
 # For options, environment variables, defaults see usage().
 #
-# Example: cloud-dns.sh <domain> <ipv4>
+# Example: cloud-dns.sh <domain> <ip>
 
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,7 +23,7 @@ UPDATE_ONLY=false
 usage() {
   cat <<'EOF'
 cloud-dns.sh - Create a Cloudflare zone via the API and add basic DNS records.
-Example: cloud-dns.sh <domain> <ipv4>
+Example: cloud-dns.sh <domain> <ip>
 
 Creates a Cloudflare zone (full) and adds:
   - A record for the apex
@@ -85,7 +85,7 @@ else
   if [ $# -lt 1 ]; then usage; exit 1; fi
 fi
 if [ $# -gt 1 ]; then
-  err "Too many arguments. Provide <ipv4> only."
+  err "Too many arguments. Provide <ip> only."
 fi
 finalize_domains DOMAINS || { usage; exit 1; }
 if [ ${#DOMAINS[@]} -ne 1 ]; then
@@ -93,8 +93,8 @@ if [ ${#DOMAINS[@]} -ne 1 ]; then
 fi
 
 DOMAIN="${DOMAINS[0]}"
-IPV4="$1"
-validate_ipv4 "$IPV4" || exit 1
+IP="$1"
+validate_ip "$IP" || exit 1
 
 load_cloudflare_auth
 cf_init_auth
@@ -171,7 +171,7 @@ add_dns() {
   fi
 }
 
-add_dns "A" "$DOMAIN" "$IPV4"
+add_dns "A" "$DOMAIN" "$IP"
 add_dns "CNAME" "www.${DOMAIN}" "$DOMAIN"
 add_dns "CNAME" "*.${DOMAIN}" "$DOMAIN"
 

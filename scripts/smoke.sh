@@ -17,7 +17,7 @@ ALL_COMMANDS=(syn unit edge dns origin wp mysql)
 COMMAND_ALL=false
 STATE_FILTER=""
 SITE_TYPE_FILTER=""
-DOMAINS_FILE="${DOMAINS_CSV:-$ROOT_DIR/domains.csv}"
+DOMAINS_FILE="${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
 AUTH_FILE_OVERRIDE=""
 INCLUDE_IGNORE=false
 USE_API=false
@@ -47,8 +47,8 @@ Commands:
 
 Options:
   --domain NAME  Domain to test (repeatable; positional also accepted)
-  --domains-file PATH [DOMAINS_CSV] (default: ./domains.csv)  Domain metadata source
-  --state STATE  Filter domains by status_cf when using domains.csv (redirect, https, worker, ignore)
+  --domains-file PATH [DOMAINS_FILE] (default: ./domains.csv)  Domain metadata source
+  --state STATE  Filter domains by status_cf when using domains.csv (none, redirect, https, worker, ignore)
   --site-type TYPE  Filter domains by site_type when using domains.csv
   --include-ignore  Include status_cf=ignore or status_cf=worker domains when using domains.csv
   --api  Enable Cloudflare API checks for edge (requires zone_id)

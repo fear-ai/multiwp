@@ -241,8 +241,9 @@ if [ ${#DOMAINS[@]} -eq 0 ]; then
 fi
 
 if [ "$HTTP_ONLY" = true ] && [ "$SSL_ONLY" = true ]; then
-    echo "Error: --http and --ssl are mutually exclusive"
-    exit 1
+    warn "--http and --ssl both set; generating both (default behavior)"
+    HTTP_ONLY=false
+    SSL_ONLY=false
 fi
 
 # Verify prerequisites
