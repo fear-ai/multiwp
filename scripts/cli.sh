@@ -132,6 +132,24 @@ cli_domain_opt() {
     return 0
 }
 
+cli_date_opt() {
+    local opt="$1"
+    local var="$2"
+    local next="${3-}"
+    local val=""
+    case "$opt" in
+        date=*) val="${opt#*=}" ;;
+        date)
+            val="$next"
+            OPTIND=$((OPTIND+1))
+            ;;
+        *) return 1 ;;
+    esac
+    [ -n "$val" ] || err "--date requires a value"
+    printf -v "$var" '%s' "$val"
+    return 0
+}
+
 cli_usage_wp_root() {
     echo "  --wp-root PATH [WORDPRESS_ROOT] (default: $WORDPRESS_ROOT)  WordPress root"
 }
@@ -147,6 +165,10 @@ cli_usage_ssl_dir() {
 
 cli_usage_domain() {
     echo "  --domain NAME  Domain to process (repeatable; positional also accepted)"
+}
+
+cli_usage_date() {
+    echo "  --date TS [DATASTORE_DATE] (format: YYYYmmdd_HHMMSS)  Override datastore backup timestamp"
 }
 
 cli_usage_hsts() {

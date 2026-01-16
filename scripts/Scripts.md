@@ -19,6 +19,7 @@ Cloudflare scripts manage credentials, DNS records, certificates, and edge valid
 
 - `verify-cf-auth.sh` — verification (read-only)
 - `cloud-dns.sh` — provisioning
+- `cloud-redirect.sh` — provisioning
 - `onboard-zone.sh` — provisioning
 - `get-cert.sh` — provisioning
 - `check-cf.sh` — verification (read-only)
@@ -43,31 +44,33 @@ WordPress scripts bootstrap or validate multisite configuration and mapping. Pro
 
 Orchestration scripts combine multiple checks in a single run.
 
+- `test-record.sh` — verification + recording
 - `verify-domain.sh` — verification (read-only)
 
-### Smoke
+### Check Read
 
-The `smoke.sh` wrapper provides a light-weight entry point for read-only validation across multiple domains. It is intended to standardize how we run syntax checks, unit tests, edge/DNS checks, and origin/WordPress checks without requiring operators to remember the underlying script order or domain selection details.
+The `check-read.sh` wrapper provides a light-weight entry point for read-only validation across multiple domains. It is intended to standardize how we run syntax checks, unit tests, edge/DNS checks, and origin/WordPress checks without requiring operators to remember the underlying script order or domain selection details.
 
 Needs and requirements are grouped below so that future changes can be evaluated against the same constraints.
 
 Needs:
 - A single entry point that can run `syn`, `unit`, `edge`, `dns`, `origin`, `wp`, and `mysql` in a predictable order.
 - Domain selection driven by `domains.csv` or an explicit list of domains provided on the command line.
-- Support for filtering by `status_cf` and `site_type` while avoiding `status_cf=ignore` and `status_cf=worker` by default.
+- Support for filtering by `status_cf` and `site_type` while avoiding `status_cf=ignore` and `status_cf=worker` plus `site_type=none`, `site_type=ignore`, and `site_type=worker` by default.
 
 Requirements:
 - Read-only behavior only; no API writes and no origin or WordPress mutations.
 - Clear exit codes: syntax/unit failures should cause a non-zero exit, while edge/DNS checks should continue across domains.
-- Consistent selection rules across all commands so a single invocation can be trusted as a “smoke run.”
+- Consistent selection rules across all commands so a single invocation can be trusted as a full read-only run.
 
 Design notes:
-- `smoke.sh` reads `domains.csv` once and applies filters only when explicit domains are not supplied.
-- If no command list is provided, `smoke.sh` runs all commands in the order listed, so a default run is a full smoke pass.
+- `check-read.sh` reads `domains.csv` once and applies filters only when explicit domains are not supplied.
+- If no command list is provided, `check-read.sh` runs all commands in the order listed, so a default run is a full read-only pass.
 - `edge` uses `check-edge.sh` (with `--api` when requested) and `dns` uses `check-cf.sh`.
 - `origin` uses `check-origin.sh`, `wp` uses `check-wp.sh`, and `mysql` uses WP-CLI `db check` against selected roots.
 - `--auth-file` overrides the per-domain auth file from `domains.csv` for edge/DNS API calls.
 - Origin, WordPress, and MySQL checks are read-only and depend on local filesystem access.
+- Empty `site_type` values are normalized to `none`, and `site_type=none`, `site_type=ignore`, and `site_type=worker` are always skipped.
 
 Implementation plan:
 1) Parse commands and options; when no commands are supplied, run the full command set in order.
@@ -109,6 +112,8 @@ When `check-edge.sh --api` runs, it requires the SSL mode to be **Full (strict)*
 
 - Path: `SSL/TLS` → `Overview` → set “SSL/TLS encryption mode” to **Full (strict)**.
 
+Redirect-only zones skip HTTPS and API checks, so they can remain on the Cloudflare default **Flexible** mode when the Redirect Rule is the only intended behavior. If you want redirect zones to fail closed when a rule is removed or misconfigured, use **Full (strict)** with a valid origin certificate so the fallback path is still protected.
+
 ### Edge HTTPS Features
 
 The redirect expectations rely on Always Use HTTPS being enabled for standard WordPress sites.
@@ -126,7 +131,7 @@ The redirect expectations rely on Always Use HTTPS being enabled for standard Wo
 
 ### WordPress Markers
 
-For non-redirect domains, `check-edge.sh` fetches HTML and expects WordPress markers (`/wp-content` or `/wp-includes`). Cloudflare Pages or Workers sites will not satisfy this check; mark those zones as `status_cf=worker` so they are skipped unless explicitly included.
+For non-redirect domains, `check-edge.sh` fetches HTML and expects WordPress markers (`/wp-content` or `/wp-includes`). Cloudflare Pages or Workers sites will not satisfy this check; mark those zones as `site_type=worker` (and `status_cf=worker` once validated) so they are skipped unless explicitly included.
 
 ### API-Visible Settings (check-cf)
 
@@ -201,6 +206,7 @@ These options and environment variables control where WordPress is located on di
 
 - `--wp-root PATH [WORDPRESS_ROOT] (default: /var/www/html/wordpress)` sets the WordPress root path for scripts that operate on the WordPress filesystem or run WP-CLI.
 - `WORDPRESS_ROOT` (env) provides the default WordPress root if the `--wp-root` option is not supplied.
+For singlesite domains with an empty `wp_root` in `domains.csv`, the read-only and recording orchestrators default to `/var/www/html/<domain>` unless `--wp-root` is explicitly supplied.
 
 #### Domain selection
 
@@ -218,6 +224,7 @@ Status (current behavior):
 - Redirect-only domains are derived from `domains.csv` (`site_type=redirect`) and loaded by `load_dns_redirects`.
 - `check-origin.sh` and `check-wp.sh` skip origin/WP checks for redirect-only domains and treat absence as expected.
 - `check-edge.sh` validates DNS and HTTP redirect behavior for redirect-only domains but skips HTTPS and Cloudflare API checks.
+ - `redirect_url` alone does not imply redirect intent; `site_type=redirect` must be set explicitly.
 
 Next steps:
 - Add redirect-focused provisioning support to `cloud-dns.sh` (for example, record patterns or options suitable for edge-only redirect zones).
@@ -229,7 +236,21 @@ Examples:
 - `cloud-dns.sh example.com 203.0.113.10`
 
 Status columns:
-The `status_*` columns in `domains.csv` record the latest confirmed stage for each layer. The value `none` indicates that no tests for that layer have passed yet, and `status_cf=added` indicates the zone exists but is not yet active. These values are used for filtering and reporting rather than as authoritative configuration, and `status_cf=worker` is treated the same as `status_cf=ignore` unless explicitly included. In practice, `status_cf=https` means the standard edge checks for a full HTTPS site are confirmed, while `status_cf=redirect` means the redirect-only edge behavior is confirmed. For the origin layer, the implemented check group maps to `status_origin=apache` when `check-origin.sh` succeeds. For WordPress, `check-wp.sh` validates installation and configuration; a separate load test would be required before recording `status_wp=load`, so that value should remain unused until such a test is implemented.
+The `status_*` columns in `domains.csv` record the latest confirmed stage for each layer. The value `none` indicates that no tests for that layer have passed yet, and `status_cf=added` indicates the zone exists but is not yet active. These values are used for filtering and reporting rather than as authoritative configuration, and `status_cf=worker` is skipped by default filters unless explicitly included. In practice, `status_cf=https` means the standard edge checks for a full HTTPS site are confirmed, while `status_cf=redirect` means the redirect-only edge behavior is confirmed. For the origin layer, the implemented check group maps to `status_origin=apache` when `check-origin.sh` succeeds. For WordPress, `check-wp.sh` validates installation and configuration; a separate load test would be required before recording `status_wp=load`, so that value should remain unused until such a test is implemented.
+
+Site type handling:
+The `site_type` column captures intent rather than validation. Empty values are normalized to `none`, and `site_type=none`, `site_type=ignore`, and `site_type=worker` are treated as explicit skip markers by `check-read.sh` and `test-record.sh`. If a domain should be validated or provisioned, set `site_type` to an explicit intent such as `singlesite`, `multisite`, or `redirect`.
+
+Alignment between intent and status:
+When a redirect or worker configuration is fully in place, `status_cf` should mirror the intent (`status_cf=redirect` for `site_type=redirect`, and `status_cf=worker` for `site_type=worker`). When `site_type=ignore` is set, `status_cf` can retain the last confirmed value or remain at `added` without affecting automation, because the ignore intent is treated as a global skip.
+
+#### Record controls
+
+Scripts that update `domains.csv` support consistent controls so automation can choose whether to write or preserve existing status values. The design and open questions are documented in `Record.md`.
+
+- `--norecord` skips updating `domains.csv` without changing the operational checks or provisioning actions.
+- `--downgrade` allows status updates that would normally be blocked by the default “no downgrade” policy (for example, switching between redirect and https status for a domain).
+- `--date TS [DATASTORE_DATE]` overrides the backup timestamp used when snapshotting `domains.csv` (format: `YYYYmmdd_HHMMSS`).
 
 #### IP address inputs
 
@@ -397,6 +418,44 @@ Notes:
 - `warn()` is used for non-fatal conditions; `fail()` reports a non-fatal check failure while allowing the script to continue; `err()` emits a fatal error and exits non-zero when a required condition fails. In `cloud-dns.sh`, duplicate A records are fatal while duplicate CNAME records emit a warning.
 - Planned: support marking zones as redirect-only (from `domains.csv`) so cloud-dns can provision redirect-focused DNS without origin dependencies.
 
+#### cloud-redirect.sh (production/installation)
+
+Purpose:
+- Ensures Cloudflare Redirect Rules exist for one or more domains using the Rulesets API (http_request_dynamic_redirect phase).
+
+Arguments:
+- One or more domain names, provided positionally or via `--domain` (repeatable).
+
+Options (script-specific):
+- `--domain NAME` adds a domain to the list (repeatable).
+- `--redirect-url URL [REDIRECT_URL]` sets the redirect target (defaults to `redirect_url` in `domains.csv`).
+- `--domains-file PATH [DOMAINS_FILE]` sets the inventory CSV path.
+- `--dry-run` prints planned changes without API writes.
+- `--date TS [DATASTORE_DATE]` overrides the backup timestamp used when snapshotting `domains.csv` (format: `YYYYmmdd_HHMMSS`).
+- `--norecord` skips `domains.csv` updates.
+- `--downgrade` allows status updates that would otherwise be blocked by the default no-downgrade policy.
+
+Options (auth and shared):
+- `--auth token|key|auto [CF_AUTH]`
+- `--auth-file PATH [CF_AUTH_FILE]`
+- `--account ID [CF_ACCOUNT_ID]`
+- `--account-name NAME [CF_ACCOUNT_NAME]`
+- `--token TOKEN [CF_API_TOKEN]`
+- `--key KEY [CF_API_KEY]`
+- `--email EMAIL [CF_API_EMAIL]`
+- `--help`
+
+Environment variables:
+- `REDIRECT_URL` for the default redirect target.
+- `DOMAINS_FILE` to override the inventory path.
+- Cloudflare auth variables listed in `auth.sh`.
+
+Notes:
+- If no domains are provided, this script uses redirect domains from `domains.csv`.
+- Redirect rules are updated to a single static redirect rule when needed, while removing custom per-domain rules.
+- When recording is enabled, `status_cf=redirect` and `redirect_url` are updated for redirect-only domains.
+- Domains with `site_type=none`, `site_type=ignore`, or `site_type=worker` are skipped entirely.
+
 #### onboard-zone.sh (production/installation)
 
 Purpose:
@@ -409,13 +468,16 @@ Arguments:
 Options (script-specific):
 - `--domain NAME` adds a domain to the list (repeatable).
 - `--ip IP [IP]` sets the IPv4 address for the apex A record (default: `104.238.140.248`).
-- `--site-type TYPE` sets the inventory `site_type` (`singlesite`, `multisite`, or `redirect`); default is `singlesite` when no CSV value exists.
+- `--site-type TYPE` sets the inventory `site_type` (`singlesite`, `multisite`, `redirect`, `worker`, `ignore`, or `none`); empty values are normalized to `none`.
 - `--multisite-domain NAME` sets the inventory multisite domain when `site_type=multisite`.
 - `--redirect-url URL` sets the inventory redirect target when `site_type=redirect`.
 - `--registrar NAME` sets the inventory registrar (default: `Unknown`).
 - `--dns-provider NAME` sets the inventory DNS provider (default: `Cloudflare`).
 - `--domains-file PATH [DOMAINS_FILE]` sets the inventory CSV path.
-- `--no-csv` skips inventory updates; provisioning still runs.
+- `--date TS [DATASTORE_DATE]` overrides the backup timestamp used when snapshotting `domains.csv` (format: `YYYYmmdd_HHMMSS`).
+- `--norecord` skips inventory updates; provisioning still runs.
+- `--downgrade` allows status updates that would otherwise be blocked by the default no-downgrade policy.
+- `--no-csv` legacy alias for `--norecord`.
 
 Options (auth and shared):
 - `--auth token|key|auto [CF_AUTH]`
@@ -437,6 +499,7 @@ Notes:
 - `onboard-zone.sh` wraps `cloud-dns.sh` so zone creation and DNS provisioning stay aligned with existing validation logic.
 - Zone creation requires a Global API Key; the script defaults to `--auth key` unless overridden.
 - The script queries the zone API to record `zone_id`, `zone_name`, and nameserver details back into the inventory.
+- Domains with `site_type=none`, `site_type=ignore`, or `site_type=worker` are skipped entirely.
 
 #### get-cert.sh (production/installation)
 
@@ -664,6 +727,44 @@ Environment variables:
 
 ### Orchestration Layer Interfaces
 
+#### test-record.sh (verification + recording)
+
+Purpose:
+- Runs selected validation checks (`check-edge.sh`, `check-origin.sh`, `check-wp.sh`) and records status updates back into `domains.csv`.
+
+Arguments:
+- One or more domain names, provided positionally or via `--domain` (repeatable).
+- Commands: `edge`, `origin`, `wp`, or `all` (default: `all`).
+
+Options (script-specific):
+- `--domain NAME` adds a domain to the list (repeatable).
+- `--domains-file PATH [DOMAINS_FILE]` sets the inventory CSV path.
+- `--state STATE` filters domains by `status_cf` when using `domains.csv`.
+- `--site-type TYPE` filters domains by `site_type` when using `domains.csv`.
+- `--include-ignore` includes `status_cf=ignore` and `status_cf=worker` when using `domains.csv`.
+- `--api` enables Cloudflare API checks for edge validation.
+- `--auth-file PATH [CF_AUTH_FILE]` sets the auth file for API calls.
+- `--http-timeout SECONDS [HTTP_TIMEOUT]` passes the timeout to `check-edge.sh`.
+- `--hsts=true|false` passes the HSTS requirement to `check-edge.sh`.
+- `--date TS [DATASTORE_DATE]` overrides the backup timestamp used when snapshotting `domains.csv` (format: `YYYYmmdd_HHMMSS`).
+- `--norecord` skips `domains.csv` updates.
+- `--downgrade` allows status updates that would otherwise be blocked by the default no-downgrade policy.
+- `--multisite`, `--singlesite`, `--autosite` control WordPress mode selection.
+- `--wp-root PATH [WORDPRESS_ROOT]` sets the WordPress root used for origin/WP checks.
+- `--apache-dir DIR [APACHE_DIR]` passes the Apache sites directory to `check-origin.sh`.
+- `--ssl-dir DIR [SSL_DIR]` passes the SSL directory to `check-origin.sh`.
+- `--allow-root`, `--no-sudo` pass through to origin/WP checks.
+- `--help`.
+
+Environment variables:
+- `DOMAINS_FILE`, `HTTP_TIMEOUT`, `WORDPRESS_ROOT`, `APACHE_DIR`, `SSL_DIR`.
+
+Notes:
+- Successful edge checks record `status_cf=https` for standard domains or `status_cf=redirect` for redirect-only domains.
+- Successful origin checks record `status_origin=apache`.
+- Successful WordPress checks record `status_wp=config`.
+- Empty `site_type` values are normalized to `none`; `site_type=none`, `site_type=ignore`, and `site_type=worker` are skipped regardless of status filters.
+
 #### verify-domain.sh (verification/investigation)
 
 Purpose:
@@ -694,50 +795,54 @@ This cross-reference lists options alphabetically and the scripts that implement
 
 - `-e` (check-cf.sh)
 - `-s` (check-cf.sh)
-- `--account` (cloud-dns.sh, mcp-cf.sh, onboard-zone.sh, verify-cf-auth.sh)
-- `--account-name` (onboard-zone.sh)
-- `--allow-root` (check-origin.sh, check-wp.sh, verify-domain.sh)
-- `--apache-dir` (apache-vhost.sh, check-origin.sh, smoke.sh, verify-domain.sh)
-- `--api` (check-edge.sh, get-cert.sh, smoke.sh, verify-domain.sh)
+- `--account` (cloud-dns.sh, cloud-redirect.sh, mcp-cf.sh, onboard-zone.sh, verify-cf-auth.sh)
+- `--account-name` (cloud-redirect.sh, onboard-zone.sh)
+- `--allow-root` (check-origin.sh, check-wp.sh, test-record.sh, verify-domain.sh)
+- `--apache-dir` (apache-vhost.sh, check-origin.sh, test-record.sh, check-read.sh, verify-domain.sh)
+- `--api` (check-edge.sh, get-cert.sh, test-record.sh, check-read.sh, verify-domain.sh)
 - `--apply` (mcp-cf.sh)
-- `--auth` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, verify-cf-auth.sh)
-- `--auth-file` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, smoke.sh, verify-cf-auth.sh)
+- `--auth` (check-cf.sh, check-edge.sh, cloud-dns.sh, cloud-redirect.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, verify-cf-auth.sh)
+- `--auth-file` (check-cf.sh, check-edge.sh, cloud-dns.sh, cloud-redirect.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, test-record.sh, check-read.sh, verify-cf-auth.sh)
 - `--auto` (get-cert.sh)
-- `--autosite` (check-wp.sh, smoke.sh)
+- `--autosite` (check-wp.sh, test-record.sh, check-read.sh)
 - `--bearer` (mcp-cf.sh)
 - `--ca-key` (get-cert.sh, verify-cf-auth.sh)
 - `--catalog` (mcp-cf.sh)
 - `--create` (cloud-dns.sh)
+- `--date` (cloud-redirect.sh, onboard-zone.sh, test-record.sh)
 - `--dns-provider` (onboard-zone.sh)
-- `--domain` (apache-vhost.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, onboard-zone.sh, smoke.sh, verify-domain.sh)
-- `--domains-file` (onboard-zone.sh, smoke.sh)
-- `--email` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, verify-cf-auth.sh)
+- `--domain` (apache-vhost.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, cloud-redirect.sh, get-cert.sh, install-site.sh, onboard-zone.sh, test-record.sh, check-read.sh, verify-domain.sh)
+- `--domains-file` (cloud-redirect.sh, onboard-zone.sh, test-record.sh, check-read.sh)
+- `--downgrade` (cloud-redirect.sh, onboard-zone.sh, test-record.sh)
+- `--dry-run` (cloud-redirect.sh)
+- `--email` (check-cf.sh, check-edge.sh, cloud-dns.sh, cloud-redirect.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, verify-cf-auth.sh)
 - `--force` (get-cert.sh)
-- `--help` (apache-vhost.sh, check-cf.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, mcp-cf.sh, onboard-zone.sh, smoke.sh, verify-cf-auth.sh, verify-domain.sh)
-- `--hsts` (check-edge.sh, verify-domain.sh)
+- `--help` (apache-vhost.sh, check-cf.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, cloud-redirect.sh, get-cert.sh, install-site.sh, mcp-cf.sh, onboard-zone.sh, test-record.sh, check-read.sh, verify-cf-auth.sh, verify-domain.sh)
+- `--hsts` (check-edge.sh, test-record.sh, verify-domain.sh)
 - `--http` (apache-vhost.sh)
-- `--http-timeout` (check-edge.sh, verify-domain.sh)
-- `--include-ignore` (smoke.sh)
+- `--http-timeout` (check-edge.sh, test-record.sh, verify-domain.sh)
+- `--include-ignore` (test-record.sh, check-read.sh)
 - `--ip` (onboard-zone.sh)
-- `--key` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, verify-cf-auth.sh)
+- `--key` (check-cf.sh, check-edge.sh, cloud-dns.sh, cloud-redirect.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, verify-cf-auth.sh)
 - `--manual` (get-cert.sh)
-- `--multisite` (check-wp.sh, smoke.sh)
+- `--multisite` (check-wp.sh, test-record.sh, check-read.sh)
 - `--multisite-domain` (onboard-zone.sh)
 - `--no-csv` (onboard-zone.sh)
-- `--no-sudo` (check-origin.sh, check-wp.sh, verify-domain.sh)
+- `--no-sudo` (check-origin.sh, check-wp.sh, test-record.sh, verify-domain.sh)
+- `--norecord` (cloud-redirect.sh, onboard-zone.sh, test-record.sh)
 - `--portal-url` (mcp-cf.sh)
 - `--raw` (check-cf.sh)
-- `--redirect-url` (onboard-zone.sh)
+- `--redirect-url` (cloud-redirect.sh, onboard-zone.sh)
 - `--registrar` (onboard-zone.sh)
-- `--singlesite` (check-wp.sh, smoke.sh)
-- `--site-type` (onboard-zone.sh, smoke.sh)
+- `--singlesite` (check-wp.sh, test-record.sh, check-read.sh)
+- `--site-type` (onboard-zone.sh, test-record.sh, check-read.sh)
 - `--ssl` (apache-vhost.sh)
-- `--ssl-dir` (apache-vhost.sh, check-origin.sh, get-cert.sh, smoke.sh, verify-domain.sh)
-- `--state` (smoke.sh)
+- `--ssl-dir` (apache-vhost.sh, check-origin.sh, get-cert.sh, test-record.sh, check-read.sh, verify-domain.sh)
+- `--state` (test-record.sh, check-read.sh)
 - `--template` (apache-vhost.sh)
-- `--token` (check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, verify-cf-auth.sh)
+- `--token` (check-cf.sh, check-edge.sh, cloud-dns.sh, cloud-redirect.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, verify-cf-auth.sh)
 - `--update` (cloud-dns.sh)
-- `--wp-root` (apache-vhost.sh, check-origin.sh, check-wp.sh, install-site.sh, smoke.sh, verify-domain.sh)
+- `--wp-root` (apache-vhost.sh, check-origin.sh, check-wp.sh, install-site.sh, test-record.sh, check-read.sh, verify-domain.sh)
 - `--zone` (check-cf.sh)
 - `--zone-id` (check-cf.sh, verify-cf-auth.sh)
 
@@ -745,9 +850,9 @@ This cross-reference lists options alphabetically and the scripts that implement
 
 This cross-reference lists helper scripts and the programs or tests that source them. CSV files are exports for future processing; this list is the human-readable view.
 
-- `common.sh`: apache-vhost.sh, check-cf.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, mcp-cf.sh, onboard-zone.sh, setup-wp.sh, smoke.sh, test_cf.sh, test_cli.sh, test_common.sh, verify-cf-auth.sh, verify-domain.sh
-- `cli.sh`: apache-vhost.sh, check-cf.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, get-cert.sh, install-site.sh, mcp-cf.sh, onboard-zone.sh, smoke.sh, test_cli.sh, verify-cf-auth.sh, verify-domain.sh
-- `auth.sh`: check-cf.sh, check-edge.sh, cloud-dns.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, test_cf.sh, test_cli.sh, verify-cf-auth.sh
+- `common.sh`: apache-vhost.sh, check-cf.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, cloud-redirect.sh, get-cert.sh, install-site.sh, mcp-cf.sh, onboard-zone.sh, test-record.sh, setup-wp.sh, check-read.sh, test_cf.sh, test_cli.sh, test_common.sh, verify-cf-auth.sh, verify-domain.sh
+- `cli.sh`: apache-vhost.sh, check-cf.sh, check-edge.sh, check-origin.sh, check-wp.sh, cloud-dns.sh, cloud-redirect.sh, get-cert.sh, install-site.sh, mcp-cf.sh, onboard-zone.sh, test-record.sh, check-read.sh, test_cli.sh, verify-cf-auth.sh, verify-domain.sh
+- `auth.sh`: check-cf.sh, check-edge.sh, cloud-dns.sh, cloud-redirect.sh, get-cert.sh, mcp-cf.sh, onboard-zone.sh, test_cf.sh, test_cli.sh, verify-cf-auth.sh
 - `mcp.sh`: mcp-cf.sh, test_mcp.sh
 
 ## TODO (Revisit)

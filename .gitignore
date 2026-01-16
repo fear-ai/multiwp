@@ -12,6 +12,11 @@
 # Custom Project Patterns
 # ============================================================================
 # Add your project-specific patterns below this line
+.claude/
+docs/
+python/
+*.auth
+*.csv
 
 # ============================================================================
 # Version Control
@@ -19,8 +24,6 @@
 .git/
 .svn/
 .hg/
-.claude/
-docs/
 
 # ============================================================================
 # Secrets and Credentials

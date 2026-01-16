@@ -76,6 +76,23 @@ assert_equal "abcexamplecom" "$(safe_name "a-b.c-example.com")" "safe_name strip
 echo "== normalize_domain =="
 assert_equal "example.com" "$(normalize_domain " Example.COM ")" "normalize_domain trims and lowercases"
 
+echo "== trim_spaces / normalize_site_type =="
+assert_equal "value" "$(trim_spaces "  value  ")" "trim_spaces trims leading and trailing whitespace"
+assert_equal "none" "$(normalize_site_type "")" "normalize_site_type maps empty to none"
+assert_equal "none" "$(normalize_site_type "   ")" "normalize_site_type maps whitespace to none"
+assert_equal "singlesite" "$(normalize_site_type "SingleSite")" "normalize_site_type lowercases values"
+assert_equal "worker" "$(normalize_site_type " WORKER ")" "normalize_site_type trims and lowercases"
+
+echo "== site_type_is_skip =="
+site_type_is_skip "none"
+assert_status 0 $? "site_type_is_skip matches none"
+site_type_is_skip "ignore"
+assert_status 0 $? "site_type_is_skip matches ignore"
+site_type_is_skip "worker"
+assert_status 0 $? "site_type_is_skip matches worker"
+site_type_is_skip "singlesite"
+assert_status 1 $? "site_type_is_skip rejects singlesite"
+
 echo "== validate_domain =="
 validate_domain "example.com"
 assert_status 0 $? "validate_domain accepts valid domain"
@@ -207,6 +224,26 @@ is_redirect_domain "WWW.EXAMPLE.COM"
 assert_status 0 $? "is_redirect_domain matches normalized domain"
 is_redirect_domain "other.example.com"
 assert_status 1 $? "is_redirect_domain rejects non-redirect domain"
+
+echo "== record_backup_datastore =="
+backup_dir="$TMP_DIR/record"
+mkdir -p "$backup_dir"
+backup_csv="$backup_dir/domains.csv"
+cat <<'CSV' > "$backup_csv"
+domain,status_cf
+example.com,
+CSV
+DATASTORE_BACKUP_DONE=false
+DATASTORE_DATE="20260116_120000"
+record_backup_datastore "$backup_csv" >/dev/null 2>&1
+expected_backup="$backup_dir/datastore_20260116_120000.csv"
+if [ -f "$expected_backup" ] && [ ! -f "$backup_csv" ]; then
+    pass "record_backup_datastore uses DATASTORE_DATE override"
+else
+    fail "record_backup_datastore did not create expected backup"
+fi
+DATASTORE_DATE=""
+DATASTORE_BACKUP_DONE=false
 
 echo "== priv with sudo enabled =="
 SUDO_STUB="$TMP_DIR/sudo"

@@ -35,6 +35,30 @@ priv() {
 
 tolower() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 safe_name() { echo "$1" | sed 's/[.-]//g'; }
+trim_spaces() {
+    local val="${1-}"
+    val="${val#"${val%%[![:space:]]*}"}"
+    val="${val%"${val##*[![:space:]]}"}"
+    echo "$val"
+}
+normalize_site_type() {
+    local raw="${1-}"
+    raw=$(trim_spaces "$raw")
+    raw=$(tolower "$raw")
+    if [ -z "$raw" ]; then
+        echo "none"
+        return 0
+    fi
+    echo "$raw"
+}
+site_type_is_skip() {
+    local site_type
+    site_type=$(normalize_site_type "$1")
+    case "$site_type" in
+        none|ignore|worker) return 0 ;;
+    esac
+    return 1
+}
 parse_comma_list() {
     local raw="${1-}"
     local -n out="$2"
@@ -65,6 +89,157 @@ parse_bool() {
         false|no|n) echo "false" ;;
         *) return 1 ;;
     esac
+}
+
+DATASTORE_BACKUP_DONE="${DATASTORE_BACKUP_DONE:-false}"
+DATASTORE_BACKUP_PATH="${DATASTORE_BACKUP_PATH:-}"
+
+record_backup_datastore() {
+    local path="$1"
+    [ -n "$path" ] || err "Datastore path required"
+    [ -f "$path" ] || err "Datastore not found: $path"
+    if [ "$DATASTORE_BACKUP_DONE" = true ]; then
+        DATASTORE_BACKUP_PATH="$path"
+        export DATASTORE_BACKUP_PATH
+        echo "$path"
+        return 0
+    fi
+
+    # TODO: add a write lock around datastore updates to prevent concurrent writes.
+    local dir ts backup
+    dir=$(dirname "$path")
+    ts="${DATASTORE_DATE-}"
+    if [ -n "$ts" ]; then
+        if [[ "$ts" == *"/"* || "$ts" == *".."* ]]; then
+            err "Invalid --date: path separators are not allowed"
+        fi
+        if ! [[ "$ts" =~ ^[0-9]{8}_[0-9]{6}$ ]]; then
+            err "Invalid --date: expected YYYYmmdd_HHMMSS"
+        fi
+    else
+        ts=$(date +%Y%m%d_%H%M%S)
+    fi
+    backup="$dir/datastore_${ts}.csv"
+    mv "$path" "$backup"
+    DATASTORE_BACKUP_DONE=true
+    export DATASTORE_BACKUP_DONE
+    DATASTORE_BACKUP_PATH="$backup"
+    export DATASTORE_BACKUP_PATH
+    log "Backed up datastore to $backup" >&2
+    echo "$backup"
+}
+
+record_update_csv() {
+    local dest_path="$1"
+    local domain="$2"
+    local allow_downgrade="${3:-false}"
+    shift 3
+    local updates=("$@")
+
+    if [ "${RECORD_UPDATES:-true}" != true ]; then
+        return 0
+    fi
+    [ -n "$dest_path" ] || err "Datastore path required"
+    [ -n "$domain" ] || err "Domain required for datastore update"
+    require_cmd python3
+
+    record_backup_datastore "$dest_path"
+    local source_path="${DATASTORE_BACKUP_PATH:-$dest_path}"
+
+    python3 - "$source_path" "$dest_path" "$domain" "$allow_downgrade" "${updates[@]}" <<'PY'
+import csv
+import sys
+
+source_path = sys.argv[1]
+dest_path = sys.argv[2]
+domain = (sys.argv[3] or "").strip().lower()
+allow_downgrade = (sys.argv[4] or "").strip().lower() == "true"
+updates = {}
+for arg in sys.argv[5:]:
+    if "=" not in arg:
+        continue
+    key, val = arg.split("=", 1)
+    updates[key] = val
+
+status_orders = {
+    "status_cf": {"": 0, "none": 0, "added": 1, "redirect": 2, "https": 2, "worker": 3, "ignore": 3},
+    "status_origin": {"": 0, "none": 0, "apache": 1},
+    "status_wp": {"": 0, "none": 0, "install": 1, "config": 2, "load": 3},
+}
+
+def normalize(val):
+    return (val or "").strip().lower()
+
+def apply_status(existing, desired, field):
+    desired = (desired or "").strip()
+    if not desired:
+        return existing, False
+    if allow_downgrade:
+        return desired, normalize(existing) != normalize(desired)
+    existing_norm = normalize(existing)
+    desired_norm = normalize(desired)
+    order = status_orders.get(field, {})
+    existing_rank = order.get(existing_norm)
+    desired_rank = order.get(desired_norm)
+    if existing_norm in ("worker", "ignore") and field == "status_cf" and existing_norm != desired_norm:
+        return existing, False
+    if existing_rank is None or desired_rank is None:
+        if existing_norm in ("", "none"):
+            return desired, True
+        return existing, False
+    if desired_rank < existing_rank:
+        return existing, False
+    if desired_rank == existing_rank and desired_norm != existing_norm:
+        return existing, False
+    if desired_norm != existing_norm:
+        return desired, True
+    return existing, False
+
+with open(source_path, newline="") as fh:
+    reader = csv.DictReader(fh)
+    fieldnames = reader.fieldnames or []
+    rows = list(reader)
+
+if not fieldnames:
+    raise SystemExit("datastore CSV is missing a header row")
+
+found = False
+changed = False
+for row in rows:
+    if normalize(row.get("domain")) == domain:
+        found = True
+        for key, val in updates.items():
+            if key in ("status_cf", "status_origin", "status_wp"):
+                new_val, updated = apply_status(row.get(key, ""), val, key)
+                if updated:
+                    row[key] = new_val
+                    changed = True
+            else:
+                if val:
+                    if row.get(key, "") != val:
+                        row[key] = val
+                        changed = True
+        break
+
+if not found:
+    new_row = {k: "" for k in fieldnames}
+    new_row["domain"] = domain
+    for key, val in updates.items():
+        if key in ("status_cf", "status_origin", "status_wp"):
+            new_row[key] = normalize(val)
+        elif key in new_row and val:
+            new_row[key] = val
+    rows.append(new_row)
+    changed = True
+
+if not changed and source_path == dest_path:
+    sys.exit(0)
+
+with open(dest_path, "w", newline="") as fh:
+    writer = csv.DictWriter(fh, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)
+PY
 }
 
 auth_file_var() {

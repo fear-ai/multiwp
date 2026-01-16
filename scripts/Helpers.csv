@@ -1,5 +1,5 @@
 Helper,IncludedBy
-common.sh,apache-vhost.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-wp.sh;cloud-dns.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;setup-wp.sh;smoke.sh;test_cf.sh;test_cli.sh;test_common.sh;verify-cf-auth.sh;verify-domain.sh
-cli.sh,apache-vhost.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-wp.sh;cloud-dns.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;smoke.sh;test_cli.sh;verify-cf-auth.sh;verify-domain.sh
-auth.sh,check-cf.sh;check-edge.sh;cloud-dns.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;test_cf.sh;test_cli.sh;verify-cf-auth.sh
+common.sh,apache-vhost.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;test-record.sh;setup-wp.sh;check-read.sh;test_cf.sh;test_cli.sh;test_common.sh;verify-cf-auth.sh;verify-domain.sh
+cli.sh,apache-vhost.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;test-record.sh;check-read.sh;test_cli.sh;verify-cf-auth.sh;verify-domain.sh
+auth.sh,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;test_cf.sh;test_cli.sh;verify-cf-auth.sh
 mcp.sh,mcp-cf.sh;test_mcp.sh

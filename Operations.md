@@ -182,7 +182,7 @@ Recommended approach:
 - Use a Redirect Rule at `Rules` → `Redirect Rules` that matches the alias host and issues a 301 to the canonical host, preserving path and query. This keeps redirects consistent for both HTTP and HTTPS and does not depend on origin behavior.
 - Keep “Always Use HTTPS” off for redirect-only zones when a Redirect Rule is present. The rule handles HTTP→HTTPS directly and avoids an extra redirect hop on the alias host.
 - Keep HSTS off for redirect-only zones. HSTS is a browser-level commitment and should be reserved for the canonical domain, not for disposable or temporary aliases.
-- Prefer Full (strict) SSL mode when a valid origin cert is present so the edge remains secure even if a redirect rule is accidentally disabled. If no valid origin cert exists and the redirect rule is the only intended behavior, use Full instead of Flexible to avoid silent downgrade.
+- Flexible SSL mode is acceptable for redirect-only zones when the Redirect Rule is the only intended behavior, because the edge responds and the origin is effectively bypassed. If you want the redirect zone to fail closed when a rule is removed or misconfigured, use Full (strict) with a valid origin certificate so the fallback path is still protected.
 
 Operational notes:
 - Ensure alias DNS records are proxied (orange cloud) so Redirect Rules apply at the edge.

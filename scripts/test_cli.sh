@@ -208,6 +208,24 @@ assert_equal "2" "$OPTIND" "cli_domain_opt advances OPTIND for --domain VAL"
 output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/WP/multiwp/scripts/cli.sh; OPTIND=1; DOMAINS=(); cli_domain_opt domain DOMAINS ""' 2>&1)
 assert_contains "$output" "--domain requires a value" "cli_domain_opt errors on missing value"
 
+echo "== cli_date_opt =="
+reset_env
+OPTIND=1
+DATASTORE_DATE=""
+cli_date_opt "date=20260116_120000" DATASTORE_DATE
+assert_equal "20260116_120000" "$DATASTORE_DATE" "cli_date_opt parses --date=VAL"
+assert_equal "1" "$OPTIND" "cli_date_opt does not advance OPTIND for --date=VAL"
+
+reset_env
+OPTIND=1
+DATASTORE_DATE=""
+cli_date_opt "date" DATASTORE_DATE "20260116_120000"
+assert_equal "20260116_120000" "$DATASTORE_DATE" "cli_date_opt parses --date VAL"
+assert_equal "2" "$OPTIND" "cli_date_opt advances OPTIND for --date VAL"
+
+output=$(bash -lc '. /home/ubuntu/WP/multiwp/scripts/common.sh; . /home/ubuntu/WP/multiwp/scripts/cli.sh; OPTIND=1; DATASTORE_DATE=""; cli_date_opt date DATASTORE_DATE ""' 2>&1)
+assert_contains "$output" "--date requires a value" "cli_date_opt errors on missing value"
+
 echo "== cli_cf_auth_opt =="
 reset_env
 OPTIND=1

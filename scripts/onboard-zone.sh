@@ -15,7 +15,9 @@ DOMAINS=()
 DEFAULT_IP="104.238.140.248"
 IP="${IP-}"
 DOMAINS_FILE="${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
-CSV_UPDATE=true
+DATASTORE_DATE="${DATASTORE_DATE-}"
+RECORD_UPDATES=true
+RECORD_DOWNGRADE=false
 SITE_TYPE=""
 MULTISITE_DOMAIN=""
 REDIRECT_URL=""
@@ -36,13 +38,16 @@ Example: onboard-zone.sh --domain example.com --ip 203.0.113.10
 Options:
   --domain NAME  Domain to provision (repeatable; positional also accepted)
   --ip IP [IP]  IPv4 address for the apex A record (default: 104.238.140.248)
-  --site-type TYPE  Inventory site_type (singlesite, multisite, redirect; default: singlesite)
+  --site-type TYPE  Inventory site_type (singlesite, multisite, redirect, worker, ignore, none; default: none)
   --multisite-domain NAME  Inventory multisite domain (used when site_type=multisite)
   --redirect-url URL  Inventory redirect target (used when site_type=redirect)
   --registrar NAME  Inventory registrar (default: Unknown)
   --dns-provider NAME  Inventory DNS provider (default: Cloudflare)
   --domains-file PATH [DOMAINS_FILE] (default: ./domains.csv)  Inventory CSV path
-  --no-csv  Skip domains.csv updates (Cloudflare provisioning only)
+$(cli_usage_date)
+  --norecord  Skip domains.csv updates (Cloudflare provisioning only)
+  --downgrade  Allow status downgrades in domains.csv (overrides default)
+  --no-csv  Legacy alias for --norecord
 
 Auth options (choose one):
   - Account API Token (recommended): CF_API_TOKEN=... [--token TOKEN]
@@ -60,6 +65,7 @@ Notes:
   - This script wraps cloud-dns.sh and then records zone details back into domains.csv.
   - If IP is not supplied, the script uses ip from domains.csv; if still empty, it defaults to 104.238.140.248.
   - Zone creation requires a Global API Key; the script defaults to --auth key unless you override it.
+  - Domains with site_type none, ignore, or worker are skipped entirely.
 EOF
 }
 
@@ -68,7 +74,16 @@ while getopts ":-:" opt; do
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
-                no-csv) CSV_UPDATE=false ;;
+                norecord) RECORD_UPDATES=false ;;
+                downgrade) RECORD_DOWNGRADE=true ;;
+                no-csv) RECORD_UPDATES=false ;;
+                date|date=*)
+                    if cli_date_opt "${OPTARG}" DATASTORE_DATE "${!OPTIND-}"; then
+                        :
+                    else
+                        usage; exit 1
+                    fi
+                    ;;
                 domains-file=*) DOMAINS_FILE="${OPTARG#*=}" ;;
                 domains-file)
                     [ -n "${!OPTIND-}" ] || err "--domains-file requires a path"
@@ -201,85 +216,22 @@ update_csv() {
         status_cf_update="added"
     fi
 
-    DOMAIN_ORIG="$domain" \
-    DOMAIN="$domain" \
-    ZONE_ID="$zone_id" \
-    ZONE_NAME="$domain" \
-    IP="$ip_addr" \
-    AUTH_FILE="$auth_file" \
-    ACCOUNT_ID="$account_id" \
-    ACCOUNT_EMAIL="$account_email" \
-    SITE_TYPE="$site_type" \
-    MULTISITE_DOMAIN="$multisite_domain" \
-    REDIRECT_URL="$redirect_url" \
-    REGISTRAR="$registrar" \
-    DNS_PROVIDER="$dns_provider" \
-    NAME_SERVERS="$name_servers" \
-    STATUS_CF_UPDATE="$status_cf_update" \
-    python3 - "$DOMAINS_FILE" <<'PY'
-import csv
-import os
-import sys
+    updates=()
+    [ -n "$zone_id" ] && updates+=("zone_id=$zone_id")
+    [ -n "$domain" ] && updates+=("zone_name=$domain")
+    [ -n "$ip_addr" ] && updates+=("ip=$ip_addr")
+    [ -n "$auth_file" ] && updates+=("auth_file=$auth_file")
+    [ -n "$account_id" ] && updates+=("account_id=$account_id")
+    [ -n "$account_email" ] && updates+=("account_email=$account_email")
+    [ -n "$site_type" ] && updates+=("site_type=$site_type")
+    [ -n "$multisite_domain" ] && updates+=("multisite_domain=$multisite_domain")
+    [ -n "$redirect_url" ] && updates+=("redirect_url=$redirect_url")
+    [ -n "$registrar" ] && updates+=("registrar=$registrar")
+    [ -n "$dns_provider" ] && updates+=("dns_provider=$dns_provider")
+    [ -n "$name_servers" ] && updates+=("name_servers=$name_servers")
+    [ -n "$status_cf_update" ] && updates+=("status_cf=$status_cf_update")
 
-path = sys.argv[1]
-domain = os.environ.get("DOMAIN", "").strip().lower()
-domain_orig = os.environ.get("DOMAIN_ORIG", domain)
-
-updates = {
-    "domain": domain_orig,
-    "registrar": os.environ.get("REGISTRAR", ""),
-    "dns_provider": os.environ.get("DNS_PROVIDER", ""),
-    "ip": os.environ.get("IP", ""),
-    "auth_file": os.environ.get("AUTH_FILE", ""),
-    "zone_id": os.environ.get("ZONE_ID", ""),
-    "zone_name": os.environ.get("ZONE_NAME", ""),
-    "account_id": os.environ.get("ACCOUNT_ID", ""),
-    "account_email": os.environ.get("ACCOUNT_EMAIL", ""),
-    "site_type": os.environ.get("SITE_TYPE", ""),
-    "multisite_domain": os.environ.get("MULTISITE_DOMAIN", ""),
-    "redirect_url": os.environ.get("REDIRECT_URL", ""),
-    "name_servers": os.environ.get("NAME_SERVERS", ""),
-}
-status_cf_update = (os.environ.get("STATUS_CF_UPDATE", "") or "").strip()
-
-if not os.path.exists(path):
-    raise SystemExit(f"domains.csv not found at {path}")
-
-with open(path, newline="") as fh:
-    reader = csv.DictReader(fh)
-    fieldnames = reader.fieldnames or []
-    rows = list(reader)
-
-if not fieldnames:
-    raise SystemExit("domains.csv is missing a header row")
-
-found = False
-for row in rows:
-    if (row.get("domain") or "").strip().lower() == domain:
-        found = True
-        for key, val in updates.items():
-            if val:
-                row[key] = val
-        if status_cf_update and "status_cf" in row:
-            existing = (row.get("status_cf") or "").strip().lower()
-            if not existing or existing == "none":
-                row["status_cf"] = status_cf_update
-        break
-
-if not found:
-    new_row = {k: "" for k in fieldnames}
-    for key, val in updates.items():
-        if key in new_row and val:
-            new_row[key] = val
-    if status_cf_update and "status_cf" in new_row:
-        new_row["status_cf"] = status_cf_update
-    rows.append(new_row)
-
-with open(path, "w", newline="") as fh:
-    writer = csv.DictWriter(fh, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(rows)
-PY
+    record_update_csv "$DOMAINS_FILE" "$domain" "$RECORD_DOWNGRADE" "${updates[@]}"
 }
 
 for domain in "${DOMAINS[@]}"; do
@@ -332,14 +284,15 @@ for domain in "${DOMAINS[@]}"; do
     if [ -z "$site_type" ]; then
         site_type="$csv_site_type"
     fi
-    if [ -z "$site_type" ]; then
-        site_type="singlesite"
-    fi
-    site_type="$(tolower "$site_type")"
+    site_type="$(normalize_site_type "$site_type")"
     case "$site_type" in
-        singlesite|multisite|redirect) ;;
-        *) err "Invalid --site-type: $site_type (expected singlesite, multisite, redirect)" ;;
+        singlesite|multisite|redirect|worker|ignore|none) ;;
+        *) err "Invalid --site-type: $site_type (expected singlesite, multisite, redirect, worker, ignore, none)" ;;
     esac
+    if site_type_is_skip "$site_type"; then
+        warn "Skipping $domain (site_type=$site_type)"
+        continue
+    fi
 
     multisite_domain="$MULTISITE_DOMAIN"
     if [ -z "$multisite_domain" ]; then
@@ -402,7 +355,7 @@ for domain in "${DOMAINS[@]}"; do
         account_email="$CF_API_EMAIL"
     fi
 
-    if [ "$CSV_UPDATE" = true ]; then
+    if [ "$RECORD_UPDATES" = true ]; then
         update_site_type=""
         update_registrar=""
         update_dns_provider=""

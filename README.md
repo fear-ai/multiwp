@@ -96,6 +96,7 @@ The documents below describe different layers of the system and are intended to 
 - `Operations.md`: Consolidated runbook for Cloudflare, origin, and WordPress operations in dependency order; use the relevant sections as needed.
 - `scripts/Shell.md`: Conventions for writing scripts in this repository and using shared helpers.
 - `scripts/Scripts.md`: Authoritative script interfaces, options, and environment variables.
+- `Record.md`: Recording policy for updating `domains.csv` across provisioning and validation steps.
 - `CloudflareMCP.md` (optional, experimental): MCP portal access and validation notes; not part of the production flow.
 - `MULTI.md` (optional): Strategic architecture decisions, tradeoffs, and future work.
 - `DNSTerms.md` (optional): DNS and Cloudflare terminology reference.
@@ -108,6 +109,7 @@ multiwp/
 ├── README.md                      # This file
 ├── MULTI.md                       # Architecture & strategic decisions
 ├── Operations.md                  # Consolidated operational runbook
+├── Record.md                      # Recording policy for domains.csv updates
 ├── DNSTerms.md                    # DNS & Cloudflare terminology
 ├── CloudflareMCP.md               # Cloudflare MCP notes and validation steps
 ├── scripts/
@@ -127,14 +129,16 @@ Program scripts (alphabetical):
 | `check-cf.sh` | Inspect Cloudflare zone settings via API | Exercised |
 | `check-edge.sh` | Validate Cloudflare edge behavior and headers | Exercised |
 | `check-origin.sh` | Validate origin certs, vhosts, and Apache health | Exercised |
+| `check-read.sh` | Run syntax/unit tests and read-only edge/DNS/origin/WP checks | Exercised |
 | `check-wp.sh` | Validate multisite mappings and site URLs | Exercised |
 | `cloud-dns.sh` | Create/update DNS records in an existing Cloudflare zone | Exercised |
+| `cloud-redirect.sh` | Ensure Cloudflare Redirect Rules for redirect-only domains | Exercised |
 | `get-cert.sh` | Issue or install Cloudflare Origin cert/key (API or manual) | Not exercised |
 | `install-site.sh` | Add site to WordPress multisite, map to apex domain | Exercised |
 | `mcp-cf.sh` | Validate Cloudflare MCP portal access | Exercised |
 | `onboard-zone.sh` | Create or ensure Cloudflare zone + DNS and update domains.csv | Not exercised |
 | `setup-wp.sh` | Bootstrap WordPress multisite base configuration | Not exercised |
-| `smoke.sh` | Run syntax/unit tests and read-only edge/DNS/origin/WP checks | Exercised |
+| `test-record.sh` | Run validation checks and record status updates in domains.csv | Not exercised |
 | `verify-cf-auth.sh` | Validate Cloudflare credentials (token/key) | Exercised |
 | `verify-domain.sh` | End-to-end validation (edge, origin, WP) | Exercised |
 
