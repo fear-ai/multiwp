@@ -1,4 +1,5 @@
 # WordPress Multisite Hosting Project
+Date: January 5, 2026
 
 *Strategic overview documenting vision, requirements, architecture choices, tradeoffs, and lessons learned.*
 
@@ -160,9 +161,8 @@ Host ~100 independent client sites on shared infrastructure while keeping each s
 
 **Implications:**
 - Each new domain requires issuing Cloudflare Origin certificate (manual or API)
-- Certificates stored at `/etc/ssl/cloudflare-origin/{certs,keys}/<safe>.{crt,key}`
-- Permissions must be `root:ssl-cert 640` for keys
-- Apache vhost must reference correct cert paths
+- Certificates are stored on the origin server with restricted permissions; see Operations.md for the exact paths and ownership rules.
+- Apache vhost must reference the correct certificate and key for each domain
 - Cloudflare SSL/TLS mode must be "Full (strict)" for origin validation
 
 **Tradeoffs:**
@@ -310,23 +310,23 @@ Host ~100 independent client sites on shared infrastructure while keeping each s
 - Shared resources (database connections, PHP workers)
 - One site's traffic spike can affect others
 - Requires careful resource monitoring
-- Consider separating high-traffic sites to standalone installs
+- Consider separating high-traffic sites to single-site installs
 
 ---
 
 ### Permission & Security Model
 
 **File System:**
-- WordPress files owned by `www-data:www-data`
-- Deployment user (ubuntu) in `ssl-cert` group to read certificates
-- Scripts run as ubuntu with sudo, not as root
-- Certificate keys are `root:ssl-cert 640`
+- WordPress runtime needs a web server-owned tree for uploads and read access to code
+- Scripts run as the deployment user with sudo, not as root
+- Certificate files must be readable by validation scripts without granting full root access
+- See Operations.md for the exact ownership and permission model
 
 **Why This Matters:**
 - Scripts need to read certificates for validation
 - Running as root is risky (one script bug = system compromise)
-- ssl-cert group provides read access without full root
-- Discovered during testing: ubuntu user initially not in ssl-cert group
+- Least-privilege access reduces the blast radius of automation
+- Discovered during testing: missing certificate read access caused script failures
 
 **Database:**
 - WordPress database user has full access to wordpress_multisite database
@@ -334,9 +334,9 @@ Host ~100 independent client sites on shared infrastructure while keeping each s
 - All sites share wp_users table (network-level user accounts)
 
 **Lessons Learned:**
-- Always add deployment user to ssl-cert group during server setup
+- Always grant the deployment user the documented certificate read access during server setup
 - Scripts should use `sudo` for privileged operations, not require root login
-- Permission errors are often due to missing group membership, not sudo
+- Permission errors are often due to missing certificate read access, not sudo
 
 ---
 
@@ -377,7 +377,7 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 3. Update wp_<blog_id>_options URLs
 4. Verify site accessible at new domain
 
-**Lesson**: Domain mapping must happen before using `--url` flag with new domain. Direct database queries bypass site detection issues.
+**Lesson**: Domain mapping must happen before using `--url` option with new domain. Direct database queries bypass site detection issues.
 
 ---
 
@@ -399,11 +399,11 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 
 **Issue**: Scripts failed with permission errors even when run with sudo.
 
-**Cause**: ubuntu user not in ssl-cert group, couldn't read certificate files.
+**Cause**: deployment user lacked the documented certificate read access, so cert files were unreadable.
 
-**Fix**: `sudo usermod -aG ssl-cert ubuntu` then log out/in.
+**Fix**: grant access per Operations.md and log out/in to refresh group membership.
 
-**Lesson**: Group membership is required for reading certificates. Sudo alone doesn't grant group access. Always verify group membership during server setup.
+**Lesson**: Certificate read access is required for validation. Sudo alone doesn't grant group access. Always verify access during server setup.
 
 ---
 
@@ -516,7 +516,7 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 
 ### 7. API-Driven Onboarding (Not Yet Exercised)
 
-**Implemented but Not Used**: Scripts exist for Cloudflare API automation (cloud-dns.sh, cloud-cert.sh).
+**Implemented but Not Used**: Scripts exist for Cloudflare API automation (cloud-dns.sh, get-cert.sh).
 
 **Why Not Used Yet:**
 - Manual UI workflow is well-documented and tested
@@ -536,7 +536,7 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 
 **Investigation Needed:**
 - Test cloud-dns.sh for zone creation and DNS record management
-- Test cloud-cert.sh for automated origin certificate issuance
+- Test get-cert.sh for automated origin certificate issuance
 - Standardize API token management (environment variables vs credential store)
 - Document failure modes and recovery procedures
 - Compare reliability of API vs UI workflows
@@ -611,7 +611,7 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 **Investigation:**
 - Baseline current performance (response times, database queries)
 - Monitor resource usage as sites are added
-- Define thresholds for moving sites to standalone installs
+- Define thresholds for moving sites to single-site installs
 - Test object caching impact on multisite
 
 ---

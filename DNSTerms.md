@@ -1,6 +1,7 @@
-# DNS & Cloudflare Glossary (Workflow-Oriented)
+# DNS & Cloudflare Glossary
+Date: January 5, 2026
 
-## Subjects by Workflow Order
+## Subjects by Operational Order
 
 ### Names and Delegation
 - **Zone**: Authoritative slice of DNS (e.g., `example.com`) served by specific NS records. It contains SOA, NS, and all records for that domain unless further delegated.

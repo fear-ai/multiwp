@@ -1,35 +1,22 @@
 #!/bin/bash
-# apache-vhost.sh - Add domains to WordPress multisite
-# Creates Apache virtual hosts using templates with enhanced validation and flexibility
+# apache-vhost.sh - Add Apache vhosts for WordPress domains.
+# For options, environment variables, defaults see usage().
 #
-# Usage: ./apache-vhost.sh [OPTIONS] domain1.com domain2.com ...
-# Options:
-#   --http            Create only HTTP virtual hosts
-#   --ssl             Create only SSL virtual hosts (requires certificates)
-#   --root PATH       Set WordPress root directory (override docroot from template; default: /var/www/html/wordpress)
-#   --temp PATH       Set templates directory (default: ../templates)
-#   --ssl-dir PATH    Set base SSL directory (default: /etc/ssl/cloudflare-origin)
-#   --help            Show this help message
-#
-# Examples:
-#   ./apache-vhost.sh client1.com client2.com client3.com
-#   ./apache-vhost.sh --http test-domain.org
-#   ./apache-vhost.sh --ssl secure-site.com
-#   ./apache-vhost.sh --root /opt/wordpress --temp /etc/multiwp/templates client.com
+# Example: apache-vhost.sh [OPTIONS] domain1 [domain2...]
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-. "$SCRIPT_DIR/common.sh"
-require_cmd a2ensite
-require_cmd apache2ctl
-require_cmd systemctl
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPTS_DIR="$ROOT_DIR/scripts"
+. "$SCRIPTS_DIR/common.sh"
+. "$SCRIPTS_DIR/cli.sh"
+require_cmds a2ensite apache2ctl systemctl
 
 # Configuration (overridable via args/env)
 TEMPLATE_DIR="${TEMPLATE_DIR}"
-APACHE_SITES_DIR="${APACHE_SITES_DIR}"
-SSL_BASE="${SSL_BASE}"
-SSL_CERT_DIR="$SSL_BASE/certs"
-SSL_KEY_DIR="$SSL_BASE/keys"
+APACHE_DIR="${APACHE_DIR}"
+SSL_DIR="${SSL_DIR}"
+SSL_CERT_DIR="$SSL_DIR/certs"
+SSL_KEY_DIR="$SSL_DIR/keys"
 WORDPRESS_ROOT="${WORDPRESS_ROOT}"
 
 # Default behavior
@@ -37,74 +24,25 @@ HTTP_ONLY=false
 SSL_ONLY=false
 DOMAINS=()
 
-# Function to display help
-show_help() {
-    echo "apache-vhost.sh - Add domains to WordPress multisite"
-    echo ""
-    echo "Usage: $0 [OPTIONS] domain1.com domain2.com ..."
-    echo ""
-    echo "Options:"
-    echo "  --http            Create only HTTP virtual hosts"
-    echo "  --ssl             Create only SSL virtual hosts"
-    echo "  --root PATH       Set WordPress root directory (override docroot from template; default: /var/www/html/wordpress)"
-    echo "  --temp PATH       Set templates directory (default: ../templates)"
-    echo "  --ssl-dir PATH    Set base SSL directory (default: /etc/ssl/cloudflare-origin)"
-    echo "  --help            Show this help message"
-    echo ""
-    echo "Examples:"
-    echo "  $0 client1.com client2.com client3.com"
-    echo "  $0 --http test-domain.org"
-    echo "  $0 --ssl secure-site.com"
-    echo "  $0 --root /opt/wordpress --temp /etc/multiwp/templates client.com"
-    echo ""
-    exit 0
-}
+usage() {
+    cat <<EOF
+apache-vhost.sh - Add Apache vhosts for WordPress domains.
+Example: apache-vhost.sh [OPTIONS] domain1 [domain2...]
 
-# Function to validate domain name
-validate_domain() {
-    local domain="$1"
-    
-    # Convert to lowercase
-    domain=$(tolower "$domain")
-    
-    # Check maximum total length (255 characters)
-# length?
-    if [ ${#domain} -gt 255 ]; then
-# only print some beginning
-        echo "Error: $domain exceeds maximum length (255 characters)"
-        return 1
-    fi
-    
-    # Extract and validate TLD length (63 characters max)
-# tld Regex?
-    local tld="${domain##*.}"
-    if [ ${#tld} -gt 63 ]; then
-        echo "Error: TLD '$tld' exceeds maximum length (63 characters)"
-# only print some beginning
-# minimum 2, alpha only??
-        return 1
-    fi
-    
-    # Character set validation: alphanumeric, dots, hyphens, must have TLD
-#TLD already checked above?
-    if [[ ! "$domain" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]]; then
-        echo "Error: domain name contains invalid characters"
-        return 1
-    fi
+Options:
+  --http  Create only HTTP virtual hosts
+  --ssl  Create only SSL virtual hosts
+$(cli_usage_domain)
+  --template PATH [TEMPLATE_DIR] (default: $TEMPLATE_DIR)  Templates directory
+$(cli_usage_apache_dir)
+$(cli_usage_wp_root)
+$(cli_usage_ssl_dir)
+  --help  Show this help
 
-    # Forbidden starting characters
-    if [[ "$domain" =~ ^[.-] ]]; then
-        echo "Error: domain cannot start with dot or hyphen"
-        return 1
-    fi
-    
-    # Check for ..
-    if [[ "$domain" =~ \.\. ]]; then
-        echo "Error: domain contains double dots"
-        return 1
-    fi
-    
-    return 0
+Notes:
+  - Uses templates in the templates directory and write access to APACHE_DIR.
+  - SSL vhosts use origin cert/key files in directories from SSL_DIR.
+EOF
 }
 
 # Function to check SSL certificates
@@ -154,8 +92,8 @@ process_domain() {
         fi
     fi
     
-    local http_conf="$APACHE_SITES_DIR/${safe_name}.conf"
-    local ssl_conf="$APACHE_SITES_DIR/${safe_name}-ssl.conf"
+    local http_conf="$APACHE_DIR/${safe_name}.conf"
+    local ssl_conf="$APACHE_DIR/${safe_name}-ssl.conf"
 
     local http_expected=true
     local ssl_expected=true
@@ -243,37 +181,69 @@ process_domain() {
     return 1
 }
 
-while getopts ":h-:" opt; do
+while getopts ":-:" opt; do
     case "$opt" in
-        h) show_help ;;
         -)
             case "${OPTARG}" in
                 http) HTTP_ONLY=true ;;
                 ssl) SSL_ONLY=true ;;
-                root=*) WORDPRESS_ROOT="${OPTARG#*=}" ;;
-                temp=*) TEMPLATE_DIR="${OPTARG#*=}" ;;
-                ssl-dir=*) SSL_BASE="${OPTARG#*=}"; SSL_CERT_DIR="$SSL_BASE/certs"; SSL_KEY_DIR="$SSL_BASE/keys" ;;
-                help) show_help ;;
-                *) show_help ;;
+                domain|domain=*)
+                    if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
+                        :
+                    else
+                        usage; exit 1
+                    fi
+                    ;;
+                wp-root|wp-root=*)
+                    if cli_wp_root_opt "${OPTARG}" WORDPRESS_ROOT "${!OPTIND-}"; then
+                        :
+                    else
+                        usage; exit 1
+                    fi
+                    ;;
+                template=*) TEMPLATE_DIR="${OPTARG#*=}" ;;
+                template)
+                    [ -n "${!OPTIND-}" ] || err "--template requires a value"
+                    TEMPLATE_DIR="${!OPTIND}"
+                    OPTIND=$((OPTIND+1))
+                    ;;
+                apache-dir|apache-dir=*)
+                    if cli_apache_dir_opt "${OPTARG}" APACHE_DIR "${!OPTIND-}"; then
+                        :
+                    else
+                        usage; exit 1
+                    fi
+                    ;;
+                ssl-dir|ssl-dir=*)
+                    if cli_ssl_dir_opt "${OPTARG}" SSL_DIR SSL_CERT_DIR SSL_KEY_DIR "${!OPTIND-}"; then
+                        :
+                    else
+                        usage; exit 1
+                    fi
+                    ;;
+                help) usage; exit 0 ;;
+                *) usage; exit 1 ;;
             esac
             ;;
-        \?) show_help ;;
+        \?) usage; exit 1 ;;
     esac
 done
 shift $((OPTIND-1))
 
-# Remaining args are domains
-if [ $# -eq 0 ]; then
+for domain in "$@"; do
+    DOMAINS+=("$domain")
+done
+finalize_domains DOMAINS || { usage; exit 1; }
+if [ ${#DOMAINS[@]} -eq 0 ]; then
     echo "Error: No domains specified"
-    echo "Usage: $0 [OPTIONS] domain1.com domain2.org ..."
-    echo "Use --help for more information"
+    usage
     exit 1
 fi
-DOMAINS=("$@")
 
 if [ "$HTTP_ONLY" = true ] && [ "$SSL_ONLY" = true ]; then
-    echo "Error: --http and --ssl are mutually exclusive"
-    exit 1
+    warn "--http and --ssl both set; generating both (default behavior)"
+    HTTP_ONLY=false
+    SSL_ONLY=false
 fi
 
 # Verify prerequisites
@@ -293,8 +263,8 @@ if [ ! -f "$TEMPLATE_DIR/apache-ssl.conf" ] ; then
 fi
 
 # Verify we can write to Apache sites dir (requires sudo)
-if ! test -w "$APACHE_SITES_DIR"; then
-    echo "Error: Need write access to $APACHE_SITES_DIR."
+if ! test -w "$APACHE_DIR"; then
+    echo "Error: Need write access to $APACHE_DIR."
     exit 1
 fi
 if ! test -r "$SSL_CERT_DIR" || ! test -r "$SSL_KEY_DIR"; then
@@ -306,8 +276,8 @@ fi
 echo "Adding ${#DOMAINS[@]} domain(s) to WordPress multisite"
 echo "WordPress root: $WORDPRESS_ROOT"
 echo "Templates: $TEMPLATE_DIR"
-echo "SSL base: $SSL_BASE"
-echo "Apache sites: $APACHE_SITES_DIR"
+echo "SSL dir: $SSL_DIR"
+echo "Apache sites: $APACHE_DIR"
 echo ""
 
 # Process each domain
