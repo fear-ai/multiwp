@@ -139,7 +139,10 @@ export_rules() {
     init_auth_for_domain "$source"
     zone_id="${CF_ZONE_ID-}"
     if [ -z "$zone_id" ]; then
-        zone_id=$(cf_resolve_zone_id "$source")
+        if ! cf_zone_id_for_domain "$source"; then
+            err "No zone ID resolved for $source"
+        fi
+        zone_id="$CF_ZONE_ID"
     fi
     local resp
     resp=$(cf_api_request GET "/zones/${zone_id}/rulesets/phases/http_request_firewall_custom/entrypoint")
@@ -201,7 +204,10 @@ apply_rules() {
         init_auth_for_domain "$domain"
         zone_id="${CF_ZONE_ID-}"
         if [ -z "$zone_id" ]; then
-            zone_id=$(cf_resolve_zone_id "$domain")
+            if ! cf_zone_id_for_domain "$domain"; then
+                err "No zone ID resolved for $domain"
+            fi
+            zone_id="$CF_ZONE_ID"
         fi
         local entry_resp
         entry_resp=$(cf_api_request GET "/zones/${zone_id}/rulesets/phases/${phase}/entrypoint")

@@ -1,7 +1,6 @@
 <?php
 /**
  * WordPress Single-Site Configuration Template
- * Based on /var/www/html/zero.directory/wp-config.php
  * Replace {{VARIABLES}} with actual values
  *
  * Example file naming for single-site configuration tracking:
@@ -42,7 +41,6 @@ define('FORCE_SSL_ADMIN', true);
 
 // Optional (documented in Operations.md):
 // - WP_DEBUG defaults and related flags
-// - Honor Cloudflare HTTPS signals when the edge connects over HTTP
 
 // Absolute path to WordPress directory
 if (!defined('ABSPATH')) {

@@ -268,32 +268,46 @@ cf_zone_id_from_auth() {
     normalized="${normalized#www.}"
 
     local zone_id
-    zone_id=$(awk -v target="$normalized" '
-        function clean(s) {
-            gsub(/^[ \t]*CF_ZONE(_ID)?=|["'\'' ]/, "", s)
-            return s
-        }
-        BEGIN { match=0 }
-        /^[[:space:]]*CF_ZONE=/ {
-            if (match == 1) { exit 3 }
-            zone=clean($0)
-            match=(zone != "" && tolower(zone) == tolower(target)) ? 1 : 0
-            next
-        }
-        /^[[:space:]]*CF_ZONE_ID=/ {
-            if (match == 1) {
-                id=clean($0)
-                if (id == "") { exit 3 }
-                print id
-                exit 0
-            }
-            next
-        }
-        END {
-            if (match == 1) { exit 3 }
-            exit 1
-        }
-    ' "$auth_file")
+    zone_id=$(python3 - "$auth_file" "$normalized" <<'PY'
+import sys
+
+path = sys.argv[1]
+target = sys.argv[2].lower()
+match = False
+id_found = False
+
+def clean(value: str) -> str:
+    value = value.strip()
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        value = value[1:-1]
+    return value.strip()
+
+with open(path, "r") as fh:
+    for line in fh:
+        raw = line.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        if raw.startswith("CF_ZONE="):
+            if match and not id_found:
+                sys.exit(3)
+            zone = clean(raw.split("=", 1)[1])
+            match = (zone.lower() == target)
+            id_found = False
+            continue
+        if raw.startswith("CF_ZONE_ID="):
+            if match:
+                zid = clean(raw.split("=", 1)[1])
+                if not zid:
+                    sys.exit(3)
+                print(zid)
+                sys.exit(0)
+            continue
+
+if match and not id_found:
+    sys.exit(3)
+sys.exit(1)
+PY
+)
     case "$?" in
         0) printf '%s' "$zone_id"; return 0 ;;
         1) return 1 ;;

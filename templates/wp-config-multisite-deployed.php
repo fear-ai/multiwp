@@ -1,8 +1,6 @@
 <?php
 /**
  * WordPress Multisite Configuration Template (Production Version)
- * Based on deployed wp-config.php with sensitive values masked
- * 
  * Replace {{VARIABLES}} with actual values
  *
  * Example file naming for multisite configuration tracking:
@@ -64,7 +62,6 @@ $table_prefix = '{{TABLE_PREFIX}}';
 
 // Optional (documented in Operations.md):
 // - WP_DEBUG defaults and related flags
-// - Honor Cloudflare HTTPS signals when the edge connects over HTTP
 
 define( 'FORCE_SSL_ADMIN', true );
 define( 'DISABLE_WP_CRON', true );

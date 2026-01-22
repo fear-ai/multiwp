@@ -149,6 +149,11 @@ When multiple `CF_ZONE`/`CF_ZONE_ID` pairs are listed in an auth file, scripts d
 
 Environment variables always take precedence over the auth file, so one-off overrides can be provided safely at runtime without editing the file. Account-scoped tokens are verified against the account endpoint rather than the user endpoint. For a quick sanity check, use `scripts/verify-cf-auth.sh`, which validates any available account API token, global API key, and Origin CA key; Origin CA verification requires a `CF_ZONE_ID`.
 
+Domain and zone data sources:
+- `domains.csv` stores the apex domain in `domain` and the Cloudflare zone identifier in `zone_id`. The `zone_name` column is informational and is recorded from the API.
+- Auth files list zone pairs as `CF_ZONE=example.com` and `CF_ZONE_ID=<id>`; the zone name is the same apex domain used in `domains.csv`.
+- Domain-scoped scripts resolve zone IDs by matching the domain name first and only use the zone ID for API calls.
+
 ### Hybrid Execution
 Use the mixed UI + script workflow below to keep edge policy in the UI while keeping origin actions repeatable and auditable.
 
@@ -291,8 +296,8 @@ Ownership and permissions model:
 
 Config and rewrite files:
 - `wp-config.php`: keep out of webroot if practical; include DB creds, salts, and multisite constants; permissions 640, owner root/deployer, group `www-data` so Apache can read.
-- Multisite `.htaccess`: standard subdirectory rules from WordPress docs; `AllowOverride All` on docroot; avoid custom rewrites that bypass multisite routing.
-- Single-site `.htaccess`: standard single-site rules; typically 640, owned by deployer, readable by web server.
+- Multisite `.htaccess`: standard subdirectory rules from WordPress docs (see `.htaccess` structure below).
+- Single-site `.htaccess`: standard single-site rules (see `.htaccess` structure below).
 
 When tracking or staging configuration variants, use explicit filenames alongside the live file so it is clear which version is active. Examples for multisite:
 - Current: `/var/www/html/wordpress/wp-config.php`
@@ -303,6 +308,44 @@ Template sources:
 - Multisite templates: `templates/wp-config-multisite.php` and `templates/wp-config-multisite-deployed.php`.
 - Single-site templates: `templates/wp-config-singlesite.php` and `templates/wp-config-singlesite-deployed.php`.
 - `.htaccess` templates: `templates/htaccess-multisite` and `templates/htaccess-singlesite`.
+
+### .htaccess Structure and Routing
+We keep WordPress rewrite rules in `.htaccess` rather than moving them into vhost files. This keeps per-site routing logic close to the WordPress install and avoids duplicating rules across vhosts. The tradeoff is that Apache must allow overrides and must permit symlink traversal so rewrite directives are honored.
+
+Common structure (both templates):
+- Preserve the Authorization header to support REST/auth flows behind proxies.
+- Block PHP-family execution in writable paths under `wp-content`.
+- Block direct PHP execution in `wp-includes`.
+- Define a front controller that routes non-static requests to `index.php`.
+
+Single-site routing:
+- Uses the standard WordPress front controller: if the request is not a real file or directory, it routes to `/index.php`.
+- This is sufficient because there is a single site and no subdirectory prefix handling is required.
+
+Multisite routing:
+- Adds a `wp-admin` trailing slash rule that preserves an optional site prefix:
+  `^([_0-9a-zA-Z-]+/)?wp-admin$ -> $1wp-admin/`.
+- Short-circuits rewriting for real files or directories, then normalizes requests with optional site prefixes so `wp-content`, `wp-admin`, `wp-includes`, and `.php` paths resolve correctly.
+- Finishes with a front controller rule that sends the remaining requests to `index.php`.
+- These extra rules are required for subdirectory networks with mapped apex domains; they keep multisite routing intact when the external host maps to an internal subdirectory.
+
+Template sources and validation:
+- `.htaccess` templates live in `templates/htaccess-multisite` and `templates/htaccess-singlesite`.
+- `check-wp.sh --template-check` can be used to confirm the live `.htaccess` contains the required rules.
+
+Apache requirements for `.htaccess`:
+- Keep `AllowOverride All` on the WordPress docroot so `.htaccess` rewrite rules are honored.
+- Keep `Options FollowSymLinks` unless you are prepared to validate `SymLinksIfOwnerMatch` as a tighter alternative.
+
+If you choose to switch to `SymLinksIfOwnerMatch`, validate that permalinks and admin paths still resolve correctly:
+
+1) Run `sudo apache2ctl configtest` and reload Apache.
+2) For each site, test the front page, a known permalink, `/wp-login.php`, `/wp-admin/` (redirect to login), and `/wp-json/`.
+3) Check per-site Apache error logs for rewrite or permission errors.
+
+Do not remove both `FollowSymLinks` and `SymLinksIfOwnerMatch` while `.htaccess` remains the source of rewrite rules; Apache will refuse the rewrite directives and permalinks will break.
+
+We have discussed honoring Cloudflare HTTPS signals at the multisite `.htaccess` layer as an additional safeguard. If that is ever implemented, keep it limited to the multisite `.htaccess` and do not add it to the `zero.directory` single-site `.htaccess`.
 
 ### wp-config.php Settings
 This section documents the baseline `wp-config.php` flags we expect in production, and it mirrors the template comments so configuration is consistent across environments.
@@ -342,16 +385,6 @@ if ( ( isset( $_SERVER['HTTP_X_FORWARDED_PROTO'] ) && $_SERVER['HTTP_X_FORWARDED
     $_SERVER['SERVER_PORT'] = '443';
 }
 ```
-
-We have discussed honoring Cloudflare HTTPS signals at the multisite `.htaccess` layer as an additional safeguard. If that is ever implemented, keep it limited to the multisite `.htaccess` and do not add it to the `zero.directory` single-site `.htaccess`.
-
-We keep rewrite rules in `.htaccess` rather than moving them into vhost files. That means Apache must permit overrides and must allow symlink resolution for rewrite rules to function. The current stance is to keep `Options FollowSymLinks` in the WordPress docroot. If you want to tighten this to `SymLinksIfOwnerMatch`, validate the following before and after the change so routing does not silently break:
-
-1) Run `sudo apache2ctl configtest` and reload Apache.
-2) For each site, test the front page, a known permalink, `/wp-login.php`, `/wp-admin/` (redirect to login), and `/wp-json/`.
-3) Check per-site Apache error logs for rewrite or permission errors.
-
-If you remove both `FollowSymLinks` and `SymLinksIfOwnerMatch`, Apache will refuse `.htaccess` rewrites and permalinks will break, so do not remove both while `.htaccess` remains the source of rewrite rules.
 
 ## Multisite Ops
 WordPress multisite routing depends on the origin layer. Configure multisite first, then map sites to apex domains using the steps below.

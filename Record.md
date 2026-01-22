@@ -16,6 +16,18 @@ This document focuses on the recording policy and workflow and avoids duplicatin
 ## Read-Only Counterpart
 The repository now includes a clear separation between read-only validation and recording. `check-read.sh` runs the broader validation sweep without writing to `domains.csv`, while `test-record.sh` runs a focused subset of validations and records successful outcomes. This split keeps routine checks safe for daily use while reserving state mutation for deliberate recording runs.
 
+## Domain and Zone Data Sources
+Recording depends on consistent interpretation of the inventory fields and the Cloudflare auth file. The goal is to keep “domain name” and “zone id” unambiguous so the recording system does not drift across accounts or zones.
+
+The current sources are:
+- `domains.csv` stores the apex domain in `domain` and the Cloudflare zone identifier in `zone_id`. The `zone_name` column is informational and is recorded from the API.
+- Auth files store zone pairs as `CF_ZONE=<apex>` and `CF_ZONE_ID=<id>`. `CF_ZONE_MAIN` is informational only and is not used to select a zone.
+
+The canonical mapping used throughout this repository is:
+- `domain` (CSV) == apex zone name.
+- `zone_id` (CSV/auth) == Cloudflare zone identifier used for API calls.
+- `zone_name` (CSV) == informational echo from the API; it does not drive selection.
+
 ## Intent Signals per Site Type
 The `site_type` column is the primary intent flag, but it is not the only signal. Additional fields determine the intended behavior for each site type and prevent ambiguity during recording.
 
@@ -71,8 +83,19 @@ Recording relies on a consistent domain match so reads and writes align. The rec
 
 When a row is found, the update behavior is selective rather than wholesale. Non-status fields are only updated when a non-empty value is supplied, and status fields follow the monotonic policy unless `--downgrade` is provided. When no matching row exists, a new row is created with the normalized (lowercase) domain value and the supplied updates.
 
+## Zone ID Resolution and Orchestrator Scope
+Domain-scoped scripts resolve the zone id with an explicit priority order: auth file match (by zone name), then `domains.csv` (`zone_id`), then API lookup. This ensures a domain always maps to the correct zone even when multiple zones exist in the same auth file, while still allowing the CSV to remain the canonical inventory source for recorded values.
+
+The orchestrators (`check-read.sh` and `test-record.sh`) intentionally handle zone ids more narrowly. They read `zone_id` directly from `domains.csv` and pass it through for API checks, and they skip API-based checks when the zone id is missing. This behavior is deliberate for three reasons:
+
+1) **Deterministic scope:** Orchestrators often run across many domains and should not “discover” zones outside the declared inventory. Relying on `domains.csv` keeps the scope explicit and avoids cross-account drift.
+2) **Operational safety:** API lookups during broad orchestration can mask inventory gaps by silently resolving missing zone ids. That makes the inventory look complete when it is not. Skipping the API instead forces the missing zone id to be recorded explicitly.
+3) **Performance and rate limits:** Orchestrators are designed to be fast, read-only sweeps. Avoiding per-domain API lookups reduces API load and keeps routine runs predictable.
+
+When a zone id is missing, the intended path is to fix the inventory first (for example, by running `onboard-zone.sh` or `check-auth-domains.sh --check-ids`) rather than letting the orchestration layer infer it on the fly.
+
 ## Account-Scoped Auth and Inventory Alignment
-The current model allows multiple zones in a single `.auth` file while `domains.csv` may reference multiple accounts. This blurs the account/zone/domain relationship and makes it easy for scripts to resolve the wrong zone when a default `CF_ZONE_ID` is present. The proposed design is to make `.auth` files account-scoped and to align `domains.csv` with that account scope.
+The current model allows multiple zones in a single `.auth` file while `domains.csv` may reference multiple accounts. This blurs the account/zone/domain relationship and makes it easy for scripts to resolve the wrong zone when a stale `CF_ZONE_ID` is set or a domain is missing from the inventory. The proposed design is to make `.auth` files account-scoped and to align `domains.csv` with that account scope.
 
 Design objectives:
 - Each Cloudflare account has a dedicated `.auth` file with `CF_ACCOUNT_ID`, `CF_ACCOUNT_NAME`, and a `CF_DOMAINS` list (comma-separated).

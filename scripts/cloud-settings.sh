@@ -256,12 +256,11 @@ for domain in "${DOMAINS[@]}"; do
     domain=$(normalize_domain "$domain")
     log "Configuring Cloudflare settings for: $domain"
 
-    zone_id=""
     auth_file=""
     site_type=""
-    meta=$(csv_get_domain_fields "$domain" zone_id auth_file site_type || true)
+    meta=$(csv_get_domain_fields "$domain" auth_file site_type || true)
     if [ -n "$meta" ]; then
-        IFS=$'\t' read -r zone_id auth_file site_type <<<"$meta"
+        IFS=$'\t' read -r auth_file site_type <<<"$meta"
     fi
 
     site_type_norm=$(normalize_site_type "$site_type")
@@ -284,11 +283,6 @@ for domain in "${DOMAINS[@]}"; do
     CF_ZONE=""
     cf_init_auth "${CF_AUTH_FILE-}"
     CF_ZONE="$domain"
-    if [ -n "$zone_id" ]; then
-        CF_ZONE_ID="$zone_id"
-    else
-        CF_ZONE_ID=""
-    fi
     cf_require_auth "for Cloudflare settings update"
     cf_require_zone_id "for Cloudflare settings update" "$domain"
 

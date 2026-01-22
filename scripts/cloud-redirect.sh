@@ -235,15 +235,14 @@ for domain in "${DOMAINS[@]}"; do
     domain=$(normalize_domain "$domain")
     log "Configuring redirect for: $domain"
 
-    meta=$(csv_get_domain_fields "$domain" zone_id auth_file redirect_url site_type status_cf || true)
-    zone_id=""
+    meta=$(csv_get_domain_fields "$domain" auth_file redirect_url site_type status_cf || true)
     auth_file=""
     redirect_csv=""
     site_type=""
     status_cf=""
 
     if [ -n "$meta" ]; then
-        IFS=$'\t' read -r zone_id auth_file redirect_csv site_type status_cf <<<"$meta"
+        IFS=$'\t' read -r auth_file redirect_csv site_type status_cf <<<"$meta"
     fi
 
     site_type_norm=$(normalize_site_type "$site_type")
@@ -270,9 +269,6 @@ for domain in "${DOMAINS[@]}"; do
 
     CF_ZONE_ID=""
     CF_ZONE="$domain"
-    if [ -n "$zone_id" ]; then
-        CF_ZONE_ID="$zone_id"
-    fi
 
     cf_init_auth "${CF_AUTH_FILE-}"
     cf_require_auth

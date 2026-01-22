@@ -15,7 +15,7 @@ Key scope decisions and standards:
 - Vhosts are per zone. Zone-specific values live in Apache vhost files and Cloudflare settings, not in host-wide configuration.
 - Cloudflare settings are expected to be largely common across zones (SSL mode, HTTPS, security headers). Deviations should be explicit and documented.
 - Caching and filtering rules apply only to non-redirect zones (multisite and single-site). Redirect-only zones should avoid origin-facing cache rules.
-- We use standardized and templated `.htaccess` and `wp-config.php` files per multisite and single-site. Development versus production variants may be maintained as separate, explicit files so the active configuration is unambiguous.
+- WordPress configuration structure and template usage are documented in Operations.md; this guide focuses on the host security and permission requirements for those files.
 - IPv6 at the Cloudflare edge is acceptable when the origin is IPv4-only; Cloudflare can terminate IPv6 and proxy to the IPv4 origin. The hardening stance here is focused on the origin host, not on disabling Cloudflare edge IPv6.
 
 Host validation script design:
@@ -411,6 +411,8 @@ If you want the construction page to be visible, comment out the `<Location /> R
 - `/etc/apache2/sites-available/000-default-ssl.conf`
 
 ### Directory options and `.htaccess` rewrites
+The detailed `.htaccess` structure (single-site vs multisite) is documented in Operations.md. This section focuses on the host requirements and permissions that keep those rules secure and functional.
+
 Because we keep rewrite rules in `.htaccess`, Apache must allow overrides and must permit symlink traversal for rewrite rules to function. The safest operational path is to keep `AllowOverride All` on the WordPress docroot and use `Options FollowSymLinks` unless you have a specific reason to tighten it.
 
 Keep `.htaccess` write-restricted even if the rest of the WordPress tree is owned by `www-data`. The baseline policy is to keep `.htaccess` (and the site root directory) owned by root or the deployer account with group `www-data`, and keep permissions at 640. See Operations.md for the full WordPress ownership and permissions model.

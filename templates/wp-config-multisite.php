@@ -1,13 +1,8 @@
 <?php
 /**
  * WordPress Multisite Configuration Template
- * Based on /var/www/html/wordpress/wp-config.php
  * Replace {{VARIABLES}} with actual values
  *
- * Example file naming for multisite configuration tracking:
- * - /var/www/html/wordpress/wp-config.php (current)
- * - /var/www/html/wordpress/wp-config.php.ssl (SSL configuration staging)
- * - /var/www/html/wordpress/wp-config.php.prod (production snapshot)
  */
 
 // Database settings
@@ -42,7 +37,6 @@ define('FORCE_SSL_ADMIN', true);
 
 // Optional (documented in Operations.md):
 // - WP_DEBUG defaults and related flags
-// - Honor Cloudflare HTTPS signals when the edge connects over HTTP
 
 // WordPress multisite configuration
 define('WP_ALLOW_MULTISITE', true);

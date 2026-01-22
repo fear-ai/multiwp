@@ -117,14 +117,14 @@ Host ~100 independent client sites on shared infrastructure while keeping each s
 - **Performance**: Global CDN with edge caching reduces origin load
 - **DDoS protection**: Cloudflare absorbs attacks before they reach origin
 - **Managed TLS**: Edge certificates auto-renew, support TLS 1.3, HTTP/2/3
-- **DNS management**: API-driven DNS updates (not yet exercised in production)
+- **DNS management**: API-driven DNS updates are supported and used selectively during onboarding and record changes.
 - **Avoids plugins**: No need for WordPress domain-mapping or caching plugins
 - **Origin IP hiding**: Proxy mode prevents direct origin exposure
 
 **Non-Goals:**
 - Nginx reverse proxy in front of Apache (Cloudflare already proxies)
 - WordPress domain-mapping plugins (DNS + vhosts handle this)
-- WordPress caching plugins for Cloudflare (managed at edge with Page Rules)
+- WordPress caching plugins for Cloudflare (managed at the edge with Cache/Redirect Rules and managed transforms)
 
 **Implications:**
 - DNS changes at Cloudflare registrar or zone management
@@ -514,17 +514,16 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 
 ---
 
-### 7. API-Driven Onboarding (Not Yet Exercised)
+### 7. API-Driven Onboarding (Implemented and Used Selectively)
 
-**Implemented but Not Used**: Scripts exist for Cloudflare API automation (cloud-dns.sh, get-cert.sh).
+**Current State**: Scripts exist for Cloudflare API automation (cloud-dns.sh, get-cert.sh) and are used when repeatable onboarding or bulk changes are needed.
 
-**Why Not Used Yet:**
-- Manual UI workflow is well-documented and tested
-- API automation needs testing before production use
-- Token/credential management not yet standardized
-- Team still learning optimal onboarding workflow
+**Operational Considerations:**
+- Manual UI workflow remains valid for one-off changes or when validation is required in the UI.
+- API automation must be paired with clear credential scoping and post-run validation.
+- Use the documented auth-file patterns in Operations.md so token/key selection is explicit.
 
-**Status**: Scripts exist, syntax-validated, but not exercised in production. Planned for future testing with dedicated test domains.
+**Status**: Scripts are available and used selectively; expand usage as testing coverage grows.
 
 ---
 
@@ -532,12 +531,12 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 
 ### 1. Cloudflare API Automation
 
-**Current State**: Scripts exist but not exercised. Manual UI workflow used for all domains.
+**Current State**: Scripts are available and used selectively, with manual UI steps still used for validation or edge-only changes.
 
 **Investigation Needed:**
-- Test cloud-dns.sh for zone creation and DNS record management
-- Test get-cert.sh for automated origin certificate issuance
-- Standardize API token management (environment variables vs credential store)
+- Expand coverage for cloud-dns.sh and get-cert.sh with repeatable test runs.
+- Clarify which steps remain UI-only vs scriptable for each onboarding phase.
+- Continue refining token/key scoping and account separation as the domain count grows.
 - Document failure modes and recovery procedures
 - Compare reliability of API vs UI workflows
 
@@ -605,7 +604,7 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 - Is database becoming bottleneck as site count grows?
 - Should high-traffic sites move to dedicated installs?
 - Would Redis/Memcached object caching help?
-- Are Cloudflare Page Rules optimally configured?
+- Are Cloudflare Cache and Redirect Rules optimally configured?
 - Should we implement rate limiting per site?
 
 **Investigation:**
@@ -638,11 +637,11 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 - Are we fully utilizing Cloudflare's caching?
 - Should we use Cloudflare Images for automatic optimization?
 - Would a CDN for WordPress uploads (separate from Cloudflare) help?
-- Are Page Rules configured optimally per site?
+- Are Cache and Redirect Rules configured optimally per site?
 
 **Investigation:**
 - Audit current cache hit rates in Cloudflare Analytics
-- Review Page Rules for each domain
+- Review Cache and Redirect Rules for each domain
 - Test cache purging workflows
 - Consider Cloudflare Workers for advanced caching logic
 

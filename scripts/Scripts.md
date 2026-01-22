@@ -220,20 +220,15 @@ These options and environment variables control where WordPress is located on di
 - `WORDPRESS_ROOT` (env) provides the default WordPress root if the `--wp-root` option is not supplied.
 For singlesite domains with an empty `wp_root` in `domains.csv`, the read-only and recording orchestrators default to `/var/www/html/<domain>` unless `--wp-root` is explicitly supplied.
 
-#### Templates and stages
+#### Templates
 
-WordPress configuration and `.htaccess` templates are selected by site type (`singlesite` or `multisite`) and an optional stage suffix. The stage is intended for tracking variations such as `ssl` or `prod` without renaming the live configuration file.
+WordPress configuration and `.htaccess` templates are selected by site type (`singlesite` or `multisite`). The templates in `templates/` are the authoritative baseline for deployments and checks.
 
 - `TEMPLATE_DIR` (env) sets the template directory for WordPress and Apache templates; the default is `templates/` under the repository root.
 - `--template-dir DIR [TEMPLATE_DIR]` overrides the template directory for scripts that read WordPress templates.
-- `WP_STAGE` (env) sets the template stage suffix for WordPress templates (for example `ssl` or `prod`).
-- `--stage NAME [WP_STAGE]` overrides the stage for scripts that select WordPress templates.
-
 Naming conventions:
 - `templates/wp-config-<site_type>.php` is the base template.
-- `templates/wp-config-<site_type>-<stage>.php` is the stage-specific template (optional).
 - `templates/htaccess-<site_type>` is the base `.htaccess` template.
-- `templates/htaccess-<site_type>-<stage>` is the stage-specific `.htaccess` template (optional).
 
 #### Domain selection
 
@@ -432,7 +427,8 @@ Environment variables:
 
 Notes:
 - If `domains.csv` contains multiple `auth_file` values, provide `--auth-file` so the comparison is scoped correctly.
-- The script exits non-zero when mismatches are found.
+- If `CF_DOMAINS` is empty, the script falls back to `CF_ZONE` entries in the auth file.
+- The script exits non-zero when mismatches are found; with `--check-ids`, it still reports ID mismatches before exiting.
 
 #### cloud-dns.sh (production/installation)
 
@@ -505,6 +501,7 @@ Notes:
 - Redirect rules are updated to a single static redirect rule when needed, while removing custom per-domain rules.
 - When recording is enabled, `status_cf=redirect` and `redirect_url` are updated for redirect-only domains.
 - Domains with `site_type=none`, `site_type=ignore`, or `site_type=worker` are skipped entirely.
+- Zone IDs are resolved in priority order: auth file match (by zone name), then `domains.csv` (`zone_id`), then API lookup.
 
 #### rules-cf.sh (production/installation)
 
@@ -540,6 +537,7 @@ Notes:
 - Apply replaces the entire ruleset for the target zone; there is no merge behavior.
 - The rules file may retain a `phase` value; if missing, the script uses `http_request_firewall_custom`.
 - Applying rules to redirect-only domains requires `--allow-redirects` so the intent is explicit.
+- Zone IDs are resolved in priority order: auth file match (by zone name), then `domains.csv` (`zone_id`), then API lookup.
 
 #### cloud-settings.sh (production/installation)
 
@@ -576,7 +574,7 @@ Environment variables:
 - Cloudflare auth variables listed in `auth.sh`.
 
 Notes:
-- The script reads per-domain `auth_file` and `zone_id` values from `domains.csv` when present, falling back to zone name lookup when needed.
+- Zone IDs are resolved in priority order: auth file match (by zone name), then `domains.csv` (`zone_id`), then API lookup.
 - DNS records and redirect rules are not modified; use `cloud-dns.sh` and `cloud-redirect.sh` for those changes.
 
 #### onboard-zone.sh (production/installation)
@@ -819,11 +817,11 @@ Options:
 
 Environment variables:
 - `WORDPRESS_ROOT` can be set to override the default WordPress root path; if unset, the script uses `/var/www/html/wordpress`.
-- `TEMPLATE_DIR` and `WP_STAGE` select the base and stage-specific templates for `wp-config.php` and `.htaccess`.
+- `TEMPLATE_DIR` selects the base templates for `wp-config.php` and `.htaccess`.
 
 Notes:
 - The header includes upstream reference links for MySQL, Apache, and PHP setup, and the script expects you to follow those instructions before enabling multisite.
-- The script reports the selected templates so configuration changes can be staged consistently.
+- The script reports the selected templates so configuration changes are explicit.
 
 #### install-site.sh (production/installation)
 
@@ -863,7 +861,6 @@ Options (script-specific):
 - `--multisite` forces multisite checks.
 - `--autosite` auto-detects single-site vs multisite (default).
 - `--template-dir DIR [TEMPLATE_DIR]` overrides the templates directory used for template checks.
-- `--stage NAME [WP_STAGE]` selects stage-specific templates (example: `ssl`, `prod`).
 - `--template-check` compares `wp-config.php` and `.htaccess` against selected templates.
 - `--domain NAME` adds a domain to the list (repeatable).
 
@@ -875,7 +872,6 @@ Options (shared):
 Environment variables:
 - `WORDPRESS_ROOT`.
 - `TEMPLATE_DIR`.
-- `WP_STAGE`.
 
 ### Orchestration Layer Interfaces
 
@@ -1002,7 +998,6 @@ This cross-reference lists options alphabetically and the scripts that implement
 - `--ssl` (apache-vhost.sh, cloud-settings.sh)
 - `--ssl-dir` (apache-vhost.sh, check-origin.sh, get-cert.sh, test-record.sh, check-read.sh, verify-domain.sh)
 - `--state` (test-record.sh, check-read.sh)
-- `--stage` (check-wp.sh)
 - `--template` (apache-vhost.sh)
 - `--template-check` (check-wp.sh)
 - `--template-dir` (check-wp.sh)

@@ -28,7 +28,8 @@ Options:
   --help  Show this help
 
 Notes:
-  - Expects CF_DOMAINS in the auth file (comma-separated list of domains).
+  - Uses CF_DOMAINS in the auth file (comma-separated list of domains).
+  - If CF_DOMAINS is empty, falls back to CF_ZONE entries in the auth file.
   - If domains.csv contains multiple auth_file values, supply --auth-file to select.
   - --check-ids requires API credentials for the auth file account and will query the API.
 EOF
@@ -39,9 +40,14 @@ while getopts ":-:" opt; do
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
-                auth-file|auth-file=*)
+                auth-file=*)
                     cf_auth_file "${OPTARG}" "${!OPTIND-}"
                     AUTH_FILE="$CF_AUTH_FILE"
+                    ;;
+                auth-file)
+                    cf_auth_file "${OPTARG}" "${!OPTIND-}"
+                    AUTH_FILE="$CF_AUTH_FILE"
+                    OPTIND=$((OPTIND+1))
                     ;;
                 domains-file=*) DOMAINS_FILE_LOCAL="${OPTARG#*=}" ;;
                 domains-file)
@@ -64,16 +70,39 @@ shift $((OPTIND-1))
 CF_AUTH_FILE="$AUTH_FILE"
 DOMAINS_FILE="$DOMAINS_FILE_LOCAL"
 
+AUTH_SOURCE="CF_DOMAINS"
 AUTH_DOMAINS_RAW="$(auth_file_var "$AUTH_FILE" CF_DOMAINS || true)"
-if [ -z "$AUTH_DOMAINS_RAW" ]; then
-    warn "CF_DOMAINS is empty in $AUTH_FILE"
-fi
-
 AUTH_DOMAINS=()
 if [ -n "$AUTH_DOMAINS_RAW" ]; then
     if ! parse_comma_list "$AUTH_DOMAINS_RAW" AUTH_DOMAINS "CF_DOMAINS"; then
         err "CF_DOMAINS contains empty values"
     fi
+else
+    warn "CF_DOMAINS is empty in $AUTH_FILE"
+    AUTH_SOURCE="CF_ZONE"
+    AUTH_ZONE_RAW=$(python3 - "$AUTH_FILE" <<'PY'
+import sys
+
+path = sys.argv[1]
+with open(path, "r") as fh:
+    for line in fh:
+        raw = line.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        if not raw.startswith("CF_ZONE="):
+            continue
+        val = raw.split("=", 1)[1].strip()
+        if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+            val = val[1:-1]
+        val = val.strip()
+        if val:
+            print(val)
+PY
+)
+    while read -r zone; do
+        [ -n "$zone" ] || continue
+        AUTH_DOMAINS+=("$zone")
+    done <<<"$AUTH_ZONE_RAW"
 fi
 
 CSV_DOMAINS_RAW="$(python3 - "$DOMAINS_FILE_LOCAL" "$AUTH_FILE" <<'EOF'
@@ -163,22 +192,22 @@ for domain in "${CSV_SET[@]}"; do
 done
 
 log "Auth file: $AUTH_FILE"
-if [ -n "$AUTH_DOMAINS_RAW" ]; then
-    echo "Auth domains: ${#AUTH_SET[@]}"
-else
-    echo "Auth domains: 0"
-fi
+echo "Auth domains (${AUTH_SOURCE}): ${#AUTH_SET[@]}"
 echo "domains.csv domains: ${#CSV_SET[@]}"
 
 if [ ${#only_in_auth[@]} -gt 0 ]; then
-    warn "Domains listed in CF_DOMAINS but missing in domains.csv: ${only_in_auth[*]}"
+    warn "Domains listed in ${AUTH_SOURCE} but missing in domains.csv: ${only_in_auth[*]}"
 fi
 if [ ${#only_in_csv[@]} -gt 0 ]; then
-    warn "Domains present in domains.csv but missing in CF_DOMAINS: ${only_in_csv[*]}"
+    warn "Domains present in domains.csv but missing in ${AUTH_SOURCE}: ${only_in_csv[*]}"
 fi
 
+pre_mismatch=false
 if [ ${#only_in_auth[@]} -gt 0 ] || [ ${#only_in_csv[@]} -gt 0 ]; then
-    exit 1
+    pre_mismatch=true
+    if [ "$CHECK_IDS" != true ]; then
+        exit 1
+    fi
 fi
 
 if [ "$CHECK_IDS" = true ]; then
@@ -323,7 +352,7 @@ if [ "$CHECK_IDS" = true ]; then
         fi
     done
 
-    if [ "$any_mismatch" = true ] || [ "$any_error" = true ]; then
+    if [ "$pre_mismatch" = true ] || [ "$any_mismatch" = true ] || [ "$any_error" = true ]; then
         exit 1
     fi
 fi
