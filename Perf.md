@@ -2,7 +2,38 @@
 Date: January 21, 2026
 
 ## Introduction
-This document consolidates our caching strategy, performance tooling, and benchmarking workflow for WordPress multisite and single-site installs on Ubuntu 24 behind Cloudflare. It is written for operations work and uses the same dependency order as Operations.md: edge first, then origin services, then WordPress. The intent is to make decisions explicit, avoid overlapping caches, and keep a repeatable test plan with commands and validation criteria.
+This document consolidates our caching strategy, performance tooling, and benchmarking workflow for WordPress multisite and single-site installs on Ubuntu 24 behind Cloudflare. It is written for operations work and uses the same dependency order as `Operations.md` sections 3–5 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`): edge first, then origin services, then WordPress. The intent is to make decisions explicit, avoid overlapping caches, and keep a repeatable test plan with commands and validation criteria.
+
+## Problem Statement and Challenges
+Our performance work must reconcile two competing realities: the origin must remain secure and stable, while the user experience depends on latency and cache efficiency that are largely driven by Cloudflare. The problem to solve is not merely “make it faster,” but “make it measurably faster without violating the operational constraints of a shared multisite origin.” This requires a disciplined approach that prevents overlapping caches, preserves correctness under CDN behavior, and produces reproducible measurements that can be compared over time.
+
+Key challenges:
+- **Layered caching effects**: Multiple layers (edge, PHP opcode, object cache, DB buffers) can interact in non-obvious ways and obscure where performance gains actually come from.
+- **Operational safety**: Testing and tuning can unintentionally change application behavior, so safety controls, backups, and clear rollback conditions are mandatory.
+- **Multi-tenant impact**: A single origin serves multiple domains; tuning must avoid improving one site at the cost of others.
+- **Edge vs origin visibility**: Cloudflare absorbs a large portion of requests; origin metrics can mislead if they do not distinguish cached from uncached traffic.
+
+## Methodology
+We follow a single-change-at-a-time workflow with explicit measurement targets. Each test or adjustment records both the user-facing effects (latency percentiles, throughput, error rate) and origin pressure (CPU, memory, IO, DB latency). This aligns with `Operations.md` sections 3–5 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`) and prevents “tuning in the dark.”
+
+Methodology steps:
+1) **Define baseline**: Capture edge headers, OPcache values, MySQL variables, and any object cache state.
+2) **Isolate change**: Make one change at a time, scoped to one site or one layer.
+3) **Measure and compare**: Use identical test parameters before and after the change.
+4) **Decide and record**: Keep a decision record with explicit rollback triggers.
+
+## Architecture of the Performance Approach
+Performance decisions must follow the same dependency chain as operational setup. The architecture below is conceptual and links to the canonical operational runbook for exact settings and procedures.
+
+Layered model:
+- **Edge** (Cloudflare): HTTPS enforcement, security headers, and edge caching behavior. See `Operations.md` section 3 (`Operations.md#3-cloudflare-edge`) for authoritative settings and the Cloudflare baseline.
+- **Origin** (Apache/PHP/MySQL): vhosts, TLS, OPcache, and DB buffers; these are operationally configured before tuning.
+- **WordPress**: application-level caching and object caching strategy, especially for logged-in paths.
+
+Canonical references:
+- Operations runbook: `Operations.md` sections 3–5 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`) for edge settings, origin TLS, Apache, and WordPress structure.
+- Multisite architecture: `MULTI.md` sections 2–5 (`MULTI.md#2-architecture--design-decisions`, `MULTI.md#3-network--domain-model`, `MULTI.md#4-infrastructure-layers`, `MULTI.md#5-operational-tradeoffs`) for architectural rationale and tradeoffs.
+- DNS and TLS terms: `DNSTerms.md` (terminology and vendor references).
 
 ## Scope
 This applies to:
@@ -14,7 +45,7 @@ This applies to:
 Before changing caching or running performance tests, confirm:
 - DNS is proxied through Cloudflare and is pointing at the origin IP.
 - Origin certificates are installed and Apache vhosts are healthy.
-- The cache baseline and security settings in Operations.md are applied.
+- The cache baseline and security settings in `Operations.md` section 3 (`Operations.md#3-cloudflare-edge`) are applied.
 - You have a defined test window, a rollback plan, and a place to store raw outputs.
 
 ## Baseline capture and verification
@@ -153,7 +184,10 @@ Recommended baseline:
 - Keep `wp-content/cache` writable but block PHP execution in writable paths.
 - Set `WP_REDIS_PASSWORD` in `wp-config.php` when Redis requires authentication.
 
-## Configuration Steps
+## Execution
+This section is the canonical, command-level runbook for performance baselining, changes, and validation. It is intentionally detailed so repeated measurement cycles are consistent, while upstream configuration details remain in `Operations.md` sections 3–5 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`).
+
+### Configuration steps
 Apply caching and performance settings in dependency order to avoid ambiguous behavior.
 
 ### 1) Cloudflare edge settings
@@ -172,15 +206,15 @@ Confirm buffer pool size and enable slow query logs for investigation when uncac
 ### 5) WordPress object cache
 Enable Redis Object Cache in WordPress and validate that it is active. Keep page cache plugins off if edge caching is in use.
 
-## Test Methodology
+### Test methodology
 We use a single-change-at-a-time workflow with explicit safety and decision recording so results can be attributed to specific configuration changes.
 
-### Operational cautions
+#### Operational cautions
 - One HTML cache layer at a time. Do not run a WordPress page cache plugin alongside Cloudflare edge HTML caching.
 - If a zone is set to DNS-only temporarily, enable an origin page cache only for the duration of the DNS-only window and disable it when the proxy returns.
 - Purge at the active cache layer; avoid full purges unless you have no narrower option.
 
-### Decision record
+#### Decision record
 For each change or test, record:
 - Domain, URL, scenario (cached/uncached), and test parameters.
 - Edge headers and any cache analytics snapshot (paid tiers only).
@@ -189,10 +223,10 @@ For each change or test, record:
 - Decision, expected impact, and rollback trigger.
 - Re-test delta.
 
-## Benchmarking and Validation
+### Benchmarking and validation
 The goal is to distinguish edge-cached versus origin behavior and record CPU, memory, and database pressure alongside latency and errors.
 
-### Freeze and backup before testing
+#### Freeze and backup before testing
 Announce a change freeze for the test window and disable file modifications at the WordPress layer:
 ```bash
 sudo -u www-data wp --path=/var/www/html/wordpress config set DISALLOW_FILE_MODS true --raw
@@ -219,6 +253,12 @@ sudo -u www-data wp --path=/var/www/html/zero.directory db export "/var/backups/
 sudo tar -czf "/var/backups/wp/zero_directory_wp-content_${RUN_ID}.tgz" -C /var/www/html/zero.directory wp-content
 sudo -u www-data wp --path=/var/www/html/zero.directory maintenance-mode deactivate
 ```
+
+## Deferred topics
+The following items are acknowledged but intentionally postponed so the execution workflow can stabilize before the tooling and data model are refactored:
+- Script design for automated performance runs and baseline comparisons.
+- Data model changes for associating performance results with domain inventory.
+- Cross-document restructuring of `HardenUbuntu.md` and `MULTI.md` for broader audience partitioning.
 
 After testing, restore `DISALLOW_FILE_MODS` to its prior value:
 ```bash

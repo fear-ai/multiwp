@@ -1,35 +1,72 @@
 # Operations Runbook
 Date: January 10, 2026
 
-## Introduction
+## 1. Introduction
 This runbook consolidates the operational steps for Cloudflare edge configuration, origin TLS/Apache setup, and WordPress multisite operations. It is organized in dependency order so each layer is configured and validated before the next layer relies on it. Use this document as the canonical operational guide, and reference `scripts/Scripts.md` for exact option and environment variable interfaces when running scripts.
 
 The dependency chain is explicit: Cloudflare edge behavior depends on correct DNS and SSL/TLS configuration, origin TLS and Apache vhosts depend on valid certificates and permissions, and WordPress routing depends on the origin layer being correct. This ordering avoids diagnosing downstream symptoms before the upstream cause is resolved.
 
-## Cloudflare Edge
+## 2. Table of Contents
+1. [1. Introduction](#1-introduction)
+2. [3. Cloudflare Edge](#3-cloudflare-edge)
+   1. [3.1 Overview](#31-overview)
+   2. [3.2 Proxy Model (Summary)](#32-proxy-model-summary)
+   3. [3.3 HTTPS Responsibility (Summary)](#33-https-responsibility-summary)
+   4. [3.4 HTTPS Flow](#34-https-flow)
+      1. [3.4.1 DNS Proxy](#341-dns-proxy)
+      2. [3.4.2 SSL Mode](#342-ssl-mode)
+      3. [3.4.3 TLS Settings](#343-tls-settings)
+      4. [3.4.4 Origin Cert](#344-origin-cert)
+      5. [3.4.5 Security Settings](#345-security-settings)
+      6. [3.4.6 Security Headers](#346-security-headers)
+   5. [3.5 Automation](#35-automation)
+      1. [3.5.1 HTTPS and Security Baseline](#351-https-and-security-baseline)
+      2. [3.5.2 Zone DNS](#352-zone-dns)
+      3. [3.5.3 Cert Placement](#353-cert-placement)
+      4. [3.5.4 Vhost Generation](#354-vhost-generation)
+      5. [3.5.5 API Auth](#355-api-auth)
+   6. [3.6 Hybrid Execution](#36-hybrid-execution)
+   7. [3.7 Notes](#37-notes)
+      1. [3.7.1 HSTS](#371-hsts)
+      2. [3.7.2 Redirect Config](#372-redirect-config)
+3. [4. Origin TLS](#4-origin-tls)
+   1. [4.1 Host Services](#41-host-services)
+   2. [4.2 Ubuntu updates](#42-ubuntu-updates)
+   3. [4.3 User Permissions](#43-user-permissions)
+   4. [4.4 Origin Certs](#44-origin-certs)
+   5. [4.5 Web Vhosts](#45-web-vhosts)
+   6. [4.6 PHP Database](#46-php-database)
+   7. [4.7 WordPress Files and Permissions](#47-wordpress-files-and-permissions)
+   8. [4.8 .htaccess Structure and Routing](#48-htaccess-structure-and-routing)
+   9. [4.9 wp-config.php Settings](#49-wp-configphp-settings)
+4. [5. Multisite Ops](#5-multisite-ops)
+   1. [5.1 Site Onboarding](#51-site-onboarding)
+   2. [5.2 Site Troubleshooting](#52-site-troubleshooting)
+5. [6. Verification](#6-verification)
+   1. [6.1 Validation Checks](#61-validation-checks)
+6. [7. Domain Transfer](#7-domain-transfer)
+   1. [7.1 Manual Transfer](#71-manual-transfer)
+   2. [7.2 Transfer Automation](#72-transfer-automation)
+7. [8. Target Audience](#8-target-audience)
+
+## 3. Cloudflare Edge
 Cloudflare edge configuration defines how traffic reaches the origin and how HTTPS, redirects, and security headers are enforced. The UI is authoritative for edge policy, while scripts can assist with repeatable provisioning tasks such as DNS or origin certificate issuance.
 
-### Overview
-Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HTTP is redirected to HTTPS at the edge, and security headers are applied consistently. Cloudflare generates these security headers at the edge for both site and redirect zones; do not add Apache-level header directives unless a future exception is explicitly justified. Origin servers use per-domain Cloudflare Origin certificates; Cloudflare presents edge certificates to visitors. Use the UI for clarity; layer scripts where it saves time. For terminology, see `DNSTerms.md`.
+### 3.1 Overview
+Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HTTP is redirected to HTTPS at the edge, and security headers are applied consistently. Cloudflare generates these security headers at the edge for both site and redirect zones; do not add Apache-level header directives unless a future exception is explicitly justified. Origin servers use per-domain Cloudflare Origin certificates; Cloudflare presents edge certificates to visitors. Use the UI for clarity; layer scripts where it saves time. For terminology, see `DNSTerms.md` and `MULTI.md` section 3.1 (`MULTI.md#31-terminology-apex-zone-subdomain`).
 
 These settings reflect the current tested configuration for this repository and will be updated as validation continues and platform behavior changes.
 
-### Proxy Model
-Cloudflare’s orange cloud behaves as a reverse proxy: clients connect to Cloudflare; Cloudflare connects to our origin. This provides origin address shielding and enables caching, WAF, and edge TLS features. Our usage proxies apex and `www`, issues origin certs per apex+www pair, and lets Cloudflare enforce HTTPS and headers at the edge.
+### 3.2 Proxy Model (Summary)
+Cloudflare operates as a reverse proxy in front of the origin. This runbook focuses on the operational steps; architectural rationale and tradeoffs are documented in `MULTI.md` section 2.2 (`MULTI.md#22-edge-layer-cloudflare-proxy-dns-cdn-ssl`) and in its Glossary (`MULTI.md#10-glossary`).
 
-Reverse proxy background: [Cloudflare reverse proxy] https://www.cloudflare.com/learning/cdn/glossary/reverse-proxy/ [MDN reverse proxy] https://developer.mozilla.org/en-US/docs/Glossary/Reverse_proxy
+### 3.3 HTTPS Responsibility (Summary)
+HTTPS enforcement and security headers are applied at the Cloudflare edge. Avoid Apache-level HTTP→HTTPS redirects to prevent loops. For the rationale and design constraints, see `MULTI.md` section 2.2 (`MULTI.md#22-edge-layer-cloudflare-proxy-dns-cdn-ssl`); for stepwise UI actions, continue with the sections below.
 
-### HTTPS Responsibility
-Edge HTTPS and headers belong at Cloudflare; do not add redundant Apache redirects to avoid loops and extra hops. Use Force HTTPS via Edge Certificates because “Always Use HTTPS” is simple and avoids custom rule errors.
-
-Redirect Rules give more control but carry more risk. Use Redirect Rules only when you need custom logic. When used, configure `Rules` → `Redirect Rules` with a condition that matches apex or `www` and a 301 to `https://{host}{uri}`. Turn “Always Use HTTPS” off if using Rules to avoid overlapping redirects.
-
-Warning: misconfigured Rules or overlapping redirects can create loops. Use Redirect Rules only when needed and have a tested plan to recover.
-
-### HTTPS Flow
+### 3.4 HTTPS Flow
 The UI flow below provides a reliable baseline for new domains. The steps are written in the order they should be performed.
 
-#### DNS Proxy
+#### 3.4.1 DNS Proxy
 Use the DNS screen to set the apex A record, proxy it, and then point `www` at the apex so there is one source of truth for the origin address.
 
 - Path: `DNS`.
@@ -39,13 +76,13 @@ Use the DNS screen to set the apex A record, proxy it, and then point `www` at t
 - If origin IP changes, update DNS before enforcing strict TLS to avoid downtime.
 - Assumes nameservers already point to Cloudflare; DNSSEC is not required for this flow.
 
-#### SSL Mode
+#### 3.4.2 SSL Mode
 Set SSL mode to Full (strict) after origin certificates are in place.
 
 - Path: `SSL/TLS` → `Overview`.
 - Setting: “SSL/TLS encryption mode” → select `Full (strict)`.
 
-#### TLS Settings
+#### 3.4.3 TLS Settings
 Enable HTTPS enforcement and modern TLS at the edge. These are Free-tier options; verify each setting because some are enabled by default.
 
 - Path: `SSL/TLS` → `Edge Certificates`.
@@ -57,14 +94,14 @@ Enable HTTPS enforcement and modern TLS at the edge. These are Free-tier options
 
 HSTS is documented in a dedicated section below.
 
-#### Origin Cert
+#### 3.4.4 Origin Cert
 Use a separate origin certificate per domain (apex+www pair) to avoid exposing tenant lists and to keep trust scoped. These certificates are used between Cloudflare and the origin and are not publicly trusted.
 
 - Path: `SSL/TLS` → `Origin Server` → `Create Certificate`.
 - Options: “Let Cloudflare generate a private key and CSR”; Hostnames: apex + www; Key type: RSA; Validity: default.
 - Download cert/key in PEM format; install on origin at `/etc/ssl/cloudflare-origin/certs|keys/<safe>.{crt,key}` (safe = domain without dots/hyphens).
 
-#### Security Settings
+#### 3.4.5 Security Settings
 Use the Security Settings page to enable baseline protections. These settings are expected to be consistent across domains.
 
 - Path: `Security` → `Settings`.
@@ -73,7 +110,7 @@ Use the Security Settings page to enable baseline protections. These settings ar
 - Schema validation is currently OFF, pending further investigation. TODO: Revisit schema validation; it is not exposed by the standard zone settings API, so confirm where it can be read or set before automating.
 - Leaked credentials detection is not enabled in this runbook; evaluate separately before enabling.
 
-#### Security Headers
+#### 3.4.6 Security Headers
 Use Managed Transforms to add standard response headers at the edge.
 
 - Path: `Rules` → `Settings` → `Managed Transforms` → `HTTP Response Headers` → “Add security headers.”
@@ -86,36 +123,36 @@ Use Managed Transforms to add standard response headers at the edge.
   - `Expect-CT: max-age=86400, enforce`.
   - `Referrer-Policy: same-origin`.
 
-### Automation
+### 3.5 Automation
 Cloudflare UI is authoritative for SSL mode, redirects, and headers. Automation scripts help with DNS, origin certificate placement, and vhost generation when repeatability is needed.
 
-#### HTTPS and Security Baseline
+#### 3.5.1 HTTPS and Security Baseline
 Use the settings helper when you need to apply the HTTPS/security baseline across many zones with consistent values. This script reads `domains.csv`, resolves the zone ID per domain, and applies the baseline via the Cloudflare API, so it depends on active zones and valid credentials with edit access.
 
 - Script: `scripts/cloud-settings.sh --site-types redirect,multisite`.
 - Does: sets `ssl=strict`, enables Always Use HTTPS, raises minimum TLS to 1.2, and enables the managed “Add security headers” transform.
 - Does not: modify DNS records or Redirect Rules; use `scripts/cloud-dns.sh` or `scripts/cloud-redirect.sh` for those.
 
-#### Zone DNS
+#### 3.5.2 Zone DNS
 Use the zone/DNS script when onboarding a new domain and you want API-driven provisioning.
 
 - Script: `scripts/cloud-dns.sh <domain> <ip>`.
 - Fit: onboarding a new domain; uses the Cloudflare API instead of the UI.
 - Does: creates the zone and adds proxied A records for apex+www. Env or options: `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `--token`, `--account`.
 
-#### Cert Placement
+#### 3.5.3 Cert Placement
 Use the unified cert helper so the same command supports manual paste, API issuance, and validation in a single workflow. This keeps the operational steps consistent across environments while preserving the default filesystem layout and permissions documented below.
 
 - Script: `scripts/get-cert.sh <domain>` (supports `--api`, `--manual`, or `--auto`).
 - Does: validate/install Cloudflare Origin cert/key into `/etc/ssl/cloudflare-origin/{certs,keys}/<safe>.{crt,key}` with perms root:ssl-cert 640; prints SANs.
 
-#### Vhost Generation
+#### 3.5.4 Vhost Generation
 Use the vhost helper to generate HTTP/SSL vhosts that reference the origin certificate paths.
 
 - Script: `scripts/apache-vhost.sh <domain>`.
 - Uses templates pointing at origin cert paths; enables HTTP/SSL vhosts. Add origin certs first, then run; the script runs `apache2ctl configtest`.
 
-#### API Auth
+#### 3.5.5 API Auth
 Cloudflare API access is needed only when you run API-backed scripts or optional API checks. Keep authentication configuration centralized and local to the operator’s host to avoid hardcoding secrets into the repository. Prefer scoped API tokens over the Global API Key whenever the required permissions are available.
 
 Credential terminology and where to find it in the Cloudflare UI:
@@ -154,7 +191,7 @@ Domain and zone data sources:
 - Auth files list zone pairs as `CF_ZONE=example.com` and `CF_ZONE_ID=<id>`; the zone name is the same apex domain used in `domains.csv`.
 - Domain-scoped scripts resolve zone IDs by matching the domain name first and only use the zone ID for API calls.
 
-### Hybrid Execution
+### 3.6 Hybrid Execution
 Use the mixed UI + script workflow below to keep edge policy in the UI while keeping origin actions repeatable and auditable.
 
 Sequence per domain:
@@ -174,10 +211,10 @@ Interaction model:
 - UI controls edge behavior (strict TLS, redirects, headers).
 - Scripts configure origin (cert files, vhosts). Treat UI settings as source of truth for TLS mode and redirects; scripts should not duplicate them.
 
-### Notes
+### 3.7 Notes
 The notes below explain the tradeoffs for security settings that require intentional commitment or operational discipline.
 
-#### HSTS
+#### 3.7.1 HSTS
 HSTS instructs browsers that the site should only be accessed over HTTPS.
 
 - Pros: enforces HTTPS at the browser; prevents downgrade/mixed-mode requests after first load.
@@ -187,7 +224,7 @@ HSTS instructs browsers that the site should only be accessed over HTTPS.
 - Cloudflare configuration: SSL/TLS → Edge Certificates → HTTP Strict Transport Security (HSTS), after Always Use HTTPS.
 - WordPress option: [Headers Security Advanced HSTS WP] https://wordpress.com/plugins/headers-security-advanced-hsts-wp.
 
-#### Redirect Config
+#### 3.7.2 Redirect Config
 Some zones exist only to redirect to a canonical domain (for example, short or legacy domains that should always land on the primary site). These zones should be configured to redirect at the Cloudflare edge and now follow the same HTTPS and Security baseline as singlesite and multisite domains. The intent is to eliminate drift and ensure aliases are not a weaker security posture, even if that introduces an extra redirect hop.
 
 Recommended approach:
@@ -201,13 +238,13 @@ Operational notes:
 - The baseline security headers now apply on both canonical and redirect zones; this trades a small redirect cost for consistent policy and simpler audits.
 - Validation: confirm HTTP and HTTPS requests for both apex and `www` return 301 to the canonical host, preserve path/query, and do not loop. Use `curl -I` from a client or a browser test, and verify that the origin is not being hit directly (UFW logs should show only Cloudflare IPs if the allowlist is active).
 
-## Origin TLS
+## 4. Origin TLS
 The origin layer provides the TLS endpoint Cloudflare connects to and the Apache vhost routing that serves WordPress. This layer must be correct before Full (strict) can succeed at the edge.
 
-### Host Services
+### 4.1 Host Services
 Provision Ubuntu 24 with Apache 2.4, PHP 8.x, MySQL 8.x. Check CONF.md for the latest site-specific recommendations (versions, paths, domains).
 
-### Ubuntu updates
+### 4.2 Ubuntu updates
 Keep the host patched with unattended security updates so origin services are not exposed to known vulnerabilities. This is a foundational dependency for the rest of the stack because Apache, PHP, OpenSSL, and kernel fixes arrive through Ubuntu security updates. Configure this before or alongside initial server provisioning.
 
 Install and enable unattended upgrades:
@@ -236,7 +273,7 @@ sudo unattended-upgrades --dry-run --debug
 
 If automatic reboots are allowed, set a window that matches maintenance expectations. If reboots are disabled, document the manual reboot cadence and ensure kernel updates are applied intentionally.
 
-### User Permissions
+### 4.3 User Permissions
 The deployment user (typically `ubuntu`) must be in the `ssl-cert` group to run scripts that read SSL certificates.
 
 ```bash
@@ -245,7 +282,7 @@ sudo usermod -aG ssl-cert ubuntu
 
 After adding the group, log out and log back in, or run `newgrp ssl-cert` to activate. Verify with `groups ubuntu`.
 
-### Origin Certs
+### 4.4 Origin Certs
 HTTPS vhosts reference these paths per template. The certificate and key must be readable by the `ssl-cert` group and owned by root.
 
 - `/etc/ssl/cloudflare-origin/certs/<safe>.crt`
@@ -262,7 +299,7 @@ sudo scripts/get-cert.sh --manual <domain>
 sudo scripts/get-cert.sh --api <domain>
 ```
 
-### Web Vhosts
+### 4.5 Web Vhosts
 The web server uses one vhost per domain, driven by templates that reference the origin certificates.
 
 - Enable Apache modules: `sudo a2enmod rewrite ssl headers && sudo systemctl reload apache2`.
@@ -279,10 +316,10 @@ Host validation note: Apache’s `Require host` does **not** validate the `Host`
 ```
 If you do not require host header validation, omit the `Require host`/`Require expr` blocks entirely and rely on `ServerName`/`ServerAlias` plus the default vhost fallback.
 
-### PHP Database
+### 4.6 PHP Database
 Database name and user configuration should be tracked alongside the domain inventory so the origin and WordPress layers can be validated consistently.
 
-### WordPress Files and Permissions
+### 4.7 WordPress Files and Permissions
 Keep WordPress readable by the web server while keeping code write-restricted. The goal is to make uploads writable without granting write access to the core, plugins, themes, or configuration files.
 
 Site roots and layout:
@@ -309,7 +346,7 @@ Template sources:
 - Single-site templates: `templates/wp-config-singlesite.php` and `templates/wp-config-singlesite-deployed.php`.
 - `.htaccess` templates: `templates/htaccess-multisite` and `templates/htaccess-singlesite`.
 
-### .htaccess Structure and Routing
+### 4.8 .htaccess Structure and Routing
 We keep WordPress rewrite rules in `.htaccess` rather than moving them into vhost files. This keeps per-site routing logic close to the WordPress install and avoids duplicating rules across vhosts. The tradeoff is that Apache must allow overrides and must permit symlink traversal so rewrite directives are honored.
 
 Common structure (both templates):
@@ -347,7 +384,7 @@ Do not remove both `FollowSymLinks` and `SymLinksIfOwnerMatch` while `.htaccess`
 
 We have discussed honoring Cloudflare HTTPS signals at the multisite `.htaccess` layer as an additional safeguard. If that is ever implemented, keep it limited to the multisite `.htaccess` and do not add it to the `zero.directory` single-site `.htaccess`.
 
-### wp-config.php Settings
+### 4.9 wp-config.php Settings
 This section documents the baseline `wp-config.php` flags we expect in production, and it mirrors the template comments so configuration is consistent across environments.
 
 Defaults and environment flags:
@@ -386,10 +423,10 @@ if ( ( isset( $_SERVER['HTTP_X_FORWARDED_PROTO'] ) && $_SERVER['HTTP_X_FORWARDED
 }
 ```
 
-## Multisite Ops
+## 5. Multisite Ops
 WordPress multisite routing depends on the origin layer. Configure multisite first, then map sites to apex domains using the steps below.
 
-### Site Onboarding
+### 5.1 Site Onboarding
 The sequence below mirrors the multisite mapping process and should be followed in order so WordPress routing is correct.
 
 1) Create the site in subdirectory form to obtain a blog_id.
@@ -422,7 +459,7 @@ Pitfalls and expectations:
 - `sh: 1: /usr/sbin/sendmail: not found` during site create is expected on hosts without an MTA; site creation still succeeds. Use an SMTP plugin later if email delivery is required.
 - `scripts/install-site.sh` prints a `BLOG_ID=<id>` line after verification so the blog ID can be captured for inventory updates.
 
-### Site Troubleshooting
+### 5.2 Site Troubleshooting
 When a mapped apex domain serves the primary multisite site instead of the intended site, the cause is almost always a mismatch in routing data or vhost selection. In a multisite network, WordPress routes requests by matching the incoming host and path against `wp_blogs`, and Apache must first map the request to the correct vhost via `ServerName`. If any of these pieces are out of sync, the request falls back to the primary domain and appears as the main site.
 
 Authoritative checks, in the order they affect routing:
@@ -432,12 +469,12 @@ Authoritative checks, in the order they affect routing:
 
 Use the mapping steps in this section to correct data first, then reload Apache if you update vhost files so the routing change takes effect. Ensure edge policy is already aligned in the Cloudflare section above before public cutover.
 
-## Verification
+## 6. Verification
 Use the checks in this section after provisioning to confirm the stack is healthy end to end. These checks are read-oriented and are designed to highlight the first failing layer.
 
-Comprehensive validation and monitoring tooling is still under investigation and development. Treat the checks below as the current baseline until a more complete observability plan is formalized.
+Validation coverage is further along than early exploration: the check scripts are exercised and the baseline below is reliable for read-oriented confirmation. Monitoring and alerting remain under development, so treat these checks as the current operational baseline until a broader observability plan is formalized.
 
-### Validation Checks
+### 6.1 Validation Checks
 The list below covers the standard checks by layer. Use them to confirm configuration state before diagnosing higher-level symptoms.
 
 - Vhosts present/enabled: `sudo ls /etc/apache2/sites-available`, `sudo ls /etc/apache2/sites-enabled`.
@@ -449,10 +486,10 @@ The list below covers the standard checks by layer. Use them to confirm configur
 - Zone/DNS creation: `scripts/cloud-dns.sh <domain> <ip>` (using Cloudflare API when onboarding domains).
 
 
-### Domain Transfer
+## 7. Domain Transfer
 Domain registration does not need to happen at Cloudflare. The common model is to keep the registrar elsewhere and use Cloudflare as the authoritative nameserver and proxy. The steps below describe registrar transfers only for cases where Cloudflare is intended to be the registrar of record, and the UI/API flows are not verified at this time. The steps below focus on the manual process and the automation outline; they are written as procedures and ideas rather than prescriptive production automation.
 
-#### Manual Transfer
+### 7.1 Manual Transfer
 Manual transfers require an unlocked domain, a valid auth code, and nameservers already pointed at Cloudflare. The process varies slightly by registrar.
 
 Prerequisites:
@@ -473,7 +510,7 @@ NameSilo:
 
 Cloudflare bills and adds one-year renewal; monitor status in Registrar.
 
-#### Transfer Automation
+### 7.2 Transfer Automation
 Automated transfers are possible but require careful safeguards. Use the outline below as a planning reference rather than a production procedure.
 
 APIs:
@@ -492,5 +529,5 @@ Safeguards:
 - Rate-limit calls and handle registrant approval emails manually.
 
 
-## Target Audience
-This runbook serves operators administering Cloudflare zones and edge security, origin services (Apache, PHP, and certificates), and WordPress multisite routing. Common scenarios include onboarding a new domain (proxy, origin cert, HTTPS enforcement), validating TLS after origin changes, diagnosing routing or SSL issues, and validating changes after Cloudflare updates. Recommended skills include navigating Cloudflare DNS/SSL/Rules, Bash with sudo, Apache vhost management, WP-CLI, and basic MySQL queries. Architectural rationale lives in MULTI.md, and terminology is defined in DNSTerms.md.
+## 8. Target Audience
+This runbook serves operators administering Cloudflare zones and edge security, origin services (Apache, PHP, and certificates), and WordPress multisite routing. Common scenarios include onboarding a new domain (proxy, origin cert, HTTPS enforcement), validating TLS after origin changes, diagnosing routing or SSL issues, and validating changes after Cloudflare updates. Recommended skills include navigating Cloudflare DNS/SSL/Rules, Bash with sudo, Apache vhost management, WP-CLI, and basic MySQL queries. Architectural rationale lives in `MULTI.md` sections 2–5 (`MULTI.md#2-architecture--design-decisions`, `MULTI.md#3-network--domain-model`, `MULTI.md#4-infrastructure-layers`, `MULTI.md#5-operational-tradeoffs`), and terminology is defined in `DNSTerms.md`.

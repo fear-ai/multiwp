@@ -2,26 +2,15 @@
 Date: January 20, 2026
 
 ## Introduction
-This project implements a WordPress multisite network in subdirectory mode with apex domain mapping. Each client site uses its own domain while sharing WordPress core, themes, and plugins for operational efficiency. Cloudflare provides DNS, CDN, and edge security.
-Included are shared VPS server and WordPress multisite installation instructions, tooling, and templates to host many domains via Cloudflare and Apache, with per-domain SSL. See the Documentation Map below for the consolidated runbook and strategic context. Cloudflare accounts and zones may be created and configured in the Cloudflare UI, but helper scripts provide some automations, in addition to checking and even validating configurations.
+This project implements a WordPress multisite network in subdirectory mode with apex domain mapping. Each client site uses its own domain while sharing WordPress core, themes, and plugins for operational efficiency. Cloudflare provides DNS, CDN, and edge security. The repository includes the runbooks, scripts, and templates needed to host many domains via Cloudflare and Apache with per-domain origin certificates. Use the Documentation Map below to choose the right document for your role and avoid duplicating guidance.
 
 ## Expected Audience
-This documentation is written for experienced system managers, administrators, and operators and for network and system developers. Each role can enter at the right layer without losing the dependency chain. System administrators responsible for the network, Cloudflare, Ubuntu, Apachee should start with Operations.md, consult HardenUbuntu.md, and review the verification scripts. WordPress administrators focused on site mapping and content integrity can jump to Operations.md sections that cover multisite configuration and validation. Developers adapting or extending the scripts should begin with `scripts/Shell.md` and `scripts/Scripts.md`, then consult MULTI.md for architectural context.
+This documentation is written for experienced system managers, administrators, and operators and for network and system developers. Each role can enter at the right layer without losing the dependency chain. System administrators responsible for the network, Cloudflare, Ubuntu, Apache should start with `Operations.md` sections 3–6 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`, `Operations.md#6-verification`), consult `HardenUbuntu.md`, and review the verification scripts. WordPress administrators focused on site mapping and content integrity can jump to `Operations.md` section 5 (`Operations.md#5-multisite-ops`). Developers adapting or extending the scripts should begin with `scripts/Shell.md` and `scripts/Scripts.md`, then consult `MULTI.md` sections 2–3 (`MULTI.md#2-architecture--design-decisions`, `MULTI.md#3-network--domain-model`) for architectural context.
 
-This documentation sequince keeps operational dependencies clear: Cloudflare edge behavior must align before origin TLS and vhost wiring can be trusted, and WordPress routing depends on both layers being correct.
+This documentation sequence keeps operational dependencies clear: Cloudflare edge behavior must align before origin TLS and vhost wiring can be trusted, and WordPress routing depends on both layers being correct.
 
 ## Key Concepts
-
-### Domain Model
-- **Apex domain mapping**: Each client site uses their own domain (domain.com), not subdomains (sub.main.com)
-- **Subdirectory multisite**: Internal WordPress structure uses subdirectories, mapped to apex domains via Apache vhosts
-- **Per-domain SSL**: Individual Cloudflare Origin certificates per domain and www.domain (no shared SAN certs)
-
-### Infrastructure Layers
-1. **Cloudflare Edge**: DNS, CDN, TLS termination, HTTPS redirects, security headers
-2. **Origin TLS**: Cloudflare→Apache uses per-domain origin certificates, Full (strict) mode
-3. **Apache**: One vhost per domain, all point to shared WordPress installation
-4. **WordPress Multisite**: Shared core/plugins, per-site content/options
+The architectural model, dependencies, and tradeoffs are defined in `MULTI.md` sections 2–5 (`MULTI.md#2-architecture--design-decisions`, `MULTI.md#3-network--domain-model`, `MULTI.md#4-infrastructure-layers`, `MULTI.md#5-operational-tradeoffs`). The operational steps, commands, and validation checks are defined in `Operations.md` sections 3–6 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`, `Operations.md#6-verification`). This README only summarizes how to navigate the documentation and scripts.
 
 ## Validated Environment
 - **Server**: Ubuntu 24.04
@@ -34,9 +23,7 @@ This documentation sequince keeps operational dependencies clear: Cloudflare edg
 
 ## Quick Start: Administrator
 
-Scripts use commands: `curl`, `dig`, `jq`, `wp`, `apache2ctl`, `openssl`. Make sure these are installed and and the system administrator can run them.
-
-For the canonical, step-by-step onboarding and troubleshooting guidance, reference Operations.md; this is a condensed starter.
+Scripts use commands: `curl`, `dig`, `jq`, `wp`, `apache2ctl`, `openssl`. Make sure these are installed and the system administrator can run them. For the canonical onboarding and troubleshooting steps, use `Operations.md` sections 3–6 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`, `Operations.md#6-verification`).
 
 ### Add Site to the Network
 
@@ -44,46 +31,23 @@ For the canonical, step-by-step onboarding and troubleshooting guidance, referen
 **Goal:** Domain registered, nameservers pointed to Cloudflare, zone created in Cloudflare, and SSL/TLS configured.
 
 #### Configure Zone on Cloudflare (via UI)
-- Add the domain to Cloudflare and confirm nameservers are delegated.
-- SSL/TLS → Overview → Set "Full (strict)"
-- SSL/TLS → Edge Certificates → "Always Use HTTPS" ON
-- Rules → Transform Rules → Managed Transforms → "Add security headers"
+Use `Operations.md` section 3.4 (`Operations.md#34-https-flow`) for the exact steps and settings.
 
 #### Issue and install Cloudflare origin certificate
-You can issue origin certificates via the Cloudflare UI or through the API, and in both cases the installation is handled by the same helper. The manual path uses the UI for issuance and then uses `get-cert.sh --manual` to install the certificate safely; the API path uses `get-cert.sh --api` and requires an Origin CA key (`CF_CA_KEY`).
-
-UI issuance + manual install:
-- SSL/TLS → Origin Server → Create Certificate
-- `./scripts/get-cert.sh --manual domain.com`
-
-API issuance + install:
-- `./scripts/get-cert.sh --api domain.com`
+Follow `Operations.md` section 4.4 (`Operations.md#44-origin-certs`) for the UI or API path and the exact command.
 
 #### Create Apache vhosts
 `./scripts/apache-vhost.sh domain.com`
 
 #### Add to WordPress multisite
 `./scripts/install-site.sh domain.com "Site Title" email@domain.com`
-  Assumes WordPress multisite is already installed; see Operations.md for the setup sequence.
+Assumes WordPress multisite is already installed; see `Operations.md` section 5.1 (`Operations.md#51-site-onboarding`) for the setup sequence.
 
 #### Verify
 `./scripts/verify-domain.sh domain.com`
 
 ### Query Multisite Setup
-
-#### List sites in multisite network
-`sudo -u www-data wp --path=<wp_root> site list`
-Example wp_root: `/var/www/html/<directory>` (/var/www/html is default on Ubuntu) and `<directory>` was chosen for your environment or empty. In some examples, documentation, and as script defaults <directory> is `wordpress`.
-
-#### Check Apache vhosts
-`sudo ls /etc/apache2/sites-enabled/`
-
-#### List installed certificates
-`sudo ls /etc/ssl/cloudflare-origin/certs/`
-
-#### Check DNS resolution
-`dig +short <domain.com>`
-`curl -I https://<domain.com> | grep -i cf-ray`
+Use `Operations.md` sections 5.2 and 6.1 (`Operations.md#52-site-troubleshooting`, `Operations.md#61-validation-checks`) for the authoritative validation checks and troubleshooting sequence.
 
 ---
 
@@ -93,15 +57,15 @@ Example wp_root: `/var/www/html/<directory>` (/var/www/html is default on Ubuntu
 The documents below describe different layers of the system and are intended to be read in this order so the operational dependencies remain clear.
 
 - `README.md`: Entry point and quick start with the script index.
-- `Operations.md`: Consolidated runbook for Cloudflare, origin, and WordPress operations in dependency order; use the relevant sections as needed.
-- `HardenUbuntu.md`: Host hardening guidance focused on Ubuntu, including SSH baselines, unattended upgrades, and logging/retention.
-- `Perf.md`: Caching strategy, performance tooling, benchmarking steps, and validation workflow for multisite and single-site.
+- `Operations.md`: Consolidated runbook for Cloudflare, origin, and WordPress operations in dependency order (see sections 3–6: `Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`, `Operations.md#6-verification`).
+- `HardenUbuntu.md`: Host hardening guidance focused on Ubuntu security baselines and verification.
+- `Perf.md`: Performance strategy, tooling, and the execution runbook for benchmarking and tuning.
 - `scripts/Shell.md`: Conventions for writing scripts in this repository and using shared helpers.
 - `scripts/Scripts.md`: Authoritative script interfaces, options, and environment variables.
 - `Record.md`: Recording policy for updating `domains.csv` across provisioning and validation steps.
 - `CloudflareMCP.md` (optional, experimental): MCP portal access and validation notes; not part of the production flow.
-- `MULTI.md` (optional): Strategic architecture decisions, tradeoffs, and future work.
-- `DNSTerms.md` (optional): DNS and Cloudflare terminology reference.
+- `MULTI.md` (optional): Strategic architecture decisions, tradeoffs, and future work (see sections 2–8: `MULTI.md#2-architecture--design-decisions`, `MULTI.md#3-network--domain-model`, `MULTI.md#4-infrastructure-layers`, `MULTI.md#5-operational-tradeoffs`, `MULTI.md#6-implementation-issues--lessons`, `MULTI.md#7-abandoned-approaches`, `MULTI.md#8-future-investigation`).
+- `DNSTerms.md` (optional): DNS and Cloudflare terminology reference and vendor links.
 - TODO: Reconcile guidance between `Operations.md` and `HardenUbuntu.md`.
 
 ### Repository Structure
@@ -174,28 +138,12 @@ Unit test scripts:
 `bash -n scripts/*.sh`
 
 #### Permissions
-Permissions and ownership policy for WordPress files are documented in Operations.md so the origin stays write-restricted while WordPress can still write uploads and caches.
-
-- Run as user with sudo permissions and in ssl-cert group, not as root
-`sudo usermod -aG ssl-cert {user} && sudo newgrp ssl-cert`
-- WordPress tree baseline: `www-data:www-data` with directories at 750 and files at 640, except the site root, `.htaccess`, and `wp-config.php`, which remain owned by root or the deployer account with group `www-data`.
+Permissions and ownership policy for WordPress files are documented in `Operations.md` section 4.7 (`Operations.md#47-wordpress-files-and-permissions`). The README does not repeat them to avoid drift.
 
 ---
 
 ### Troubleshooting
-
-**Site shows primary domain content:**
-See Operations.md for the authoritative mapping checks and troubleshooting flow.
-
-**Certificate errors:**
-- Check cert path in Apache vhost config
-- Check cert file permissions: `root:ssl-cert 640`
-`sudo openssl x509 -in /etc/ssl/cloudflare-origin/certs/domaincom.crt -noout -subject -dates -ext subjectAltName`
-
-**HTTP→HTTPS not working:**
-- Check Cloudflare proxy (orange cloud) is enabled
-- Verify Cloudflare "Always Use HTTPS" is ON
-- Do NOT configure Apache-level HTTP→HTTPS redirect (may causes loops)
+Use `Operations.md` sections 5.2 and 6.1 (`Operations.md#52-site-troubleshooting`, `Operations.md#61-validation-checks`) for the authoritative troubleshooting and validation flow.
 
 ---
 
