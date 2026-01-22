@@ -1,14 +1,14 @@
 <?php
 /**
- * WordPress Multisite Configuration Template (Production Version)
+ * WordPress Single-Site Configuration Template (Production Version)
  * Based on deployed wp-config.php with sensitive values masked
- * 
+ *
  * Replace {{VARIABLES}} with actual values
  *
- * Example file naming for multisite configuration tracking:
- * - /var/www/html/wordpress/wp-config.php (current)
- * - /var/www/html/wordpress/wp-config.php.ssl (SSL configuration staging)
- * - /var/www/html/wordpress/wp-config.php.prod (production snapshot)
+ * Example file naming for single-site configuration tracking:
+ * - /var/www/html/domain.tld/wp-config.php (current)
+ * - /var/www/html/domain.tld/wp-config.php.ssl (SSL configuration staging)
+ * - /var/www/html/domain.tld/wp-config.php.prod (production snapshot)
  */
 
 // ** Database settings - You can get this info from your web host ** //
@@ -68,15 +68,6 @@ $table_prefix = '{{TABLE_PREFIX}}';
 
 define( 'FORCE_SSL_ADMIN', true );
 define( 'DISABLE_WP_CRON', true );
-
-/* WordPress Multisite Configuration */
-define( 'WP_ALLOW_MULTISITE', true );
-define( 'MULTISITE', true );
-define( 'SUBDOMAIN_INSTALL', false );
-define( 'DOMAIN_CURRENT_SITE', '{{PRIMARY_DOMAIN}}' );
-define( 'PATH_CURRENT_SITE', '/' );
-define( 'SITE_ID_CURRENT_SITE', 1 );
-define( 'BLOG_ID_CURRENT_SITE', 1 );
 
 // WordPress security enhancements
 define( 'DISALLOW_FILE_EDIT', true );           // Disable file editing
