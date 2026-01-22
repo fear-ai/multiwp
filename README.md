@@ -1,21 +1,21 @@
 # WordPress Multisite Tools
-Date: January 12, 2026
+Date: January 20, 2026
 
 ## Introduction
 This project implements a WordPress multisite network in subdirectory mode with apex domain mapping. Each client site uses its own domain while sharing WordPress core, themes, and plugins for operational efficiency. Cloudflare provides DNS, CDN, and edge security.
-Included are shared VPS server and WordPress multisite installation instructions, tooling, and templates to host many domains via Cloudflare and Apache, with per-domain SSL. See the Documentation Map below for the consolidated runbook and strategic context. Cloudflare zones are created in the Cloudflare UI; the scripts assume the zone exists before DNS automation begins.
+Included are shared VPS server and WordPress multisite installation instructions, tooling, and templates to host many domains via Cloudflare and Apache, with per-domain SSL. See the Documentation Map below for the consolidated runbook and strategic context. Cloudflare accounts and zones may be created and configured in the Cloudflare UI, but helper scripts provide some automations, in addition to checking and even validating configurations.
 
 ## Expected Audience
-This documentation is written for several operator roles and is structured so each role can enter at the right layer without losing the dependency chain. System administrators responsible for Ubuntu, Apache, and Cloudflare should start with Operations.md and the verification scripts, while WordPress administrators focused on site mapping and content integrity should use Operations.md sections that cover multisite configuration and validation. Developers adapting or extending the scripts should begin with `scripts/Shell.md` and `scripts/Scripts.md`, then consult MULTI.md for architectural context.
+This documentation is written for experienced system managers, administrators, and operators and for network and system developers. Each role can enter at the right layer without losing the dependency chain. System administrators responsible for the network, Cloudflare, Ubuntu, Apachee should start with Operations.md, consult HardenUbuntu.md, and review the verification scripts. WordPress administrators focused on site mapping and content integrity can jump to Operations.md sections that cover multisite configuration and validation. Developers adapting or extending the scripts should begin with `scripts/Shell.md` and `scripts/Scripts.md`, then consult MULTI.md for architectural context.
 
-This shared structure keeps operational dependencies clear: Cloudflare edge behavior must align before origin TLS and vhost wiring can be trusted, and WordPress routing depends on both layers being correct.
+This documentation sequince keeps operational dependencies clear: Cloudflare edge behavior must align before origin TLS and vhost wiring can be trusted, and WordPress routing depends on both layers being correct.
 
 ## Key Concepts
 
 ### Domain Model
 - **Apex domain mapping**: Each client site uses their own domain (domain.com), not subdomains (sub.main.com)
 - **Subdirectory multisite**: Internal WordPress structure uses subdirectories, mapped to apex domains via Apache vhosts
-- **Per-domain SSL**: Individual Cloudflare Origin certificates per domain (no shared SAN certs)
+- **Per-domain SSL**: Individual Cloudflare Origin certificates per domain and www.domain (no shared SAN certs)
 
 ### Infrastructure Layers
 1. **Cloudflare Edge**: DNS, CDN, TLS termination, HTTPS redirects, security headers
@@ -28,13 +28,13 @@ This shared structure keeps operational dependencies clear: Cloudflare edge beha
 - **Web**: Apache 2.4.58
 - **PHP**: 8.3.11
 - **Database**: MySQL 8.0.43
-- **WordPress**: 6.9 multisite (subdirectory mode)
+- **WordPress**: 6.9 Multisite
 
 ---
 
 ## Quick Start: Administrator
 
-Scripts use commands: `curl`, `dig`, `jq`, `wp`, `apache2ctl`, `openssl`. Make sure these are installed and you can run them.
+Scripts use commands: `curl`, `dig`, `jq`, `wp`, `apache2ctl`, `openssl`. Make sure these are installed and and the system administrator can run them.
 
 For the canonical, step-by-step onboarding and troubleshooting guidance, reference Operations.md; this is a condensed starter.
 
@@ -73,7 +73,7 @@ API issuance + install:
 
 #### List sites in multisite network
 `sudo -u www-data wp --path=<wp_root> site list`
-Default example: `/var/www/html/wordpress` (Ubuntu default is `/var/www/html`, with `wordpress` as the chosen subdirectory).
+Example wp_root: `/var/www/html/<directory>` (/var/www/html is default on Ubuntu) and `<directory>` was chosen for your environment or empty. In some examples, documentation, and as script defaults <directory> is `wordpress`.
 
 #### Check Apache vhosts
 `sudo ls /etc/apache2/sites-enabled/`
@@ -82,8 +82,8 @@ Default example: `/var/www/html/wordpress` (Ubuntu default is `/var/www/html`, w
 `sudo ls /etc/ssl/cloudflare-origin/certs/`
 
 #### Check DNS resolution
-`dig +short domain.com`
-`curl -I https://domain.com | grep -i cf-ray`
+`dig +short <domain.com>`
+`curl -I https://<domain.com> | grep -i cf-ray`
 
 ---
 
@@ -94,12 +94,15 @@ The documents below describe different layers of the system and are intended to 
 
 - `README.md`: Entry point and quick start with the script index.
 - `Operations.md`: Consolidated runbook for Cloudflare, origin, and WordPress operations in dependency order; use the relevant sections as needed.
+- `HardenUbuntu.md`: Host hardening guidance focused on Ubuntu, including SSH baselines, unattended upgrades, and logging/retention.
+- `Perf.md`: Caching strategy, performance tooling, benchmarking steps, and validation workflow for multisite and single-site.
 - `scripts/Shell.md`: Conventions for writing scripts in this repository and using shared helpers.
 - `scripts/Scripts.md`: Authoritative script interfaces, options, and environment variables.
 - `Record.md`: Recording policy for updating `domains.csv` across provisioning and validation steps.
 - `CloudflareMCP.md` (optional, experimental): MCP portal access and validation notes; not part of the production flow.
 - `MULTI.md` (optional): Strategic architecture decisions, tradeoffs, and future work.
 - `DNSTerms.md` (optional): DNS and Cloudflare terminology reference.
+- TODO: Reconcile guidance between `Operations.md` and `HardenUbuntu.md`.
 
 ### Repository Structure
 
@@ -109,6 +112,7 @@ multiwp/
 ├── README.md                      # This file
 ├── MULTI.md                       # Architecture & strategic decisions
 ├── Operations.md                  # Consolidated operational runbook
+├── HardenUbuntu.md                # Host hardening guidance focused on Ubuntu baseline controls
 ├── Record.md                      # Recording policy for domains.csv updates
 ├── DNSTerms.md                    # DNS & Cloudflare terminology
 ├── CloudflareMCP.md               # Cloudflare MCP notes and validation steps
@@ -117,7 +121,13 @@ multiwp/
 ├── templates/
 │   ├── apache-http.conf           # Apache HTTP vhost template
 │   ├── apache-ssl.conf            # Apache HTTPS vhost template
-│   └── .htaccess                  # WordPress multisite rewrite rules
+│   ├── htaccess-multisite         # WordPress multisite rewrite rules
+│   ├── htaccess-singlesite        # WordPress single-site rewrite rules
+│   ├── wp-config-multisite.php    # Multisite wp-config template
+│   ├── wp-config-multisite-deployed.php # Multisite wp-config (production-style)
+│   ├── wp-config-singlesite.php   # Single-site wp-config template
+│   ├── wp-config-singlesite-deployed.php # Single-site wp-config (production-style)
+│   └── ...
 ```
 
 ### Scripts
@@ -126,9 +136,11 @@ Program scripts (alphabetical):
 | Script | Purpose | Status |
 |--------|---------|--------|
 | `apache-vhost.sh` | Create Apache HTTP + SSL vhosts for domain | Exercised |
+| `check-auth-domains.sh` | Compare CF_DOMAINS in auth files to domains.csv | Not exercised |
 | `check-cf.sh` | Inspect Cloudflare zone settings via API | Exercised |
 | `check-edge.sh` | Validate Cloudflare edge behavior and headers | Exercised |
 | `check-origin.sh` | Validate origin certs, vhosts, and Apache health | Exercised |
+| `check-server.sh` | Validate Ubuntu/Apache/PHP/MySQL baseline settings | Not exercised |
 | `check-read.sh` | Run syntax/unit tests and read-only edge/DNS/origin/WP checks | Exercised |
 | `check-wp.sh` | Validate multisite mappings and site URLs | Exercised |
 | `cloud-dns.sh` | Create/update DNS records in an existing Cloudflare zone | Exercised |
@@ -150,7 +162,7 @@ Helper scripts:
 | `cli.sh` | Shared option parsing helpers | Library |
 | `mcp.sh` | MCP helper functions | Library |
 
-Test scripts:
+Unit test scripts:
 | Script | Purpose | Status |
 |--------|---------|--------|
 | `test_common.sh` | Unit tests for shared helpers | Test |
@@ -162,14 +174,11 @@ Test scripts:
 `bash -n scripts/*.sh`
 
 #### Permissions
+Permissions and ownership policy for WordPress files are documented in Operations.md so the origin stays write-restricted while WordPress can still write uploads and caches.
+
 - Run as user with sudo permissions and in ssl-cert group, not as root
 `sudo usermod -aG ssl-cert {user} && sudo newgrp ssl-cert`
-
-### Contributing
-
-See the following references for implementation details:
-- `scripts/Shell.md` for scripting conventions and shared helpers
-- `AGENTS.md` for AI assistant guidelines specific to this repository
+- WordPress tree baseline: `www-data:www-data` with directories at 750 and files at 640, except the site root, `.htaccess`, and `wp-config.php`, which remain owned by root or the deployer account with group `www-data`.
 
 ---
 

@@ -10,7 +10,7 @@ The dependency chain is explicit: Cloudflare edge behavior depends on correct DN
 Cloudflare edge configuration defines how traffic reaches the origin and how HTTPS, redirects, and security headers are enforced. The UI is authoritative for edge policy, while scripts can assist with repeatable provisioning tasks such as DNS or origin certificate issuance.
 
 ### Overview
-Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HTTP is redirected to HTTPS at the edge, and security headers are applied consistently. Origin servers use per-domain Cloudflare Origin certificates; Cloudflare presents edge certificates to visitors. Use the UI for clarity; layer scripts where it saves time. For terminology, see `DNSTerms.md`.
+Configure Cloudflare so client traffic is encrypted end-to-end (Full strict), HTTP is redirected to HTTPS at the edge, and security headers are applied consistently. Cloudflare generates these security headers at the edge for both site and redirect zones; do not add Apache-level header directives unless a future exception is explicitly justified. Origin servers use per-domain Cloudflare Origin certificates; Cloudflare presents edge certificates to visitors. Use the UI for clarity; layer scripts where it saves time. For terminology, see `DNSTerms.md`.
 
 These settings reflect the current tested configuration for this repository and will be updated as validation continues and platform behavior changes.
 
@@ -70,7 +70,7 @@ Use the Security Settings page to enable baseline protections. These settings ar
 - Path: `Security` → `Settings`.
 - Enable Browser integrity check.
 - Enable Replace insecure JavaScript libraries.
-- Schema validation is currently OFF, pending further investigation.
+- Schema validation is currently OFF, pending further investigation. TODO: Revisit schema validation; it is not exposed by the standard zone settings API, so confirm where it can be read or set before automating.
 - Leaked credentials detection is not enabled in this runbook; evaluate separately before enabling.
 
 #### Security Headers
@@ -88,6 +88,13 @@ Use Managed Transforms to add standard response headers at the edge.
 
 ### Automation
 Cloudflare UI is authoritative for SSL mode, redirects, and headers. Automation scripts help with DNS, origin certificate placement, and vhost generation when repeatability is needed.
+
+#### HTTPS and Security Baseline
+Use the settings helper when you need to apply the HTTPS/security baseline across many zones with consistent values. This script reads `domains.csv`, resolves the zone ID per domain, and applies the baseline via the Cloudflare API, so it depends on active zones and valid credentials with edit access.
+
+- Script: `scripts/cloud-settings.sh --site-types redirect,multisite`.
+- Does: sets `ssl=strict`, enables Always Use HTTPS, raises minimum TLS to 1.2, and enables the managed “Add security headers” transform.
+- Does not: modify DNS records or Redirect Rules; use `scripts/cloud-dns.sh` or `scripts/cloud-redirect.sh` for those.
 
 #### Zone DNS
 Use the zone/DNS script when onboarding a new domain and you want API-driven provisioning.
@@ -133,12 +140,12 @@ Expected variables in the auth file or environment:
 Optional variables:
 - `CF_ACCOUNT` (human-readable account name).
 - `CF_ZONE` (zone [domain] for the account).
-- `CF_ZONE_MAIN` (primary zone/domain when multiple zones exist).
+- `CF_ZONE_MAIN` (informational hint for the primary zone; scripts do not select a zone based on this value).
 - `CF_KEY_SCOPE` (scope hint for the global API key, for example `user`).
 - `CF_TOKEN_SCOPE` (scope hint for the account API token, for example `account`).
 - `CF_CA_SCOPE` (scope hint for the Origin CA key, for example `user`).
 
-When multiple `CF_ZONE`/`CF_ZONE_ID` pairs are listed in an auth file, scripts default to the first `CF_ZONE_ID` and use `CF_ZONE_MAIN` (if set) as the default zone name. Pass `--zone-id` (or set `CF_ZONE_ID`) to target a specific zone explicitly.
+When multiple `CF_ZONE`/`CF_ZONE_ID` pairs are listed in an auth file, scripts do not pick a default. For domain-scoped work they look up the matching pair for that domain, and otherwise require an explicit `--zone` or `--zone-id` (or an API lookup) to select a target.
 
 Environment variables always take precedence over the auth file, so one-off overrides can be provided safely at runtime without editing the file. Account-scoped tokens are verified against the account endpoint rather than the user endpoint. For a quick sanity check, use `scripts/verify-cf-auth.sh`, which validates any available account API token, global API key, and Origin CA key; Origin CA verification requires a `CF_ZONE_ID`.
 
@@ -176,23 +183,53 @@ HSTS instructs browsers that the site should only be accessed over HTTPS.
 - WordPress option: [Headers Security Advanced HSTS WP] https://wordpress.com/plugins/headers-security-advanced-hsts-wp.
 
 #### Redirect Config
-Some zones exist only to redirect to a canonical domain (for example, short or legacy domains that should always land on the primary site). These zones should be configured to redirect at the Cloudflare edge, keep the canonical security policies on the primary domain, and avoid extra hops or browser-level stickiness that is unnecessary for aliases.
+Some zones exist only to redirect to a canonical domain (for example, short or legacy domains that should always land on the primary site). These zones should be configured to redirect at the Cloudflare edge and now follow the same HTTPS and Security baseline as singlesite and multisite domains. The intent is to eliminate drift and ensure aliases are not a weaker security posture, even if that introduces an extra redirect hop.
 
 Recommended approach:
 - Use a Redirect Rule at `Rules` → `Redirect Rules` that matches the alias host and issues a 301 to the canonical host, preserving path and query. This keeps redirects consistent for both HTTP and HTTPS and does not depend on origin behavior.
-- Keep “Always Use HTTPS” off for redirect-only zones when a Redirect Rule is present. The rule handles HTTP→HTTPS directly and avoids an extra redirect hop on the alias host.
-- Keep HSTS off for redirect-only zones. HSTS is a browser-level commitment and should be reserved for the canonical domain, not for disposable or temporary aliases.
-- Flexible SSL mode is acceptable for redirect-only zones when the Redirect Rule is the only intended behavior, because the edge responds and the origin is effectively bypassed. If you want the redirect zone to fail closed when a rule is removed or misconfigured, use Full (strict) with a valid origin certificate so the fallback path is still protected.
+- Keep “Always Use HTTPS” enabled even when a Redirect Rule is present. This can introduce an extra hop, but the consistency across domains is preferred and reduces configuration exceptions.
+- Apply the standard security headers (Managed Transforms → “Add security headers”) on redirect-only zones. This includes HSTS, so treat redirects as a long-lived commitment rather than disposable aliases.
+- Require SSL mode `Full (strict)` for redirect-only zones so the edge-to-origin path remains protected if a rule is removed or misconfigured.
 
 Operational notes:
 - Ensure alias DNS records are proxied (orange cloud) so Redirect Rules apply at the edge.
-- Security headers should be enforced on the canonical domain. On redirect-only zones, they are secondary to the redirect response and can be absent.
+- The baseline security headers now apply on both canonical and redirect zones; this trades a small redirect cost for consistent policy and simpler audits.
+- Validation: confirm HTTP and HTTPS requests for both apex and `www` return 301 to the canonical host, preserve path/query, and do not loop. Use `curl -I` from a client or a browser test, and verify that the origin is not being hit directly (UFW logs should show only Cloudflare IPs if the allowlist is active).
 
 ## Origin TLS
 The origin layer provides the TLS endpoint Cloudflare connects to and the Apache vhost routing that serves WordPress. This layer must be correct before Full (strict) can succeed at the edge.
 
 ### Host Services
 Provision Ubuntu 24 with Apache 2.4, PHP 8.x, MySQL 8.x. Check CONF.md for the latest site-specific recommendations (versions, paths, domains).
+
+### Ubuntu updates
+Keep the host patched with unattended security updates so origin services are not exposed to known vulnerabilities. This is a foundational dependency for the rest of the stack because Apache, PHP, OpenSSL, and kernel fixes arrive through Ubuntu security updates. Configure this before or alongside initial server provisioning.
+
+Install and enable unattended upgrades:
+```bash
+sudo apt-get update && sudo apt-get install -y unattended-upgrades
+sudo systemctl enable --now unattended-upgrades.service
+```
+
+Confirm the service state and recent activity:
+```bash
+systemctl status unattended-upgrades.service
+systemctl is-enabled unattended-upgrades.service
+journalctl -u unattended-upgrades.service --since "7 days ago"
+```
+
+Review and adjust configuration as needed:
+```bash
+sudo sed -n '1,200p' /etc/apt/apt.conf.d/20auto-upgrades
+sudo sed -n '1,200p' /etc/apt/apt.conf.d/50unattended-upgrades
+```
+
+Use a dry run when validating changes:
+```bash
+sudo unattended-upgrades --dry-run --debug
+```
+
+If automatic reboots are allowed, set a window that matches maintenance expectations. If reboots are disabled, document the manual reboot cadence and ensure kernel updates are applied intentionally.
 
 ### User Permissions
 The deployment user (typically `ubuntu`) must be in the `ssl-cert` group to run scripts that read SSL certificates.
@@ -229,18 +266,92 @@ The web server uses one vhost per domain, driven by templates that reference the
 - Script: `sudo scripts/apache-vhost.sh`.
 - Runs: `sudo apache2ctl configtest && sudo systemctl reload apache2`.
 
+Host validation note: Apache’s `Require host` does **not** validate the `Host` header. It performs a reverse DNS lookup on the client IP and compares that name to the listed hostnames. This fails for Cloudflare origins because the client IP is a Cloudflare edge address, not the site’s hostname. If you need to validate the `Host` header explicitly, use an expression instead:
+```apache
+<Location />
+    Require expr %{HTTP_HOST} == 'alphaeos.net' || %{HTTP_HOST} == 'www.alphaeos.net'
+</Location>
+```
+If you do not require host header validation, omit the `Require host`/`Require expr` blocks entirely and rely on `ServerName`/`ServerAlias` plus the default vhost fallback.
+
 ### PHP Database
-Database name/user configuration is tracked in CONF.md.
+Database name and user configuration should be tracked alongside the domain inventory so the origin and WordPress layers can be validated consistently.
 
-### WordPress Files
-Ensure `www-data` can read/write uploads and keep code write-restricted.
+### WordPress Files and Permissions
+Keep WordPress readable by the web server while keeping code write-restricted. The goal is to make uploads writable without granting write access to the core, plugins, themes, or configuration files.
 
-### WP Config
-Keep configuration and rewrite rules aligned with multisite requirements so routing remains stable.
+Site roots and layout:
+- Multisite root: `/var/www/html/wordpress`
+- Single-site root: `/var/www/html/zero.directory`
 
-- `wp-config.php`: keep out of webroot if practical; include DB creds, salts, multisite constants; perms 640, owner root/deployer, group `www-data` if Apache must read.
+Ownership and permissions model:
+- Default WordPress tree: `www-data:www-data` with directories at 750 and files at 640. This keeps runtime ownership consistent for WordPress operations while avoiding world-readable files.
+- Exceptions: keep the site root directory, `.htaccess`, and `wp-config.php` owned by root or the deployer account (group `www-data`) so these files remain write-restricted even when the rest of the tree is owned by `www-data`.
+- Uploads and cache directories under `wp-content`: writable by `www-data` only. Prefer `www-data` ownership with 750/640 rather than making the entire tree group-writable.
+
+Config and rewrite files:
+- `wp-config.php`: keep out of webroot if practical; include DB creds, salts, and multisite constants; permissions 640, owner root/deployer, group `www-data` so Apache can read.
 - Multisite `.htaccess`: standard subdirectory rules from WordPress docs; `AllowOverride All` on docroot; avoid custom rewrites that bypass multisite routing.
 - Single-site `.htaccess`: standard single-site rules; typically 640, owned by deployer, readable by web server.
+
+When tracking or staging configuration variants, use explicit filenames alongside the live file so it is clear which version is active. Examples for multisite:
+- Current: `/var/www/html/wordpress/wp-config.php`
+- SSL configuration staging: `/var/www/html/wordpress/wp-config.php.ssl`
+- Production-hardening snapshot: `/var/www/html/wordpress/wp-config.php.prod`
+
+Template sources:
+- Multisite templates: `templates/wp-config-multisite.php` and `templates/wp-config-multisite-deployed.php`.
+- Single-site templates: `templates/wp-config-singlesite.php` and `templates/wp-config-singlesite-deployed.php`.
+- `.htaccess` templates: `templates/htaccess-multisite` and `templates/htaccess-singlesite`.
+
+### wp-config.php Settings
+This section documents the baseline `wp-config.php` flags we expect in production, and it mirrors the template comments so configuration is consistent across environments.
+
+Defaults and environment flags:
+- `WP_DEBUG`, `WP_DEBUG_LOG`, `WP_DEBUG_DISPLAY`, and `SCRIPT_DEBUG` are set to `false` by default.
+- `WP_ENVIRONMENT_TYPE` is set to `production`.
+- Use a guard (`if ( ! defined( 'WP_DEBUG' ) )`) so these defaults can be overridden intentionally in a staging or debugging context.
+
+Security and update controls:
+- `DISALLOW_FILE_EDIT` is `true` to prevent theme/plugin edits in wp-admin.
+- `DISALLOW_FILE_MODS` remains commented by default; enable only if updates must be CLI-only.
+- `DISABLE_WP_CRON` is `true`, which requires a system cron entry (see the Scheduled Cron section) to run due events.
+
+HTTPS and admin enforcement:
+- `FORCE_SSL_ADMIN` is `true` to keep `/wp-admin` and login over HTTPS.
+- When Cloudflare terminates TLS at the edge and connects to the origin over HTTP, honor Cloudflare HTTPS headers in `wp-config.php` so WordPress generates HTTPS URLs. This is safe only because the origin is restricted to Cloudflare IPv4 traffic.
+
+Example baseline block:
+```php
+if ( ! defined( 'WP_DEBUG' ) ) {
+    define( 'WP_DEBUG', false );
+    define( 'WP_DEBUG_LOG', false );
+    define( 'WP_DEBUG_DISPLAY', false );
+    define( 'SCRIPT_DEBUG', false );
+    define( 'WP_ENVIRONMENT_TYPE', 'production' );
+}
+
+define( 'DISALLOW_FILE_EDIT', true );
+// define( 'DISALLOW_FILE_MODS', true ); // CLI-only installs/updates
+define( 'DISABLE_WP_CRON', true );
+define( 'FORCE_SSL_ADMIN', true );
+
+if ( ( isset( $_SERVER['HTTP_X_FORWARDED_PROTO'] ) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https' ) ||
+     ( isset( $_SERVER['HTTP_CF_VISITOR'] ) && stripos( $_SERVER['HTTP_CF_VISITOR'], 'https' ) !== false ) ) {
+    $_SERVER['HTTPS'] = 'on';
+    $_SERVER['SERVER_PORT'] = '443';
+}
+```
+
+We have discussed honoring Cloudflare HTTPS signals at the multisite `.htaccess` layer as an additional safeguard. If that is ever implemented, keep it limited to the multisite `.htaccess` and do not add it to the `zero.directory` single-site `.htaccess`.
+
+We keep rewrite rules in `.htaccess` rather than moving them into vhost files. That means Apache must permit overrides and must allow symlink resolution for rewrite rules to function. The current stance is to keep `Options FollowSymLinks` in the WordPress docroot. If you want to tighten this to `SymLinksIfOwnerMatch`, validate the following before and after the change so routing does not silently break:
+
+1) Run `sudo apache2ctl configtest` and reload Apache.
+2) For each site, test the front page, a known permalink, `/wp-login.php`, `/wp-admin/` (redirect to login), and `/wp-json/`.
+3) Check per-site Apache error logs for rewrite or permission errors.
+
+If you remove both `FollowSymLinks` and `SymLinksIfOwnerMatch`, Apache will refuse `.htaccess` rewrites and permalinks will break, so do not remove both while `.htaccess` remains the source of rewrite rules.
 
 ## Multisite Ops
 WordPress multisite routing depends on the origin layer. Configure multisite first, then map sites to apex domains using the steps below.
@@ -290,6 +401,8 @@ Use the mapping steps in this section to correct data first, then reload Apache 
 
 ## Verification
 Use the checks in this section after provisioning to confirm the stack is healthy end to end. These checks are read-oriented and are designed to highlight the first failing layer.
+
+Comprehensive validation and monitoring tooling is still under investigation and development. Treat the checks below as the current baseline until a more complete observability plan is formalized.
 
 ### Validation Checks
 The list below covers the standard checks by layer. Use them to confirm configuration state before diagnosing higher-level symptoms.

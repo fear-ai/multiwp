@@ -9,7 +9,7 @@ This design depends on the following sources, which define the underlying interf
 
 - `scripts/Scripts.md` defines the authoritative options and behaviors of `onboard-zone.sh`, `cloud-redirect.sh`, and `test-record.sh`.
 - `Plan.md` and the `domains.csv` header define the inventory schema and the meaning of `status_cf`, `status_origin`, and `status_wp` values.
-- `scripts/Shell.md` defines the helper conventions used by `record_update_csv` in `common.sh`.
+- `scripts/Shell.md` defines the helper conventions used by `csv_put_fields` in `common.sh`.
 
 This document focuses on the recording policy and workflow and avoids duplicating the full interface details already captured in `scripts/Scripts.md`.
 
@@ -70,6 +70,81 @@ Each step uses the same recording helper so status updates are consistent across
 Recording relies on a consistent domain match so reads and writes align. The recording helper lowercases the target domain and matches it against the `domain` column after trimming and lowercasing. This keeps lookups case-insensitive while preserving the original `domain` value already stored in the CSV.
 
 When a row is found, the update behavior is selective rather than wholesale. Non-status fields are only updated when a non-empty value is supplied, and status fields follow the monotonic policy unless `--downgrade` is provided. When no matching row exists, a new row is created with the normalized (lowercase) domain value and the supplied updates.
+
+## Account-Scoped Auth and Inventory Alignment
+The current model allows multiple zones in a single `.auth` file while `domains.csv` may reference multiple accounts. This blurs the account/zone/domain relationship and makes it easy for scripts to resolve the wrong zone when a default `CF_ZONE_ID` is present. The proposed design is to make `.auth` files account-scoped and to align `domains.csv` with that account scope.
+
+Design objectives:
+- Each Cloudflare account has a dedicated `.auth` file with `CF_ACCOUNT_ID`, `CF_ACCOUNT_NAME`, and a `CF_DOMAINS` list (comma-separated).
+- Each `domains.csv` is either account-specific (recommended) or uses the `auth_file` column consistently to point at the correct account file.
+- Script defaults should avoid using a stale `CF_ZONE_ID` from an unrelated account when domains are not in scope for that auth file.
+
+Mismatch handling:
+- If a domain appears in `CF_DOMAINS` but not in the account’s `domains.csv`, add it to the CSV before running provisioning scripts.
+- If a domain appears in the CSV but not in `CF_DOMAINS`, add it to the auth file or move it to the correct account file.
+- When a CSV includes multiple `auth_file` values, require explicit `--auth-file` usage so zone resolution does not default to the wrong account.
+
+Split an inventory into per-account CSV files:
+```bash
+python3 - <<'PY'
+import csv
+from collections import defaultdict
+
+src = "domains.csv"
+groups = defaultdict(list)
+
+with open(src, newline="") as fh:
+    reader = csv.DictReader(fh)
+    fieldnames = reader.fieldnames or []
+    for row in reader:
+        key = (row.get("auth_file") or "unknown").strip()
+        groups[key].append(row)
+
+for auth_file, rows in groups.items():
+    slug = auth_file.replace("/", "_").replace("~", "home") if auth_file else "unknown"
+    out = f"domains_{slug}.csv"
+    with open(out, "w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"Wrote {out} ({len(rows)} rows)")
+PY
+```
+
+Re-merge account CSV files back into a single inventory:
+```bash
+python3 - <<'PY'
+import csv
+import glob
+
+files = sorted(glob.glob("domains_*.csv"))
+rows = []
+fieldnames = None
+seen = set()
+
+for path in files:
+    with open(path, newline="") as fh:
+        reader = csv.DictReader(fh)
+        fieldnames = fieldnames or reader.fieldnames
+        for row in reader:
+            domain = (row.get("domain") or "").strip().lower()
+            if not domain or domain in seen:
+                continue
+            seen.add(domain)
+            rows.append(row)
+
+with open("domains.csv", "w", newline="") as fh:
+    writer = csv.DictWriter(fh, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)
+print(f"Wrote domains.csv ({len(rows)} rows)")
+PY
+```
+
+Onboarding domains with account-scoped auth:
+1) Add the domain to `CF_DOMAINS` in the account’s `.auth` file.
+2) Ensure `auth_file` in the CSV row matches the account `.auth` file.
+3) Run `onboard-zone.sh` with `--auth-file` set to the account file to avoid cross-account defaults.
 
 ## Open Questions and TODOs
 The items below require follow-up to harden the recording system and clarify intent boundaries:
