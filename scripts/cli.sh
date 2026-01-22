@@ -95,6 +95,42 @@ cli_hsts_opt() {
     return 0
 }
 
+cli_template_dir_opt() {
+    local opt="$1"
+    local var="$2"
+    local next="${3-}"
+    local val=""
+    case "$opt" in
+        template-dir=*) val="${opt#*=}" ;;
+        template-dir)
+            val="$next"
+            OPTIND=$((OPTIND+1))
+            ;;
+        *) return 1 ;;
+    esac
+    [ -n "$val" ] || err "--template-dir requires a value"
+    printf -v "$var" '%s' "$val"
+    return 0
+}
+
+cli_stage_opt() {
+    local opt="$1"
+    local var="$2"
+    local next="${3-}"
+    local val=""
+    case "$opt" in
+        stage=*) val="${opt#*=}" ;;
+        stage)
+            val="$next"
+            OPTIND=$((OPTIND+1))
+            ;;
+        *) return 1 ;;
+    esac
+    [ -n "$val" ] || err "--stage requires a value"
+    printf -v "$var" '%s' "$val"
+    return 0
+}
+
 cli_http_timeout_opt() {
     local opt="$1"
     local var="$2"
@@ -178,6 +214,14 @@ cli_usage_hsts() {
 cli_usage_http_timeout() {
     local def="${1:-${HTTP_TIMEOUT:-10}}"
     echo "  --http-timeout SECONDS [HTTP_TIMEOUT] (default: $def)  HTTP timeout for curl"
+}
+
+cli_usage_template_dir() {
+    echo "  --template-dir DIR [TEMPLATE_DIR] (default: $TEMPLATE_DIR)  Templates directory"
+}
+
+cli_usage_stage() {
+    echo "  --stage NAME [WP_STAGE] (default: current)  Template stage suffix (example: ssl, prod)"
 }
 
 cli_usage_common_priv() {

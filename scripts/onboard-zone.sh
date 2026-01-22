@@ -168,35 +168,6 @@ fi
 
 require_cmds curl jq python3
 
-csv_lookup() {
-    local domain="$1"
-    [ -f "$DOMAINS_FILE" ] || return 1
-    python3 - "$DOMAINS_FILE" "$domain" <<'PY'
-import csv
-import sys
-
-path, domain = sys.argv[1], sys.argv[2].strip().lower()
-with open(path, newline="") as fh:
-    reader = csv.DictReader(fh)
-    for row in reader:
-        if (row.get("domain") or "").strip().lower() == domain:
-            fields = [
-                row.get("auth_file", ""),
-                row.get("account_id", ""),
-                row.get("ip", ""),
-                row.get("site_type", ""),
-                row.get("multisite_domain", ""),
-                row.get("redirect_url", ""),
-                row.get("registrar", ""),
-                row.get("dns_provider", ""),
-                row.get("account_email", ""),
-            ]
-            print("|".join([f.strip() for f in fields]))
-            sys.exit(0)
-sys.exit(1)
-PY
-}
-
 update_csv() {
     local domain="$1"
     local zone_id="$2"
@@ -231,7 +202,7 @@ update_csv() {
     [ -n "$name_servers" ] && updates+=("name_servers=$name_servers")
     [ -n "$status_cf_update" ] && updates+=("status_cf=$status_cf_update")
 
-    record_update_csv "$DOMAINS_FILE" "$domain" "$RECORD_DOWNGRADE" "${updates[@]}"
+    csv_put_fields "$DOMAINS_FILE" "$domain" "$RECORD_DOWNGRADE" "${updates[@]}"
 }
 
 for domain in "${DOMAINS[@]}"; do
@@ -246,9 +217,9 @@ for domain in "${DOMAINS[@]}"; do
     csv_dns_provider=""
     csv_account_email=""
 
-    if csv_row=$(csv_lookup "$domain"); then
+    if csv_row=$(csv_get_domain_fields "$domain" auth_file account_id ip site_type multisite_domain redirect_url registrar dns_provider account_email); then
         csv_found=true
-        IFS='|' read -r csv_auth_file csv_account_id csv_ip csv_site_type csv_multisite_domain csv_redirect_url csv_registrar csv_dns_provider csv_account_email <<<"$csv_row"
+        IFS=$'\t' read -r csv_auth_file csv_account_id csv_ip csv_site_type csv_multisite_domain csv_redirect_url csv_registrar csv_dns_provider csv_account_email <<<"$csv_row"
     fi
 
     auth_file="${CF_AUTH_FILE:-}"

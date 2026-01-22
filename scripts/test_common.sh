@@ -206,12 +206,12 @@ assert_contains "$output" "test failure" "fail includes message"
 
 echo "== load_dns_redirects / is_redirect_domain =="
 domains_path="$TMP_DIR/domains.csv"
-cat <<'CSV' > "$domains_path"
+cat <<'EOF' > "$domains_path"
 domain,site_type,redirect_url
 example.com,redirect,https://target.example/
 www.example.com,redirect,https://alt.example/path
 other.example.com,singlesite,
-CSV
+EOF
 DOMAINS_FILE="$domains_path"
 load_dns_redirects
 assert_equal "2" "${#DNS_REDIRECT_LIST[@]}" "load_dns_redirects loads redirect list from domains.csv"
@@ -229,10 +229,10 @@ echo "== record_backup_datastore =="
 backup_dir="$TMP_DIR/record"
 mkdir -p "$backup_dir"
 backup_csv="$backup_dir/domains.csv"
-cat <<'CSV' > "$backup_csv"
+cat <<'EOF' > "$backup_csv"
 domain,status_cf
 example.com,
-CSV
+EOF
 DATASTORE_BACKUP_DONE=false
 DATASTORE_DATE="20260116_120000"
 record_backup_datastore "$backup_csv" >/dev/null 2>&1
@@ -247,10 +247,10 @@ DATASTORE_BACKUP_DONE=false
 
 echo "== priv with sudo enabled =="
 SUDO_STUB="$TMP_DIR/sudo"
-cat <<'STUB' > "$SUDO_STUB"
+cat <<'EOF' > "$SUDO_STUB"
 #!/bin/bash
 printf '%s\n' "$@"
-STUB
+EOF
 chmod +x "$SUDO_STUB"
 
 SAVED_SUDO_BIN="${SUDO_BIN-}"

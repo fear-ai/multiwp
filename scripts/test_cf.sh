@@ -78,14 +78,15 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 echo "== cf_auth_mode =="
 reset_auth_env
 CF_API_TOKEN="token123"
-cf_auth_mode
-assert_equal "token" "$CF_AUTH_MODE" "cf_auth_mode prefers token"
-
-reset_auth_env
 CF_API_KEY="key123"
 CF_API_EMAIL="user@example.com"
 cf_auth_mode
-assert_equal "key" "$CF_AUTH_MODE" "cf_auth_mode uses key when token missing"
+assert_equal "key" "$CF_AUTH_MODE" "cf_auth_mode prefers key"
+
+reset_auth_env
+CF_API_TOKEN="token123"
+cf_auth_mode
+assert_equal "token" "$CF_AUTH_MODE" "cf_auth_mode uses token when key missing"
 
 reset_auth_env
 CF_AUTH="token"
@@ -170,17 +171,17 @@ assert_status 0 $? "cf_has_zone_id true when set"
 
 echo "== load_cloudflare_auth =="
 auth_file="$TMP_DIR/auth"
-cat <<'AUTH' > "$auth_file"
+cat <<'EOF' > "$auth_file"
 CF_API_TOKEN="filetoken"
 CF_ACCOUNT_ID="fileaccount"
 CF_ZONE_ID="filezone"
-AUTH
+EOF
 
 reset_auth_env
 load_cloudflare_auth "$auth_file"
 assert_equal "filetoken" "$CF_API_TOKEN" "load_cloudflare_auth sets token from file"
 assert_equal "fileaccount" "$CF_ACCOUNT_ID" "load_cloudflare_auth sets account id from file"
-assert_equal "filezone" "$CF_ZONE_ID" "load_cloudflare_auth sets zone id from file"
+assert_equal "" "${CF_ZONE_ID:-}" "load_cloudflare_auth does not set zone id by default"
 assert_equal "filezone" "$CF_ZONE_IDS" "load_cloudflare_auth collects zone ids from file"
 
 reset_auth_env
@@ -189,35 +190,35 @@ CF_ACCOUNT_ID="envaccount"
 load_cloudflare_auth "$auth_file"
 assert_equal "envtoken" "$CF_API_TOKEN" "load_cloudflare_auth preserves env token priority"
 assert_equal "envaccount" "$CF_ACCOUNT_ID" "load_cloudflare_auth preserves env account priority"
-assert_equal "filezone" "$CF_ZONE_ID" "load_cloudflare_auth still loads unset vars"
+assert_equal "" "${CF_ZONE_ID:-}" "load_cloudflare_auth does not default zone id"
 
 auth_file_multi="$TMP_DIR/auth-multi"
-cat <<'AUTH' > "$auth_file_multi"
+cat <<'EOF' > "$auth_file_multi"
 CF_ZONE_MAIN="alpha.example"
 CF_ZONE="alpha.example"
 CF_ZONE_ID="zone-alpha"
 CF_ZONE="beta.example"
 CF_ZONE_ID="zone-beta"
-AUTH
+EOF
 
 reset_auth_env
 load_cloudflare_auth "$auth_file_multi"
-assert_equal "zone-alpha" "$CF_ZONE_ID" "load_cloudflare_auth uses first CF_ZONE_ID by default"
-assert_equal "alpha.example" "$CF_ZONE" "load_cloudflare_auth prefers CF_ZONE_MAIN for zone name"
+assert_equal "" "${CF_ZONE_ID:-}" "load_cloudflare_auth does not set zone id for multi-zone file"
+assert_equal "" "${CF_ZONE:-}" "load_cloudflare_auth does not set zone name for multi-zone file"
 assert_equal "zone-alpha,zone-beta" "$CF_ZONE_IDS" "load_cloudflare_auth collects multiple zone ids"
 
 auth_file_first="$TMP_DIR/auth-first"
-cat <<'AUTH' > "$auth_file_first"
+cat <<'EOF' > "$auth_file_first"
 CF_ZONE="first.example"
 CF_ZONE_ID="zone-first"
 CF_ZONE="second.example"
 CF_ZONE_ID="zone-second"
-AUTH
+EOF
 
 reset_auth_env
 load_cloudflare_auth "$auth_file_first"
-assert_equal "zone-first" "$CF_ZONE_ID" "load_cloudflare_auth uses first CF_ZONE_ID when no CF_ZONE_MAIN"
-assert_equal "first.example" "$CF_ZONE" "load_cloudflare_auth uses first CF_ZONE when no CF_ZONE_MAIN"
+assert_equal "" "${CF_ZONE_ID:-}" "load_cloudflare_auth does not set zone id when no CF_ZONE_MAIN"
+assert_equal "" "${CF_ZONE:-}" "load_cloudflare_auth does not set zone name when no CF_ZONE_MAIN"
 assert_equal "zone-first,zone-second" "$CF_ZONE_IDS" "load_cloudflare_auth keeps zone id list"
 
 reset_auth_env
@@ -230,29 +231,30 @@ assert_equal "env.example" "$CF_ZONE" "load_cloudflare_auth preserves CF_ZONE pr
 assert_equal "env-one env-two" "$CF_ZONE_IDS" "load_cloudflare_auth preserves CF_ZONE_IDS priority"
 
 auth_file_quotes="$TMP_DIR/auth-quotes"
-cat <<'AUTH' > "$auth_file_quotes"
+cat <<'EOF' > "$auth_file_quotes"
 CF_ZONE_MAIN="quoted-main.example"
 CF_ZONE="quoted-one.example"
 CF_ZONE_ID="zone-quoted-one"
 CF_ZONE="quoted-two.example"
 CF_ZONE_ID="zone-quoted-two"
-AUTH
+EOF
 
 reset_auth_env
 load_cloudflare_auth "$auth_file_quotes"
-assert_equal "zone-quoted-one" "$CF_ZONE_ID" "load_cloudflare_auth strips quotes and uses first CF_ZONE_ID"
-assert_equal "quoted-main.example" "$CF_ZONE" "load_cloudflare_auth uses quoted CF_ZONE_MAIN"
+assert_equal "" "${CF_ZONE_ID:-}" "load_cloudflare_auth does not set zone id from quoted file"
+assert_equal "" "${CF_ZONE:-}" "load_cloudflare_auth does not set zone name from quoted file"
 
 auth_file_ids_only="$TMP_DIR/auth-ids-only"
-cat <<'AUTH' > "$auth_file_ids_only"
+cat <<'EOF' > "$auth_file_ids_only"
 CF_ZONE_ID="zone-only-one"
 CF_ZONE_ID="zone-only-two"
-AUTH
+EOF
 
 reset_auth_env
 load_cloudflare_auth "$auth_file_ids_only"
-assert_equal "zone-only-one" "$CF_ZONE_ID" "load_cloudflare_auth uses first CF_ZONE_ID when no zones listed"
+assert_equal "" "${CF_ZONE_ID:-}" "load_cloudflare_auth does not set zone id when only ids listed"
 assert_equal "" "${CF_ZONE:-}" "load_cloudflare_auth leaves CF_ZONE empty when none listed"
+assert_equal "zone-only-one,zone-only-two" "$CF_ZONE_IDS" "load_cloudflare_auth keeps zone id list"
 
 
 echo "== cf_auth_file / cf_auth_opt =="
@@ -306,10 +308,10 @@ assert_status 1 $? "token mode fails without CF_API_TOKEN"
 echo "== cf_api_request_mode =="
 STUB_BIN="$TMP_DIR/bin"
 mkdir -p "$STUB_BIN"
-cat <<'STUB' > "$STUB_BIN/curl"
+cat <<'EOF' > "$STUB_BIN/curl"
 #!/bin/bash
 printf '%s\n' "$@"
-STUB
+EOF
 chmod +x "$STUB_BIN/curl"
 PATH="$STUB_BIN:$PATH"
 
@@ -341,7 +343,7 @@ assert_status 1 $? "cf_origin_ca_request fails without CA key even when key/emai
 assert_contains "$output" "CF_CA_KEY required" "cf_origin_ca_request requires Origin CA key"
 
 echo "== cf_api_request checked =="
-cat <<'STUB' > "$STUB_BIN/curl"
+cat <<'EOF' > "$STUB_BIN/curl"
 #!/bin/bash
 out=""
 fmt=""
@@ -363,7 +365,7 @@ if [ -n "$out" ]; then
     printf '%s' "$body" > "$out"
 fi
 printf '%s' "$status"
-STUB
+EOF
 chmod +x "$STUB_BIN/curl"
 
 reset_auth_env

@@ -9,6 +9,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/common.sh"
 
+TEMPLATE_DIR_LOCAL="$TEMPLATE_DIR"
+WP_STAGE_LOCAL="${WP_STAGE-}"
+
 # Usage and prerequisites summary.
 usage() {
     cat <<'EOF'
@@ -18,6 +21,7 @@ Example: setup-wp.sh
 Notes:
   - Run as a user with sudo privileges, never as root.
   - IMPORTANT: Record all database names, usernames, and passwords for WordPress configuration.
+  - Templates are selected from TEMPLATE_DIR with optional WP_STAGE suffixes.
 
 Official WordPress Documentation:
   https://developer.wordpress.org/advanced-administration/multisite/create-network
@@ -85,9 +89,59 @@ WORDPRESS_ROOT="${WORDPRESS_ROOT:-/var/www/html/wordpress}"
 WP_CONFIG_PATH="$WORDPRESS_ROOT/wp-config.php"
 HTACCESS_PATH="$WORDPRESS_ROOT/.htaccess"
 
+template_paths() {
+    local stage="$1"
+    local template_dir="$2"
+    local line key val
+    local wp_config=""
+    local wp_amend_base=""
+    local wp_amend_stage=""
+    local htaccess=""
+    local htaccess_amend_base=""
+    local htaccess_amend_stage=""
+
+    while IFS=: read -r key val; do
+        case "$key" in
+            selected) wp_config="$val" ;;
+            amend_stage) wp_amend_stage="$val" ;;
+            amend_base) wp_amend_base="$val" ;;
+        esac
+    done < <(wp_template_list "wp-config" "multisite" "$stage" "$template_dir")
+
+    while IFS=: read -r key val; do
+        case "$key" in
+            selected) htaccess="$val" ;;
+            amend_stage) htaccess_amend_stage="$val" ;;
+            amend_base) htaccess_amend_base="$val" ;;
+        esac
+    done < <(wp_template_list "htaccess" "multisite" "$stage" "$template_dir")
+
+    echo "Templates directory: $template_dir"
+    if [ -n "$stage" ]; then
+        echo "Template stage: $stage"
+    else
+        echo "Template stage: current"
+    fi
+    echo "wp-config template: $wp_config"
+    if [ -f "$wp_amend_base" ]; then
+        echo "wp-config amend: $wp_amend_base"
+    fi
+    if [ -f "$wp_amend_stage" ]; then
+        echo "wp-config amend (stage): $wp_amend_stage"
+    fi
+    echo ".htaccess template: $htaccess"
+    if [ -f "$htaccess_amend_base" ]; then
+        echo ".htaccess amend: $htaccess_amend_base"
+    fi
+    if [ -f "$htaccess_amend_stage" ]; then
+        echo ".htaccess amend (stage): $htaccess_amend_stage"
+    fi
+}
+
 echo "WordPress Multisite Base Setup"
 echo "Following official WordPress documentation process"
 echo "WordPress root: $WORDPRESS_ROOT"
+template_paths "$WP_STAGE_LOCAL" "$TEMPLATE_DIR_LOCAL"
 echo ""
 
 # Create WordPress root directory if it doesn't exist
@@ -116,9 +170,8 @@ if [ ! -f "$WP_CONFIG_PATH" ]; then
         echo "  1. Set DB_NAME, DB_USER, DB_PASSWORD (use credentials from MySQL setup)"
         echo "  2. Generate security keys: https://api.wordpress.org/secret-key/1.1/salt/"
         echo ""
-        echo "Or use a Template from ../templates/:"
-        echo "  wp-config-multisite.php          - Terse template with {{VARIABLES}}"
-        echo "  wp-config-multisite-deployed.php - Full template with WordPress comments"
+        echo "Or use templates (and optional .amend files) from $TEMPLATE_DIR_LOCAL:"
+        template_paths "$WP_STAGE_LOCAL" "$TEMPLATE_DIR_LOCAL"
         echo ""
         echo "REMINDER: Record database name, username, and password for future reference"
         echo ""

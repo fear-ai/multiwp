@@ -21,7 +21,7 @@ MCP_BEARER_TOKEN="${MCP_BEARER_TOKEN-}"
 CF_AUTH_CLI=""
 
 usage() {
-    cat <<'USAGE'
+    cat <<'EOF'
 mcp-cf.sh - Verify Cloudflare MCP readiness and portal reachability.
 Example: mcp-cf.sh [OPTIONS]
 
@@ -41,11 +41,11 @@ Options:
 Notes:
   - Uses POST with streamable HTTP headers; 401/403 indicates auth is required.
   - Write operations are not implemented and will fail even if --apply is provided.
-USAGE
+EOF
 }
 
 print_catalog() {
-    cat <<'CATALOG'
+    cat <<'EOF'
 Managed MCP servers (reference list):
 - Documentation
 - Workers bindings
@@ -62,17 +62,17 @@ Managed MCP servers (reference list):
 - DEX
 - CASB
 - GraphQL
-CATALOG
+EOF
 }
 
 manual_steps() {
-    cat <<'MANUAL'
+    cat <<'EOF'
 Manual action required:
 - Zero Trust → Access → Applications → AI controls
 - Verify MCP Servers and MCP Portals are visible
 - Create a test portal and verify it is reachable at https://<subdomain>.<domain>/mcp
 - Apply an Access policy and confirm OAuth-based access works as expected
-MANUAL
+EOF
 }
 
 mcp_emit() {

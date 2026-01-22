@@ -22,7 +22,7 @@ AUTH_LOADED=false
 CF_AUTH_CLI=""
 
 usage() {
-    cat <<'USAGE'
+    cat <<'EOF'
 check-edge.sh - Validate Cloudflare edge behavior for domains.
 Example: check-edge.sh [OPTIONS] domain1 [domain2...]
 
@@ -31,6 +31,8 @@ Options:
 $(cli_usage_http_timeout)
 $(cli_usage_hsts)
   --api  Enable Cloudflare API checks (optional; requires CF_ZONE_ID or CF_ZONE and either account API token CF_API_TOKEN or Global API Key + email CF_API_KEY+CF_API_EMAIL)
+  --zone name [CF_ZONE]  Set CF_ZONE (zone apex, e.g., example.com)
+  --zone-id id [CF_ZONE_ID]  Set CF_ZONE_ID
   --auth token|key|auto [CF_AUTH]  Select which credential to use (default: auto)
   --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
   --token TOKEN [CF_API_TOKEN]  Set CF_API_TOKEN (account API token)
@@ -44,7 +46,7 @@ Notes:
   - Cloudflare API checks run only when --api is provided.
   - Accepts a www A record when Cloudflare CNAME flattening hides the CNAME.
   - Redirect-only domains (from domains.csv) skip HTTPS and Cloudflare API checks.
-USAGE
+EOF
 }
 
 while getopts ":-:" opt; do
@@ -67,6 +69,18 @@ while getopts ":-:" opt; do
                         usage; exit 1
                     fi
                     ;;
+                zone=*) CF_ZONE_CLI="${OPTARG#*=}" ;;
+                zone)
+                    [ -n "${!OPTIND-}" ] || err "--zone requires a value"
+                    CF_ZONE_CLI="${!OPTIND}"
+                    OPTIND=$((OPTIND+1))
+                    ;;
+                zone-id=*) CF_ZONE_ID_CLI="${OPTARG#*=}" ;;
+                zone-id)
+                    [ -n "${!OPTIND-}" ] || err "--zone-id requires a value"
+                    CF_ZONE_ID_CLI="${!OPTIND}"
+                    OPTIND=$((OPTIND+1))
+                    ;;
                 *)
                     if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
                         :
@@ -88,6 +102,10 @@ for domain in "$@"; do
 done
 finalize_domains DOMAINS || { usage; exit 1; }
 [ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
+
+if [ -z "${CF_AUTH_FILE-}" ] && [ ${#DOMAINS[@]} -eq 1 ]; then
+    cf_auth_from_csv "${DOMAINS[0]}" || true
+fi
 
 if [ -n "${HSTS_REQUIRED_CLI-}" ]; then
     HSTS_REQUIRED="$HSTS_REQUIRED_CLI"

@@ -182,7 +182,7 @@ load_domain_meta() {
     [ -f "$DOMAINS_FILE" ] || return 0
     local rows
     if command -v python3 >/dev/null 2>&1; then
-        rows=$(python3 - "$DOMAINS_FILE" <<'PY'
+        rows=$(python3 - "$DOMAINS_FILE" <<'EOF'
 import csv
 import sys
 
@@ -198,7 +198,7 @@ with open(path, newline="") as fh:
         wp_root = (row.get("wp_root") or "").strip()
         if domain:
             print(f"{domain}\t{status}\t{site_type}\t{auth_file}\t{zone_id}\t{wp_root}")
-PY
+EOF
 )
     else
         warn "python3 not available; reading $DOMAINS_FILE with awk"

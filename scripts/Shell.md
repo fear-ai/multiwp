@@ -28,6 +28,24 @@ Option parsing is a contract with operators, so `usage()` must be accurate and s
 
 The repository standard is a single heredoc for `usage()` and a short title plus single-line example at the top of usage. Ordering must be consistent: script-specific options first, then auth, then root/ssl paths, then common privilege options, and `--help` last. The exact format and rules are captured in `scripts/Prompt.md`.
 
+## Heredoc Conventions and File Emission
+
+Heredocs are used throughout the scripts for `usage()` blocks and for inline Python or stub files in tests. To avoid delimiter collisions and to keep behavior consistent, use the following conventions:
+
+- Use `<<'EOF'` for literal heredocs (no variable expansion). This is the default for `usage()` output, embedded Python blocks, and test fixtures.
+- Use `<<EOF` only when you explicitly need variable expansion inside the heredoc body.
+- When emitting a script that itself contains a heredoc, use `SCRIPT_EOF` for the outer delimiter (`<<'SCRIPT_EOF'`). This prevents the outer heredoc from terminating early when the inner script contains `EOF`.
+
+Why this matters:
+- A heredoc terminator is matched by line content, not by quoting. If the body contains a line with just `EOF`, the outer heredoc ends early, which truncates the file and produces syntax errors.
+- Standardizing on `EOF` for inner heredocs and `SCRIPT_EOF` for outer generation avoids accidental collisions and makes the patterns predictable.
+
+Preferred file emission method:
+- Use `apply_patch` to add or update scripts when possible. It does not parse heredoc markers and therefore cannot be confused by nested heredocs. It also produces smaller, safer diffs for review.
+
+Future transition:
+- As scripts evolve, prefer migrating any file-generation steps away from shell heredocs and toward `apply_patch` or dedicated templates. This keeps complex scripts maintainable and reduces the risk of accidental truncation.
+
 ## Configuration Processing
 
 Configuration flows are layered so defaults are predictable and priority is explicit. Scripts should apply these patterns consistently so operators can reason about outcomes without reading implementation details.

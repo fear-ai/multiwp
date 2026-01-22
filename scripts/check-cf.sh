@@ -98,6 +98,13 @@ fi
 
 require_cmds curl jq
 
+if [ -z "${CF_AUTH_FILE-}" ]; then
+    domain_lookup="${CF_ZONE_CLI:-${CF_ZONE-}}"
+    if [ -n "$domain_lookup" ]; then
+        cf_auth_from_csv "$domain_lookup" || true
+    fi
+fi
+
 cf_init_auth
 if [ -n "${CF_ZONE:-}" ]; then
     CF_ZONE_INPUT_RAW="$CF_ZONE"
@@ -112,17 +119,7 @@ if cf_has_zone_id && [ -n "${CF_ZONE:-}" ]; then
 fi
 if ! cf_has_zone_id; then
     [ -n "${CF_ZONE:-}" ] || err "CF_ZONE or CF_ZONE_ID is required"
-    note "Resolving zone ID from zone name: $CF_ZONE"
-    zone_resp=$(cf_api_request GET "/zones?name=${CF_ZONE}&status=active")
-    if [ "$(cf_api_success "$zone_resp")" != "true" ]; then
-        err "Failed to query zones: $(cf_api_error_messages "$zone_resp")"
-    fi
-    CF_ZONE_ID=$(echo "$zone_resp" | jq -r '.result[0].id // empty')
-    [ -n "$CF_ZONE_ID" ] || err "No active zone found for name: $CF_ZONE"
-    CF_ZONE_API=$(echo "$zone_resp" | jq -r '.result[0].name // empty')
-    if [ -n "$CF_ZONE_API" ]; then
-        CF_ZONE="$CF_ZONE_API"
-    fi
+    cf_require_zone_id "for Cloudflare settings check" "$CF_ZONE"
 fi
 
 if [ -z "${CF_ZONE:-}" ]; then
