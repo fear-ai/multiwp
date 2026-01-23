@@ -113,6 +113,19 @@ This summary is provided so each decision is explicit and avoids overlapping cac
    - Examples: WP Super Cache, W3 Total Cache.
    - Do not enable while Cloudflare HTML caching is active; it introduces overlapping caches and ambiguous purge behavior.
 
+### Redis object cache separation
+We use Redis for the WordPress object cache, and we need clear separation between the single-site and multisite installs. The two practical patterns are:
+
+Option 1: single Redis DB with distinct prefixes.
+- Pros: simplest to run, no Redis DB index configuration, minimal moving parts.
+- Cons: flushing affects every site, and prefix mistakes can collide silently.
+
+Option 2: separate Redis DB indices per site, with distinct prefixes.
+- Pros: closer to the MySQL pattern of one instance with multiple logical databases; safer per-site flush; clearer boundaries.
+- Cons: still shared memory and eviction, and requires per-site DB index config.
+
+This document adopts Option 2 going forward: one Redis instance, distinct DB indices per site, and distinct prefixes as a second layer of protection. This keeps separation explicit while preserving a single Redis service footprint.
+
 ### Edge: Cloudflare caching
 Cloudflare edge caching is the highest leverage layer for anonymous traffic. We cache HTML for GET/HEAD requests and bypass all authenticated or admin paths.
 
@@ -205,6 +218,59 @@ Confirm buffer pool size and enable slow query logs for investigation when uncac
 
 ### 5) WordPress object cache
 Enable Redis Object Cache in WordPress and validate that it is active. Keep page cache plugins off if edge caching is in use.
+
+### Redis Option 2 deployment
+This sequence implements Redis DB separation starting with the single-site zero.directory install, then extending to multisite. It keeps the multisite on the default Redis DB to reduce disruption, and moves zero.directory to a dedicated DB index.
+
+#### 1) Decide DB indices and prefixes
+Define explicit values up front so you can validate and avoid collisions.
+- **Multisite**: `WP_REDIS_DATABASE` = `0` (default), `WP_REDIS_PREFIX` = `wpms_` (example), `WP_CACHE_KEY_SALT` = unique per site.
+- **Single-site (zero.directory)**: `WP_REDIS_DATABASE` = `1`, `WP_REDIS_PREFIX` = `zero_` (or another unique prefix), `WP_CACHE_KEY_SALT` = unique per site.
+
+#### 2) Update zero.directory wp-config.php
+In `/var/www/html/zero.directory/wp-config.php`, add or update:
+```
+define( 'WP_REDIS_PREFIX', 'zero_' );
+define( 'WP_REDIS_DATABASE', 1 );
+define( 'WP_CACHE_KEY_SALT', '<unique-string>' );
+```
+Use a unique `WP_CACHE_KEY_SALT` per site. Keep it stable once set so cache keys remain consistent across restarts.
+
+#### 3) Validate zero.directory after change
+- Confirm Redis plugin status: `wp redis status`
+- Confirm Redis keyspace for DB 1: `redis-cli -n 1 --scan | head`
+- Confirm no unexpected keys in DB 0 for zero.directory after a warm browse.
+
+#### 4) Extend to multisite (wordpress root)
+In `/var/www/html/wordpress/wp-config.php`, add or update:
+```
+define( 'WP_REDIS_PREFIX', 'wpms_' );
+define( 'WP_REDIS_DATABASE', 0 );
+define( 'WP_CACHE_KEY_SALT', '<unique-string>' );
+```
+Use a distinct prefix and salt from the single-site to prevent any cross-site overlap.
+
+#### 5) Validate multisite after change
+- Confirm Redis plugin status: `wp redis status` (with multisite context).
+- Confirm DB 0 keyspace: `redis-cli -n 0 --scan | head`
+- Confirm multisite pages warm correctly and do not degrade.
+
+#### 6) Update templates to match the new Redis model
+Propagate the DB index and prefix to templates so future deployments stay aligned:
+- `templates/wp-config-singlesite.php`
+  - Ensure `WP_REDIS_PREFIX` and `WP_REDIS_DATABASE` placeholders exist.
+- `templates/wp-config-multisite.php`
+  - Ensure `WP_REDIS_PREFIX` and `WP_REDIS_DATABASE` placeholders exist.
+
+The template placeholders now expect:
+```
+define( 'WP_REDIS_PREFIX', '{{WP_REDIS_PREFIX}}' );
+define( 'WP_REDIS_DATABASE', {{WP_REDIS_DATABASE}} );
+define( 'WP_CACHE_KEY_SALT', '{{WP_CACHE_KEY_SALT}}' );
+```
+
+#### 7) Record the chosen values
+Record the selected Redis DB and prefix per site in your operational notes so future operators do not reuse values accidentally. If you track these values in `domains.csv`, treat them as configuration hints, not secrets.
 
 ### Test methodology
 We use a single-change-at-a-time workflow with explicit safety and decision recording so results can be attributed to specific configuration changes.
