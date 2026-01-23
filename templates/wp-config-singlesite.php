@@ -104,8 +104,9 @@ define('WP_AUTO_UPDATE_CORE', true);
 // Local cron, not WordPress exposing /wp-cron.php
 define('DISABLE_WP_CRON', true);
 
-// Redix in-memory database
-define( 'WP_REDIS_PREFIX', 'zero_' );
+// Redis in-memory database
+define( 'WP_REDIS_PREFIX', '{{WP_REDIS_PREFIX}}' );
+define( 'WP_REDIS_DATABASE', {{WP_REDIS_DATABASE}} );
 
 /* That's all, stop editing! Happy publishing. */
 
