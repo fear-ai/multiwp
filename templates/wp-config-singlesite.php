@@ -1,51 +1,118 @@
 <?php
 /**
- * WordPress Single-Site Configuration Template
- * Replace {{VARIABLES}} with actual values
+ * The base configuration for WordPress
  *
- * Example file naming for single-site configuration tracking:
- * - /var/www/html/domain.tld/wp-config.php (current)
- * - /var/www/html/domain.tld/wp-config.php.ssl (SSL configuration staging)
- * - /var/www/html/domain.tld/wp-config.php.prod (production snapshot)
+ * The wp-config.php creation script uses this file during the installation.
+ * You don't have to use the website, you can copy this file to "wp-config.php"
+ * and fill in the values.
+ *
+ * This file contains the following configurations:
+ *
+ * * Database settings
+ * * Secret keys
+ * * Database table prefix
+ * * ABSPATH
+ *
+ * @link https://developer.wordpress.org/advanced-administration/wordpress/wp-config/
+ *
+ * @package WordPress
  */
 
-// Database settings
-define('DB_NAME', '{{DB_NAME}}');
-define('DB_USER', '{{DB_USER}}');
-define('DB_PASSWORD', '{{DB_PASSWORD}}');
-define('DB_HOST', 'localhost');
-define('DB_CHARSET', 'utf8mb4');
-define('DB_COLLATE', '');
+// ** Database settings - You can get this info from your web host ** //
+/** The name of the database for WordPress */
+define( 'DB_NAME', '{{DB_NAME}}' );
 
-// Authentication unique keys and salts
+/** Database username */
+define( 'DB_USER', '{{DB_USER}}' );
+
+/** Database password */
+define( 'DB_PASSWORD', '{{DB_PASSWORD}}' );
+
+/** Database hostname */
+define( 'DB_HOST', 'localhost' );
+
+/** Database charset to use in creating database tables. */
+define( 'DB_CHARSET', 'utf8mb4' );
+
+/** The database collate type. Don't change this if in doubt. */
+define( 'DB_COLLATE', '' );
+
+/**#@+
+ * Authentication unique keys and salts.
+ *
+ * Change these to different unique phrases! You can generate these using
+ * the {@link https://api.wordpress.org/secret-key/1.1/salt/ WordPress.org secret-key service}.
+ *
+ * You can change these at any point in time to invalidate all existing cookies.
+ * This will force all users to have to log in again.
+ *
+ * @since 2.6.0
+ */
+
 // Generate from: https://api.wordpress.org/secret-key/1.1/salt/
-define('AUTH_KEY',         '{{AUTH_KEY}}');
-define('SECURE_AUTH_KEY',  '{{SECURE_AUTH_KEY}}');
-define('LOGGED_IN_KEY',    '{{LOGGED_IN_KEY}}');
-define('NONCE_KEY',        '{{NONCE_KEY}}');
-define('AUTH_SALT',        '{{AUTH_SALT}}');
-define('SECURE_AUTH_SALT', '{{SECURE_AUTH_SALT}}');
-define('LOGGED_IN_SALT',   '{{LOGGED_IN_SALT}}');
-define('NONCE_SALT',       '{{NONCE_SALT}}');
+define( 'AUTH_KEY',         '{{AUTH_KEY}}' );
+define( 'SECURE_AUTH_KEY',  '{{SECURE_AUTH_KEY}}' );
+define( 'LOGGED_IN_KEY',    '{{LOGGED_IN_KEY}}' );
+define( 'NONCE_KEY',        '{{NONCE_KEY}}' );
+define( 'AUTH_SALT',        '{{AUTH_SALT}}' );
+define( 'SECURE_AUTH_SALT', '{{SECURE_AUTH_SALT}}' );
+define( 'LOGGED_IN_SALT',   '{{LOGGED_IN_SALT}}' );
+define( 'NONCE_SALT',       '{{NONCE_SALT}}' );
+define( 'WP_CACHE_KEY_SALT', '{{WP_CACHE_KEY_SALT}}' );
 
-// WordPress table prefix
+
+/**#@-*/
+
+/**
+ * WordPress database table prefix.
+ *
+ * You can have multiple installations in one database if you give each
+ * a unique prefix. Only numbers, letters, and underscores please!
+ *
+ * At the installation time, database tables are created with the specified prefix.
+ * Changing this value after WordPress is installed will make your site think
+ * it has not been installed.
+ *
+ * @link https://developer.wordpress.org/advanced-administration/wordpress/wp-config/#table-prefix
+ */
 $table_prefix = '{{TABLE_PREFIX}}';
 
-// WordPress security and update controls
+/**
+ * For developers: WordPress debugging mode.
+ *
+ * Change this to true to enable the display of notices during development.
+ * It is strongly recommended that plugin and theme developers use WP_DEBUG
+ * in their development environments.
+ *
+ * For information on other constants that can be used for debugging,
+ * visit the documentation.
+ *
+ * @link https://developer.wordpress.org/advanced-administration/debug/debug-wordpress/
+ */
+define( 'WP_DEBUG', false );
+
+/* Add any custom values between this line and the "stop editing" line. */
+
+// WordPress access security
 define('DISALLOW_FILE_EDIT', true);
-// define('DISALLOW_FILE_MODS', true); // CLI-only installs/updates
+// define('DISALLOW_FILE_MODS', true); // uncomment for productioni, CLI-only installs/updates
+
+// WordPress update controls
 define('AUTOMATIC_UPDATER_DISABLED', false);
 define('WP_AUTO_UPDATE_CORE', true);
+
+// Local cron, not WordPress exposing /wp-cron.php
 define('DISABLE_WP_CRON', true);
-define('FORCE_SSL_ADMIN', true);
 
-// Optional (documented in Operations.md):
-// - WP_DEBUG defaults and related flags
+// Redix in-memory database
+define( 'WP_REDIS_PREFIX', 'zero_' );
 
-// Absolute path to WordPress directory
-if (!defined('ABSPATH')) {
-    define('ABSPATH', dirname(__FILE__) . '/');
+/* That's all, stop editing! Happy publishing. */
+
+/** Absolute path to the WordPress directory. */
+if ( ! defined( 'ABSPATH' ) ) {
+	define( 'ABSPATH', __DIR__ . '/' );
 }
 
-require_once(ABSPATH . 'wp-settings.php');
-?>
+/** Sets up WordPress vars and included files. */
+require_once ABSPATH . 'wp-settings.php';
