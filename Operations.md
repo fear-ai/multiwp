@@ -44,6 +44,7 @@ The dependency chain is explicit: Cloudflare edge behavior depends on correct DN
    2. [5.2 Site Troubleshooting](#52-site-troubleshooting)
 5. [6. Verification](#6-verification)
    1. [6.1 Validation Checks](#61-validation-checks)
+   2. [6.2 Script Partitioning](#62-script-partitioning)
 6. [7. Domain Transfer](#7-domain-transfer)
    1. [7.1 Manual Transfer](#71-manual-transfer)
    2. [7.2 Transfer Automation](#72-transfer-automation)
@@ -484,6 +485,19 @@ The list below covers the standard checks by layer. Use them to confirm configur
 - DB routing tables: `mysql -u <db_user> -p -D <db_name> -e "SELECT blog_id, domain, path FROM wp_blogs;"`.
 - Functional check: browse domain → confirm HTTPS and admin login; create a test site in Network Admin and verify routing; confirm Cloudflare Full (strict) and DNS after each addition.
 - Zone/DNS creation: `scripts/cloud-dns.sh <domain> <ip>` (using Cloudflare API when onboarding domains).
+
+### 6.2 Script Partitioning
+The verification scripts are partitioned by layer so failures can be isolated quickly and so output stays focused on the responsibilities of each layer. This partitioning matches the dependency chain in the runbook: host-level services must be correct before origin services, and origin services must be correct before WordPress routing and application behavior.
+
+Use the table below as the scope contract for the three core verification scripts. If a check falls outside the script’s scope, it should be implemented in the correct layer rather than duplicated across multiple scripts.
+
+| Script | Scope | Examples of checks |
+| --- | --- | --- |
+| `check-server.sh` | Ubuntu host, networking, firewall, and shared services | OS/kernel, unattended updates, SSH policy, IPv6 state, UFW allowlist, MySQL and Redis availability, WordPress cron scheduling |
+| `check-origin.sh` | Origin web stack only | Apache config, enabled modules, vhost wiring, origin cert paths, PHP runtime |
+| `check-wp.sh` | WordPress-only configuration | WP roots, multisite routing data, `wp-config.php` settings, template alignment, WordPress-level security posture |
+
+This partitioning keeps Cloudflare checks (`check-cf.sh`, `check-edge.sh`) in the edge layer and reserves origin/WP checks for local filesystem and service validation. It also prevents host-level concerns (for example, cron scheduling or MySQL settings) from being duplicated in WordPress-only scripts.
 
 
 ## 7. Domain Transfer

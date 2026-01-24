@@ -223,7 +223,7 @@ Enable Redis Object Cache in WordPress and validate that it is active. Keep page
 This sequence implements Redis DB separation starting with the single-site zero.directory install, then extending to multisite. It keeps the multisite on the default Redis DB to reduce disruption, and moves zero.directory to a dedicated DB index.
 
 #### 1) Decide DB indices and prefixes
-Define explicit values up front so you can validate and avoid collisions.
+Define explicit values up front so you can validate and avoid collisions. The Redis PHP extension expects the database index as an integer; do not quote it. If you source the value from an environment variable, cast it to an integer so Redis `select()` receives a numeric DB index.
 - **Multisite**: `WP_REDIS_DATABASE` = `0` (default), `WP_REDIS_PREFIX` = `wpms_` (example), `WP_CACHE_KEY_SALT` = unique per site.
 - **Single-site (zero.directory)**: `WP_REDIS_DATABASE` = `1`, `WP_REDIS_PREFIX` = `zero_` (or another unique prefix), `WP_CACHE_KEY_SALT` = unique per site.
 
@@ -234,10 +234,11 @@ define( 'WP_REDIS_PREFIX', 'zero_' );
 define( 'WP_REDIS_DATABASE', 1 );
 define( 'WP_CACHE_KEY_SALT', '<unique-string>' );
 ```
-Use a unique `WP_CACHE_KEY_SALT` per site. Keep it stable once set so cache keys remain consistent across restarts.
+Use a unique `WP_CACHE_KEY_SALT` per site. Keep it stable once set so cache keys remain consistent across restarts. `WP_REDIS_DATABASE` must remain an integer literal (no quotes).
 
 #### 3) Validate zero.directory after change
 - Confirm Redis plugin status: `wp redis status`
+- Example: `sudo -u www-data wp --path=/var/www/html/zero.directory redis status`
 - Confirm Redis keyspace for DB 1: `redis-cli -n 1 --scan | head`
 - Confirm no unexpected keys in DB 0 for zero.directory after a warm browse.
 
@@ -252,6 +253,7 @@ Use a distinct prefix and salt from the single-site to prevent any cross-site ov
 
 #### 5) Validate multisite after change
 - Confirm Redis plugin status: `wp redis status` (with multisite context).
+- Example: `sudo -u www-data wp --path=/var/www/html/wordpress redis status --url=https://alphaeos.net`
 - Confirm DB 0 keyspace: `redis-cli -n 0 --scan | head`
 - Confirm multisite pages warm correctly and do not degrade.
 
@@ -293,6 +295,15 @@ For each change or test, record:
 The goal is to distinguish edge-cached versus origin behavior and record CPU, memory, and database pressure alongside latency and errors.
 
 #### Freeze and backup before testing
+Backups are written to `/var/backups/wp` so they live outside the web root, are owned by root, and can be retained independently of application deployments. If you use a separate volume for backups, adjust the path accordingly. Ensure the directory exists and is not writable by the web server.
+
+Create the backup directory if needed:
+```bash
+sudo mkdir -p /var/backups/wp
+sudo chown root:root /var/backups/wp
+sudo chmod 750 /var/backups/wp
+```
+
 Announce a change freeze for the test window and disable file modifications at the WordPress layer:
 ```bash
 sudo -u www-data wp --path=/var/www/html/wordpress config set DISALLOW_FILE_MODS true --raw
@@ -337,6 +348,7 @@ Run read-only validations and capture edge headers for the test targets.
 
 ```bash
 ./scripts/check-read.sh syn unit
+./scripts/check-read.sh server
 ./scripts/check-read.sh --api --domain zero.directory --wp-root /var/www/html/zero.directory edge dns origin wp
 ./scripts/check-read.sh --api --wp-root /var/www/html/wordpress --multisite edge dns origin wp \
   alphaeos.net avtranscript.com recomp.one talkdao.org
@@ -350,6 +362,35 @@ for d in zero.directory alphaeos.net avtranscript.com recomp.one talkdao.org; do
   curl -I "https://$d/" > "$OUT/headers_${d}.txt"
 done
 ```
+
+### Initial tests
+These sanity checks confirm the stack responds as expected before sustained load. Use low concurrency and short durations so the tests are non-disruptive. Record results in the same run directory as the baseline headers and telemetry.
+
+Initial tests to run:
+1) **Edge header sanity**: confirm `cf-cache-status`, `age`, and `cf-ray` appear for each target domain.
+   ```bash
+   for d in zero.directory alphaeos.net; do
+     curl -I "https://$d/" | rg -n "cf-cache-status|age|cf-ray"
+   done
+   ```
+2) **Cached vs cache-busted single request**: confirm the cache-bust query forces a miss.
+   ```bash
+   curl -I "https://zero.directory/"
+   curl -I "https://zero.directory/?cache_bust=${RUN_ID}"
+   ```
+3) **Low-load wrk sanity**: confirm a short run completes without errors before larger tests.
+   ```bash
+   DURATION=<set>
+   CONCURRENCY=<set>
+   THREADS=<set>
+   wrk -t"$THREADS" -c"$CONCURRENCY" -d"$DURATION" https://zero.directory/
+   wrk -t"$THREADS" -c"$CONCURRENCY" -d"$DURATION" "https://zero.directory/?cache_bust=${RUN_ID}"
+   ```
+4) **Multisite sanity**: run the same low-load test on a multisite domain.
+   ```bash
+   wrk -t"$THREADS" -c"$CONCURRENCY" -d"$DURATION" https://alphaeos.net/
+   wrk -t"$THREADS" -c"$CONCURRENCY" -d"$DURATION" "https://alphaeos.net/?cache_bust=${RUN_ID}"
+   ```
 
 ### Load generation
 We use `wrk` for sustained load testing because it delivers stable latency distributions and high throughput with low overhead. It is a simple tool for GET/HEAD traffic and is ideal for repeated comparisons across configurations.

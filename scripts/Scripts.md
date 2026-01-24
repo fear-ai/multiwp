@@ -173,12 +173,12 @@ Orchestration scripts combine multiple checks in a single run.
 
 ### Check Read
 
-`check-read.sh` is a lightweight entry point for read-only validation across multiple domains. It standardizes syntax checks, unit tests, edge/DNS checks, and origin/WordPress checks without requiring operators to remember the underlying script order or domain selection details.
+`check-read.sh` is a lightweight entry point for read-only validation across multiple domains. It standardizes syntax checks, unit tests, edge/DNS checks, server checks, and origin/WordPress checks without requiring operators to remember the underlying script order or domain selection details.
 
 Needs and requirements follow so future changes can be evaluated against the same constraints.
 
 Needs:
-- A single entry point that can run `syn`, `unit`, `edge`, `dns`, `origin`, `wp`, and `mysql` in a predictable order.
+- A single entry point that can run `syn`, `unit`, `edge`, `dns`, `server`, `origin`, and `wp` in a predictable order.
 - Domain selection driven by `domains.csv` or an explicit list of domains provided on the command line.
 - Support for filtering by `status_cf` and `site_type` while avoiding `status_cf=ignore` and `status_cf=worker` plus `site_type=none`, `site_type=ignore`, and `site_type=worker` by default.
 
@@ -191,9 +191,9 @@ Design notes:
 - `check-read.sh` reads `domains.csv` once and applies filters only when explicit domains are not supplied.
 - If no command list is provided, `check-read.sh` runs all commands in the order listed, so a default run is a full read-only pass.
 - `edge` uses `check-edge.sh` (with `--api` when requested) and `dns` uses `check-cf.sh`.
-- `origin` uses `check-origin.sh`, `wp` uses `check-wp.sh`, and `mysql` uses WP-CLI `db check` against selected roots.
+- `server` uses `check-server.sh`, `origin` uses `check-origin.sh`, and `wp` uses `check-wp.sh`.
 - `--auth-file` overrides the per-domain auth file from `domains.csv` for edge/DNS API calls.
-- Origin, WordPress, and MySQL checks are read-only and depend on local filesystem access.
+- Server, Origin, and WordPress checks are read-only and depend on local filesystem access.
 - Empty `site_type` values are normalized to `none`, and `site_type=none`, `site_type=ignore`, and `site_type=worker` are always skipped.
 
 Implementation plan:
