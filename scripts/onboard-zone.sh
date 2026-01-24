@@ -47,7 +47,6 @@ Options:
 $(cli_usage_date)
   --norecord  Skip domains.csv updates (Cloudflare provisioning only)
   --downgrade  Allow status downgrades in domains.csv (overrides default)
-  --no-csv  Legacy alias for --norecord
 
 Auth options (choose one):
   - Account API Token (recommended): CF_API_TOKEN=... [--token TOKEN]
@@ -76,7 +75,6 @@ while getopts ":-:" opt; do
                 help) usage; exit 0 ;;
                 norecord) RECORD_UPDATES=false ;;
                 downgrade) RECORD_DOWNGRADE=true ;;
-                no-csv) RECORD_UPDATES=false ;;
                 date|date=*)
                     if cli_date_opt "${OPTARG}" DATASTORE_DATE "${!OPTIND-}"; then
                         :

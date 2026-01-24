@@ -3,7 +3,7 @@ Date: January 8, 2026
 
 This document defines Bash development conventions for the scripts in this repository. It focuses on technique and structure for the shared script infrastructure, and it points to other documents for the full catalog of script arguments and environment variables.
 
-This document is authoritative for Bash conventions and shared helper usage. `scripts/Scripts.md` is authoritative for option and environment variable definitions, including current interface conventions and validations. `scripts/Prompt.md` encodes the standard Codex prompt format for applying header and `usage()` updates without altering behavior.
+This document is authoritative for Bash conventions and shared helper usage. `scripts/Scripts.md` is authoritative for option and environment variable definitions, including current interface conventions and validations.
 
 ## Baseline Bash Practices
 
@@ -22,11 +22,26 @@ Program scripts follow a consistent structure so shared helpers remain predictab
 - Source `common.sh` first, then `cli.sh` or `auth.sh` as needed, using `SCRIPTS_DIR` to avoid path ambiguity.
 - Use `require_cmd` for external dependencies before running logic.
 
+## Logging, Status, and Error Conventions
+
+The shared helpers establish the baseline logging and error behavior that all scripts should follow. The intent is to keep critical failures obvious and to make it safe for scripts to continue collecting results after a non-fatal failure.
+
+The functions below are defined in `scripts/common.sh` and are the canonical entry points for logging and error signaling. Scripts that implement structured output can still emit their own `PASS/INFO/ERROR` lines, but the helpers remain the default for human-readable logs and for fatal exit behavior.
+
+| Helper | Prefix | Stream | Exit behavior | Intended use |
+| --- | --- | --- | --- | --- |
+| `log` | `[HH:MM:SS]` | stdout | continue | Normal progress and informational output |
+| `warn` | `[HH:MM:SS] Warning:` | stderr | continue | Non-fatal anomalies that should be noticed |
+| `fail` | `[HH:MM:SS] FAIL:` | stderr | continue | A check failed but the script should continue collecting results |
+| `err` | `[HH:MM:SS] ERROR:` | stderr | exit 1 | Fatal error; stop immediately |
+
+For the planned unified output format (see `scripts/Scripts.md`), non-fatal failures should still use `fail()` internally but emit an `ERROR` status line in the structured output. This keeps the external output consistent while preserving the fatal/non-fatal distinction in script control flow.
+
 ## Options and Usage Formatting
 
 Option parsing is a contract with operators, so `usage()` must be accurate and stable. For canonical option lists and script-specific details, refer to `scripts/Scripts.md`. The `scripts/Options.csv` cross-reference lists which scripts implement each option.
 
-The repository standard is a single heredoc for `usage()` and a short title plus single-line example at the top of usage. Ordering must be consistent: script-specific options first, then auth, then root/ssl paths, then common privilege options, and `--help` last. The exact format and rules are captured in `scripts/Prompt.md`.
+The repository standard is a single heredoc for `usage()` and a short title plus single-line example at the top of usage. Ordering must be consistent: script-specific options first, then auth, then root/ssl paths, then common privilege options, and `--help` last. The exact format and rules are captured in `scripts/Scripts.md`.
 
 ## Heredoc Conventions and File Emission
 
