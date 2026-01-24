@@ -78,7 +78,13 @@ EOF
 mcp_emit() {
     local level="$1"
     shift
-    echo "${level}: $*"
+    case "$level" in
+        PASS) status_pass "$*" ;;
+        WARN) status_info "$*" ;;
+        INFO) status_info "$*" ;;
+        FAIL) status_error "$*" ;;
+        *) echo "${level}: $*" ;;
+    esac
 }
 
 while getopts ":-:" opt; do
@@ -120,12 +126,15 @@ if [ -n "${MCP_PORTAL_URL-}" ] && [ -z "$PORTAL_URL" ]; then
 fi
 
 cf_init_auth "${CF_AUTH_FILE-}"
+section "MCP" "Server"
+kv "PORTAL_URL" "${PORTAL_URL-}"
 
 if [ "$APPLY" = true ]; then
     err "Write operations are not implemented yet"
 fi
 
 if [ "$CATALOG" = true ]; then
+    section "MCP" "Server"
     print_catalog
 fi
 
@@ -137,6 +146,8 @@ if [ -n "$PORTAL_URL" ]; then
         err "Invalid portal URL"
     fi
 
+    section "MCP" "Request"
+    kv "PORTAL_URL" "$PORTAL_URL"
     payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"mcp-cf","version":"0"},"protocolVersion":"2024-11-05","capabilities":{}}}'
     auth_header=()
     if [ -n "$MCP_BEARER_TOKEN" ]; then
@@ -163,6 +174,9 @@ if [ -n "$PORTAL_URL" ]; then
     if [ "$curl_status" -eq 28 ] && [ "$status" = "200" ]; then
         message="Portal reachable (stream open)"
     fi
+    section "MCP" "Response"
+    kv "STATUS" "$status"
+    kv "CLASS" "$class"
     case "$class" in
         pass) mcp_emit "PASS" "$message" ;;
         warn) mcp_emit "WARN" "$message" ;;

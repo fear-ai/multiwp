@@ -240,6 +240,8 @@ if [ "$MODE" = "export" ]; then
     if [ -z "$OUTPUT" ]; then
         OUTPUT="$(default_rules_path "$SOURCE")"
     fi
+    section "RULES" "Export"
+    kv "SOURCE" "$SOURCE"
     export_rules "$SOURCE" "$ALL" "$OUTPUT"
     exit 0
 fi
@@ -267,6 +269,9 @@ if [ "$MODE" = "apply" ]; then
             warn "Applying firewall rules to redirect-only domains: ${redirect_targets[*]}"
         fi
     fi
+    section "RULES" "Apply"
+    kv "INPUT" "$INPUT"
+    kv "DOMAINS" "${DOMAINS[*]}"
     apply_rules "$INPUT" "${DOMAINS[@]}"
     exit 0
 fi

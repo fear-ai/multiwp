@@ -212,6 +212,8 @@ for domain in "${DOMAINS[@]}"; do
     fi
 
     log "== $domain =="
+    section "CERT" "Verify"
+    kv "DOMAIN" "$domain"
     if [ -f "$cert_file" ] && [ -f "$key_file" ] && [ "$FORCE" = false ]; then
         log "Found existing origin cert/key:"
         ls -l "$cert_file" "$key_file"
@@ -220,6 +222,7 @@ for domain in "${DOMAINS[@]}"; do
     fi
 
     if [ "$mode" = "api" ]; then
+        section "CERT" "OriginCa"
         cf_require_ca_key
         require_cmds curl jq
         if [ -f "$cert_file" ] || [ -f "$key_file" ]; then
@@ -231,6 +234,7 @@ for domain in "${DOMAINS[@]}"; do
         fi
         issue_cert "$domain"
     else
+        section "CERT" "Install"
         if [ -f "$cert_file" ] || [ -f "$key_file" ]; then
             if [ "$FORCE" = true ]; then
                 log "Overwriting existing files for $domain (--force)"

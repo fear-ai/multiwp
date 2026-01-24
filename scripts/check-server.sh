@@ -1,5 +1,5 @@
 #!/bin/bash
-# check-server.sh - Validate host-level Ubuntu/Apache/PHP/MySQL baseline settings.
+# check-server.sh - Validate host-level Ubuntu, networking, and data service baselines.
 # For options, environment variables, defaults see usage().
 #
 # Example: check-server.sh
@@ -15,7 +15,7 @@ ALLOW_ROOT=false
 
 usage() {
     cat <<'EOF'
-check-server.sh - Validate host-level Ubuntu/Apache/PHP/MySQL baseline settings.
+check-server.sh - Validate host-level Ubuntu, networking, and data service baselines.
 Example: check-server.sh
 
 Options:
@@ -25,7 +25,7 @@ Options:
 
 Notes:
   - This script is read-only; it reports current settings and configuration.
-  - It does not change sysctl, UFW, Apache, PHP, or MySQL values.
+  - It does not change sysctl, UFW, MySQL, Redis, or cron values.
 EOF
 }
 
@@ -46,11 +46,6 @@ shift $((OPTIND-1))
 
 cli_require_non_root
 require_cmds awk grep
-
-section() {
-    echo ""
-    log "$1"
-}
 
 show_cmd() {
     local label="$1"
@@ -73,7 +68,7 @@ show_file_lines() {
     fi
 }
 
-section "OS"
+section "SERVER" "Os"
 if command -v lsb_release >/dev/null 2>&1; then
     show_cmd "Release" lsb_release -ds
 else
@@ -81,7 +76,22 @@ else
 fi
 show_cmd "Kernel" uname -r
 
-section "IPv6"
+section "SERVER" "Updates"
+if command -v systemctl >/dev/null 2>&1; then
+    show_cmd "unattended-upgrades enabled" systemctl is-enabled unattended-upgrades
+    show_cmd "unattended-upgrades active" systemctl is-active unattended-upgrades
+else
+    warn "systemctl is not available"
+fi
+
+section "SERVER" "Ssh"
+if command -v systemctl >/dev/null 2>&1; then
+    show_cmd "sshd active" systemctl is-active ssh
+    show_cmd "sshd enabled" systemctl is-enabled ssh
+fi
+show_file_lines "sshd_config ports" /etc/ssh/sshd_config "^[[:space:]]*Port[[:space:]]+"
+
+section "SERVER" "Network"
 show_file_lines "sysctl overrides" /etc/sysctl.d/99-disable-ipv6.conf "^net\\.ipv6\\.conf"
 for key in net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6 net.ipv6.conf.lo.disable_ipv6 net.ipv6.conf.all.accept_ra net.ipv6.conf.default.accept_ra; do
     value=$(sysctl -n "$key" 2>/dev/null || true)
@@ -96,7 +106,7 @@ else
     warn "No netplan files found"
 fi
 
-section "UFW"
+section "SERVER" "Ufw"
 if command -v ufw >/dev/null 2>&1; then
     show_cmd "ufw status" priv ufw status
     show_cmd "ufw status verbose" priv ufw status verbose
@@ -105,28 +115,26 @@ else
     warn "ufw is not installed"
 fi
 
-section "Apache"
-if command -v apache2ctl >/dev/null 2>&1; then
-    show_cmd "apache2ctl -V" priv apache2ctl -V
-    show_cmd "apache2ctl -S" priv apache2ctl -S
-    show_cmd "apache2ctl -M" priv apache2ctl -M
-else
-    warn "apache2ctl is not installed"
-fi
-
-section "PHP"
-if command -v php >/dev/null 2>&1; then
-    show_cmd "php -v" php -v
-    php -i 2>/dev/null | grep -E '^(opcache\\.|realpath_cache_|memory_limit|upload_max_filesize|post_max_size)' || true
-else
-    warn "php is not installed"
-fi
-
-section "MySQL"
+section "SERVER" "Mysql"
 if command -v mysql >/dev/null 2>&1; then
     if ! priv mysql -N -e "SHOW VARIABLES LIKE 'innodb_buffer_pool_size'; SHOW VARIABLES LIKE 'slow_query_log'; SHOW VARIABLES LIKE 'slow_query_log_file'; SHOW VARIABLES LIKE 'long_query_time';"; then
         warn "MySQL queries failed; check socket auth or root access"
     fi
 else
     warn "mysql client is not installed"
+fi
+
+section "SERVER" "Redis"
+if command -v redis-cli >/dev/null 2>&1; then
+    show_cmd "redis ping" redis-cli ping
+else
+    warn "redis-cli is not installed"
+fi
+
+section "SERVER" "Cron"
+if command -v systemctl >/dev/null 2>&1; then
+    show_cmd "cron active" systemctl is-active cron
+    show_cmd "cron enabled" systemctl is-enabled cron
+else
+    warn "systemctl is not available"
 fi

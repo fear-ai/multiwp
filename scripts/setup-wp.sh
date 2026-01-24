@@ -71,6 +71,7 @@ fi
 require_cmds grep tee a2enmod apache2ctl systemctl wget tar sed
 
 ## Apache Configuratione
+section "WP" "Install"
 echo "Step 2: Configuring Apache prerequisites"
 if ! grep -q "ServerName localhost" /etc/apache2/apache2.conf; then
     echo "ServerName localhost" | priv tee -a /etc/apache2/apache2.conf >/dev/null
@@ -116,6 +117,7 @@ template_paths() {
         esac
     done < <(wp_template_list "htaccess" "multisite" "$stage" "$template_dir")
 
+    section "WP" "Templates"
     echo "Templates directory: $template_dir"
     if [ -n "$stage" ]; then
         echo "Template stage: $stage"
@@ -159,6 +161,7 @@ if [ ! -d "$WORDPRESS_ROOT" ]; then
 fi
 
 # Create wp-config.php from sample if it doesn't exist
+section "WP" "Config"
 if [ ! -f "$WP_CONFIG_PATH" ]; then
     if [ -f "$WORDPRESS_ROOT/wp-config-sample.php" ]; then
         echo "Creating wp-config.php from sample"

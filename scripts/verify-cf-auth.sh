@@ -82,6 +82,13 @@ else
     cf_init_auth
 fi
 
+section "AUTH" "AuthFile"
+kv "AUTH_FILE" "${CF_AUTH_FILE:-$HOME/.config/cloudflare/default.auth}"
+section "AUTH" "Env"
+kv "CF_ACCOUNT_ID" "${CF_ACCOUNT_ID-}"
+kv "CF_ZONE_ID" "${CF_ZONE_ID-}"
+kv "CF_AUTH" "${CF_AUTH-}"
+
 AUTH_PREF="$(tolower "${CF_AUTH:-auto}")"
 case "$AUTH_PREF" in
     ""|auto|token|key) ;;
@@ -103,6 +110,7 @@ ca_ok=false
 
 if cf_has_token && [ "$AUTH_PREF" != "key" ]; then
     token_checked=true
+    section "AUTH" "Token"
     if cf_has_account_id; then
         log "Verifying account API token against account $CF_ACCOUNT_ID"
         token_resp=$(cf_api_request_mode token GET "/accounts/$CF_ACCOUNT_ID/tokens/verify")
@@ -114,6 +122,7 @@ if cf_has_token && [ "$AUTH_PREF" != "key" ]; then
     fi
     if [ "$token_success" = "true" ]; then
         log "API token valid"
+        status_pass "token=valid"
         token_ok=true
     else
         if cf_has_account_id; then
@@ -122,31 +131,38 @@ if cf_has_token && [ "$AUTH_PREF" != "key" ]; then
             token_success=$(cf_api_success "$token_resp")
             if [ "$token_success" = "true" ]; then
                 log "API token valid (user-scoped)"
+                status_pass "token=valid"
                 token_ok=true
             else
                 log "API token invalid"
+                status_error "token=invalid"
             fi
         else
             log "API token invalid"
+            status_error "token=invalid"
         fi
     fi
 fi
 
 if cf_has_key && [ "$AUTH_PREF" != "token" ]; then
     key_checked=true
+    section "AUTH" "Key"
     log "Verifying global API key for $CF_API_EMAIL"
     key_resp=$(cf_api_request_mode key GET "/user")
     key_success=$(cf_api_success "$key_resp")
     if [ "$key_success" = "true" ]; then
         log "Global API key valid"
+        status_pass "key=valid"
         key_ok=true
     else
         log "Global API key invalid"
+        status_error "key=invalid"
     fi
 fi
 
 if cf_has_ca_key; then
     ca_checked=true
+    section "AUTH" "OriginCa"
     if ! cf_has_zone_id; then
         if [ -n "${CF_ZONE:-}" ] && { cf_has_token || cf_has_key; }; then
             require_cmds jq
@@ -163,9 +179,11 @@ if cf_has_ca_key; then
         ca_success=$(cf_api_success "$ca_resp")
         if [ "$ca_success" = "true" ]; then
             log "Origin CA key valid"
+            status_pass "origin_ca=valid"
             ca_ok=true
         else
             log "Origin CA key invalid: $(cf_api_error_messages "$ca_resp")"
+            status_error "origin_ca=invalid"
         fi
     fi
 fi
@@ -189,3 +207,4 @@ if [ "$ca_checked" = true ] && [ "$ca_ok" != true ]; then
 fi
 
 log "Credential verification succeeded"
+status_pass "auth=ok"

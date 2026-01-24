@@ -86,6 +86,8 @@ if [ "${#cf_ips[@]}" -eq 0 ]; then
     err "No Cloudflare IP ranges returned from $CF_IPS_URL"
 fi
 
+section "FIREWALL" "IpList"
+kv "OUTPUT_FILE" "$OUTPUT_FILE"
 now_utc=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 {
     echo "# Cloudflare IPv4 UFW allowlist"
@@ -110,6 +112,8 @@ if [ "$UPDATE_UFW" = true ]; then
     if [ -z "$UFW_RULES_FILE" ]; then
         UFW_RULES_FILE="$(dirname "$OUTPUT_FILE")/user.rules"
     fi
+    section "FIREWALL" "UfwRules"
+    kv "UFW_RULES_FILE" "$UFW_RULES_FILE"
     python3 - "$OUTPUT_FILE" "$UFW_RULES_FILE" "$CF_COMMENT" <<'EOF'
 import os
 import re

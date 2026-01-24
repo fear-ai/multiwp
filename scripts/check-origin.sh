@@ -130,6 +130,8 @@ check_domain() {
 
     echo ""
     log "Origin checks for: $domain"
+    section "ORIGIN" "Tls"
+    kv "DOMAIN" "$domain"
 
     local safe
     safe=$(safe_name "$domain")
@@ -159,6 +161,7 @@ check_domain() {
         check_file_perms "$key_file" "root:ssl-cert 640" || ok=false
     fi
 
+    section "ORIGIN" "Vhosts"
     # TODO: allow per-domain vhost overrides (e.g., from domains.csv) when needed.
     local http_conf="$APACHE_DIR_LOCAL/${safe}.conf"
     local ssl_conf="$APACHE_DIR_LOCAL/${safe}-ssl.conf"
@@ -202,15 +205,16 @@ check_domain() {
     fi
 
     if [ "$ok" = true ]; then
-        echo "Origin checks passed for $domain"
+        status_pass "DOMAIN=$domain"
         return 0
     fi
 
-    echo "Origin checks failed for $domain"
+    status_error "DOMAIN=$domain"
     return 1
 }
 
 system_ok=true
+section "ORIGIN" "Apache"
 if priv apache2ctl configtest; then
     echo "Apache configtest passed"
 else
@@ -225,6 +229,7 @@ else
     system_ok=false
 fi
 
+section "ORIGIN" "Modules"
 if ! check_module "rewrite"; then
     system_ok=false
 fi
@@ -233,6 +238,13 @@ if ! check_module "ssl"; then
 fi
 if ! check_module "headers"; then
     system_ok=false
+fi
+
+section "ORIGIN" "Php"
+if priv apache2ctl -M | grep -Eiq 'php[0-9]*_module'; then
+    echo "Apache module enabled: php"
+else
+    warn "Apache PHP module not detected"
 fi
 
 overall_ok=true

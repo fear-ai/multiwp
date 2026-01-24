@@ -784,7 +784,7 @@ Notes:
 #### check-server.sh (verification/investigation)
 
 Purpose:
-- Reports host-level Ubuntu, Apache, PHP, and MySQL settings aligned to `HardenUbuntu.md`.
+- Reports host-level Ubuntu, networking, and data service settings aligned to `HardenUbuntu.md`.
 
 Arguments:
 - None.

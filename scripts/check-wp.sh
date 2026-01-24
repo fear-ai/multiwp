@@ -143,6 +143,7 @@ report_templates() {
     fi
     TEMPLATE_REPORTED=true
     echo ""
+    section "WP" "Templates"
     log "Template selection"
     echo "Template dir: $TEMPLATE_DIR_LOCAL"
     if [ -n "$WP_STAGE_LOCAL" ]; then
@@ -307,11 +308,15 @@ check_domain_multisite() {
 
     echo ""
     log "WordPress checks for: $domain"
+    section "WP" "Root"
+    kv "DOMAIN" "$domain"
+    kv "WP_ROOT" "$WORDPRESS_ROOT_LOCAL"
 
     local expected_siteurl expected_home
     expected_siteurl="https://$domain"
     expected_home="$expected_siteurl"
 
+    section "WP" "Routing"
     local site_csv
     site_csv=$(priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" site list --fields=blog_id,url,domain,path --format=csv)
     local site_line
@@ -386,6 +391,7 @@ check_domain_multisite() {
         echo "home ok"
     fi
 
+    section "WP" "Config"
     local wp_config="$WORDPRESS_ROOT_LOCAL/wp-config.php"
     if priv test -r "$wp_config"; then
         if priv grep -q "define( *'MULTISITE'" "$wp_config"; then
@@ -408,12 +414,15 @@ check_domain_multisite() {
         warn ".htaccess not readable at $htaccess"
     fi
 
+    section "WP" "Security"
+    status_info "DOMAIN=$domain security_checks=not_implemented"
+
     if [ "$ok" = true ]; then
-        echo "WordPress checks passed for $domain"
+        status_pass "DOMAIN=$domain"
         return 0
     fi
 
-    echo "WordPress checks failed for $domain"
+    status_error "DOMAIN=$domain"
     return 1
 }
 
@@ -429,11 +438,15 @@ check_domain_single() {
 
     echo ""
     log "WordPress checks for: $domain"
+    section "WP" "Root"
+    kv "DOMAIN" "$domain"
+    kv "WP_ROOT" "$WORDPRESS_ROOT_LOCAL"
 
     local expected_siteurl expected_home
     expected_siteurl="https://$domain"
     expected_home="$expected_siteurl"
 
+    section "WP" "Routing"
     local siteurl home
     siteurl=$(priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" option get siteurl 2>/dev/null || true)
     home=$(priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" option get home 2>/dev/null || true)
@@ -460,12 +473,15 @@ check_domain_single() {
         echo "home ok"
     fi
 
+    section "WP" "Security"
+    status_info "DOMAIN=$domain security_checks=not_implemented"
+
     if [ "$ok" = true ]; then
-        echo "WordPress checks passed for $domain"
+        status_pass "DOMAIN=$domain"
         return 0
     fi
 
-    echo "WordPress checks failed for $domain"
+    status_error "DOMAIN=$domain"
     return 1
 }
 

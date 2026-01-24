@@ -12,9 +12,25 @@ WORDPRESS_ROOT="${WORDPRESS_ROOT:-/var/www/html/wordpress}"
 TEMPLATE_DIR="${TEMPLATE_DIR:-$ROOT_DIR/templates}"
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
-err() { echo "[$(date +%H:%M:%S)] ERROR: $*" >&2; exit 1; }
+err() { echo "[$(date +%H:%M:%S)] ERROR: $*" >&2; status_error "$*"; exit 1; }
 warn() { echo "[$(date +%H:%M:%S)] Warning: $*" >&2; }
-fail() { echo "[$(date +%H:%M:%S)] FAIL: $*" >&2; }
+fail() { echo "[$(date +%H:%M:%S)] FAIL: $*" >&2; status_error "$*"; }
+
+section() {
+    local section="$1"
+    local topic="$2"
+    echo "== ${section}:${topic}"
+}
+
+kv() {
+    local key="$1"
+    local value="${2-}"
+    echo "${key}=${value}"
+}
+
+status_pass() { echo "PASS $*"; }
+status_info() { echo "INFO $*"; }
+status_error() { echo "ERROR $*"; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || err "Missing command: $1"; }
 require_cmds() { for cmd in "$@"; do require_cmd "$cmd"; done; }
 

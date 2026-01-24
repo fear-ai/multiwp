@@ -133,6 +133,7 @@ process_domain() {
     fi
     
     # Check SSL certificate availability
+    section "ORIGIN" "Tls"
     local cert_available=false
     if check_certificates "$domain"; then
         cert_available=true
@@ -286,6 +287,8 @@ failed_count=0
 
 for domain in "${DOMAINS[@]}"; do
     echo "----------------------------------------"
+    section "ORIGIN" "Vhosts"
+    kv "DOMAIN" "$domain"
     if process_domain "$domain"; then
         ((processed_count++))
     else
@@ -295,6 +298,7 @@ for domain in "${DOMAINS[@]}"; do
 done
 
 # Test Apache configuration and reload
+section "ORIGIN" "Enable"
 echo "Testing Apache configuration..."
 if apache2ctl configtest; then
     echo "Apache configuration valid, reloading"

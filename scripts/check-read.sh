@@ -171,6 +171,13 @@ if [ ${#COMMANDS[@]} -eq 0 ]; then
     COMMANDS=("${ALL_COMMANDS[@]}")
 fi
 
+section "ORCH" "Selection"
+kv "COMMANDS" "${COMMANDS[*]}"
+if [ ${#DOMAINS[@]} -gt 0 ]; then
+    kv "DOMAINS" "${DOMAINS[*]}"
+fi
+kv "DOMAINS_FILE" "$DOMAINS_FILE"
+
 declare -A DOMAIN_STATUS=()
 declare -A DOMAIN_SITE_TYPE=()
 declare -A DOMAIN_AUTH_FILE=()
@@ -437,6 +444,8 @@ run_mysql() {
 
 overall_ok=true
 for cmd in "${COMMANDS[@]}"; do
+    section "ORCH" "Run"
+    kv "COMMAND" "$cmd"
     case "$cmd" in
         syn) run_syn || overall_ok=false ;;
         unit) run_unit || overall_ok=false ;;
@@ -452,3 +461,5 @@ done
 if [ "$overall_ok" != true ]; then
     exit 1
 fi
+section "ORCH" "Results"
+status_pass "run=ok"

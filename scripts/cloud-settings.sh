@@ -286,6 +286,10 @@ for domain in "${DOMAINS[@]}"; do
     cf_require_auth "for Cloudflare settings update"
     cf_require_zone_id "for Cloudflare settings update" "$domain"
 
+    section "SETTINGS" "ZoneSettings"
+    kv "DOMAIN" "$domain"
+    kv "ZONE_ID" "$CF_ZONE_ID"
+
     settings_json=$(cf_api_request GET "/zones/${CF_ZONE_ID}/settings")
     if [ "$(cf_api_success "$settings_json")" != "true" ]; then
         err "Failed to query zone settings: $(cf_api_error_messages "$settings_json")"
@@ -303,6 +307,7 @@ for domain in "${DOMAINS[@]}"; do
     current_managed=$(echo "$managed_headers_json" | jq -r '.result.managed_response_headers[]? | select(.id=="add_security_headers") | .enabled' | head -n 1)
     current_managed="${current_managed:-}"
 
+    section "SETTINGS" "Baseline"
     apply_setting "$domain" "ssl" "$SSL_MODE" "$current_ssl"
     apply_setting "$domain" "always_use_https" "$ALWAYS_USE_HTTPS" "$current_always"
     apply_setting "$domain" "min_tls_version" "$MIN_TLS_VERSION" "$current_min_tls"

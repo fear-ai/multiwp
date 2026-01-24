@@ -290,11 +290,15 @@ for domain in "${DOMAINS[@]}"; do
         warn "site_type=redirect but redirect_url is empty for $domain"
     fi
 
+    section "ZONE" "Create"
+    kv "DOMAIN" "$domain"
+    kv "SITE_TYPE" "$site_type"
     log "Provisioning Cloudflare zone and DNS for $domain"
     auth_args=()
     if [ -n "${CF_AUTH_CLI:-}" ]; then
         auth_args=(--auth "$CF_AUTH_CLI")
     fi
+    section "ZONE" "Dns"
     "$SCRIPTS_DIR/cloud-dns.sh" --auth-file "$auth_file" --account "$account_id" "${auth_args[@]}" "$domain" "$ip_addr"
 
     cf_init_auth "$auth_file"
@@ -324,6 +328,7 @@ for domain in "${DOMAINS[@]}"; do
         account_email="$CF_API_EMAIL"
     fi
 
+    section "ZONE" "Record"
     if [ "$RECORD_UPDATES" = true ]; then
         update_site_type=""
         update_registrar=""

@@ -174,6 +174,9 @@ check_domain() {
 
     echo ""
     log "Edge checks for: $domain (canonical: $canonical_domain)"
+    section "EDGE" "Dns"
+    kv "DOMAIN" "$canonical_domain"
+    kv "HOST" "$domain"
     if [ "$redirect_only" = true ]; then
         log "Redirect-only domain; skipping HTTPS and Cloudflare API checks"
         redirect_target=$(redirect_target "$domain")
@@ -255,6 +258,7 @@ check_domain() {
         echo "DNS AAAA: $aaaa_records"
     fi
 
+    section "EDGE" "RedirectRule"
     if [ "$redirect_only" = true ]; then
         check_redirect "http://$canonical_domain" "$redirect_target" "" "HTTP apex"
         check_redirect "http://$www_domain" "$redirect_target" "" "HTTP www"
@@ -267,6 +271,7 @@ check_domain() {
     fi
 
     if [ "$redirect_only" != true ]; then
+        section "EDGE" "Https"
         local https_headers
         if ! https_headers=$(fetch_headers "https://$canonical_domain"); then
             fail "HTTPS request failed for https://$canonical_domain"
@@ -305,6 +310,7 @@ check_domain() {
                 required_headers+=("strict-transport-security")
             fi
 
+            section "EDGE" "Headers"
             local header
             for header in "${required_headers[@]}"; do
                 if echo "$https_headers" | grep -qi "^${header}:"; then
@@ -373,11 +379,11 @@ check_domain() {
     fi
 
     if [ "$ok" = true ]; then
-        echo "Edge checks passed for $domain"
+        status_pass "DOMAIN=$domain"
         return 0
     fi
 
-    echo "Edge checks failed for $domain"
+    status_error "DOMAIN=$domain"
     return 1
 }
 

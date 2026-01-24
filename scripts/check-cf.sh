@@ -141,6 +141,10 @@ if [ -n "$CF_ZONE_INPUT_RAW" ] && [ -n "$CF_ZONE_API" ] && [ "$CF_ZONE_INPUT_RAW
     note "Zone name differs from Cloudflare: input='$CF_ZONE_INPUT_RAW' api='$CF_ZONE_API' (case-sensitive)"
 fi
 
+section "CF" "Zone"
+kv "ZONE" "${CF_ZONE:-unknown}"
+kv "ZONE_ID" "$CF_ZONE_ID"
+
 settings_json=$(cf_api_request GET "/zones/${CF_ZONE_ID}/settings")
 if [ "$(cf_api_success "$settings_json")" != "true" ]; then
     err "Failed to query zone settings: $(cf_api_error_messages "$settings_json")"
@@ -152,8 +156,7 @@ if [ "$raw" = true ]; then
 fi
 
 settings_map=$(echo "$settings_json" | jq -c '.result | map({(.id): .value}) | add')
-
-printf "Zone: %s (%s)\n" "${CF_ZONE:-unknown}" "$CF_ZONE_ID"
+section "CF" "Settings"
 
 # Managed headers (Cloudflare Managed Transforms)
 managed_headers_json=$(cf_api_request GET "/zones/${CF_ZONE_ID}/managed_headers")
@@ -181,6 +184,7 @@ else
     fi
 fi
 
+section "CF" "Dns"
 dns_types=("A" "CNAME")
 for dns_type in "${dns_types[@]}"; do
     dns_json=$(cf_api_request GET "/zones/${CF_ZONE_ID}/dns_records?type=${dns_type}&per_page=100")
@@ -221,13 +225,13 @@ if [ "${#expects[@]}" -gt 0 ]; then
         want="${exp#*=}"
         got=$(echo "$settings_map" | jq -r --arg k "$key" '.[$k] // empty')
         if [ -z "$got" ]; then
-            echo "FAIL: ${key} unknown (expected ${want})" >&2
+            status_error "${key} unknown (expected ${want})" >&2
             failures=$((failures + 1))
         elif [ "$got" != "$want" ]; then
-            echo "FAIL: ${key}=${got} (expected ${want})" >&2
+            status_error "${key}=${got} (expected ${want})" >&2
             failures=$((failures + 1))
         else
-            echo "PASS: ${key}=${got}"
+            status_pass "${key}=${got}"
         fi
     done
     if [ "$failures" -gt 0 ]; then

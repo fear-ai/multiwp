@@ -257,6 +257,10 @@ for domain in "${DOMAINS[@]}"; do
     fi
     [ -n "$target_url" ] || err "redirect_url required for $domain (use --redirect-url or domains.csv)"
 
+    section "EDGE" "RedirectRule"
+    kv "DOMAIN" "$domain"
+    kv "REDIRECT_URL" "$target_url"
+
     if [ -n "$AUTH_FILE_OVERRIDE" ]; then
         CF_AUTH_FILE="$AUTH_FILE_OVERRIDE"
     else

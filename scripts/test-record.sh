@@ -217,6 +217,13 @@ if [ ${#COMMANDS[@]} -eq 0 ]; then
     COMMANDS=("${ALL_COMMANDS[@]}")
 fi
 
+section "ORCH" "Selection"
+kv "COMMANDS" "${COMMANDS[*]}"
+if [ ${#DOMAINS[@]} -gt 0 ]; then
+    kv "DOMAINS" "${DOMAINS[*]}"
+fi
+kv "DOMAINS_FILE" "$DOMAINS_FILE"
+
 require_cmds python3
 
 export DOMAINS_FILE
@@ -503,6 +510,8 @@ run_wp() {
 
 overall_ok=true
 for cmd in "${COMMANDS[@]}"; do
+    section "ORCH" "Run"
+    kv "COMMAND" "$cmd"
     case "$cmd" in
         edge) run_edge ;;
         origin) run_origin ;;
@@ -514,3 +523,5 @@ done
 if [ "$overall_ok" != true ]; then
     exit 1
 fi
+section "ORCH" "Results"
+status_pass "run=ok"

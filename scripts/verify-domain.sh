@@ -99,6 +99,9 @@ done
 finalize_domains DOMAINS || { usage; exit 1; }
 [ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
 
+section "ORCH" "Selection"
+kv "DOMAINS" "${DOMAINS[*]}"
+
 if [ "$ALLOW_ROOT" = true ]; then
     ORIGIN_ARGS+=("--allow-root")
     WP_ARGS+=("--allow-root")
@@ -120,6 +123,8 @@ for domain in "${DOMAINS[@]}"; do
     log "=============================="
     log "Verifying domain: $domain"
     log "=============================="
+    section "ORCH" "Run"
+    kv "DOMAIN" "$domain"
 
     if ! "$ORIGIN_SCRIPT" "${ORIGIN_ARGS[@]}" "$domain"; then
         overall_ok=false
@@ -136,7 +141,8 @@ for domain in "${DOMAINS[@]}"; do
 done
 
 if [ "$overall_ok" = true ]; then
-    log "All domain checks completed successfully"
+    section "ORCH" "Results"
+    status_pass "run=ok"
     exit 0
 fi
 

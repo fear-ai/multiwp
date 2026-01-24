@@ -191,9 +191,11 @@ for domain in "${CSV_SET[@]}"; do
     fi
 done
 
-log "Auth file: $AUTH_FILE"
-echo "Auth domains (${AUTH_SOURCE}): ${#AUTH_SET[@]}"
-echo "domains.csv domains: ${#CSV_SET[@]}"
+section "AUTH" "Domains"
+kv "AUTH_FILE" "$AUTH_FILE"
+kv "AUTH_SOURCE" "$AUTH_SOURCE"
+kv "AUTH_DOMAIN_COUNT" "${#AUTH_SET[@]}"
+kv "CSV_DOMAIN_COUNT" "${#CSV_SET[@]}"
 
 if [ ${#only_in_auth[@]} -gt 0 ]; then
     warn "Domains listed in ${AUTH_SOURCE} but missing in domains.csv: ${only_in_auth[*]}"
@@ -305,13 +307,17 @@ if [ "$CHECK_IDS" = true ]; then
             any_error=true
         fi
 
-        echo ""
-        log "Zone ID check: $normalized"
-        echo "  auth: ${auth_status} ${auth_id}"
-        echo "  csv:  ${csv_status} ${csv_id}"
-        echo "  api:  ${api_status} ${api_id}"
+        section "AUTH" "ZoneIds"
+        kv "DOMAIN" "$normalized"
+        kv "AUTH_ZONE_ID" "$auth_id"
+        kv "AUTH_STATUS" "$auth_status"
+        kv "CSV_ZONE_ID" "$csv_id"
+        kv "CSV_STATUS" "$csv_status"
+        kv "API_ZONE_ID" "$api_id"
+        kv "API_STATUS" "$api_status"
         if [ -n "$chosen" ]; then
-            echo "  chosen (${chosen_src}): $chosen"
+            kv "CHOSEN_ZONE_ID" "$chosen"
+            kv "CHOSEN_SOURCE" "$chosen_src"
         else
             warn "No zone ID resolved for $normalized"
         fi
@@ -332,14 +338,17 @@ if [ "$CHECK_IDS" = true ]; then
 
         mismatch=false
         if [ -n "$auth_id" ] && [ -n "$csv_id" ] && [ "$auth_id" != "$csv_id" ]; then
+            section "AUTH" "Mismatches"
             warn "Mismatch auth vs csv for $normalized: $auth_id != $csv_id"
             mismatch=true
         fi
         if [ -n "$auth_id" ] && [ -n "$api_id" ] && [ "$auth_id" != "$api_id" ]; then
+            section "AUTH" "Mismatches"
             warn "Mismatch auth vs api for $normalized: $auth_id != $api_id"
             mismatch=true
         fi
         if [ -n "$csv_id" ] && [ -n "$api_id" ] && [ "$csv_id" != "$api_id" ]; then
+            section "AUTH" "Mismatches"
             warn "Mismatch csv vs api for $normalized: $csv_id != $api_id"
             mismatch=true
         fi
