@@ -2,18 +2,18 @@
 Date: January 21, 2026
 
 ## Introduction
-This document consolidates our caching strategy, performance tooling, and benchmarking workflow for WordPress multisite and single-site installs on Ubuntu 24 behind Cloudflare. It is written for operations work and uses the same dependency order as `Operations.md` sections 3–5 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`): edge first, then origin services, then WordPress. The intent is to make decisions explicit, avoid overlapping caches, and keep a repeatable test plan with commands and validation criteria.
+This document consolidates our caching strategy, performance tooling, and benchmarking workflow for WordPress multisite and single-site installs on Ubuntu 24 behind Cloudflare. It is written for operations work and follows the dependency order in `Operations.md` sections 3–5 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`): edge first, then origin services, then WordPress. The intent is to make decisions explicit, avoid overlapping caches, and keep a repeatable test plan with commands and validation criteria.
 
-## Problem Statement and Challenges
-Our performance work must reconcile two competing realities: the origin must remain secure and stable, while the user experience depends on latency and cache efficiency that are largely driven by Cloudflare. The problem to solve is not merely “make it faster,” but “make it measurably faster without violating the operational constraints of a shared multisite origin.” This requires a disciplined approach that prevents overlapping caches, preserves correctness under CDN behavior, and produces reproducible measurements that can be compared over time.
+### Challenges
+Performance work must reconcile two competing realities: the origin must remain secure and stable, while the user experience depends on latency and cache efficiency that are largely driven by Cloudflare. The problem to solve is not merely “make it faster,” but “make it measurably faster without violating the operational constraints of a shared multisite origin.” This requires a disciplined approach that prevents overlapping caches, preserves correctness under CDN behavior, and produces reproducible measurements that can be compared over time.
 
-Key challenges:
+Key challenges include:
 - **Layered caching effects**: Multiple layers (edge, PHP opcode, object cache, DB buffers) can interact in non-obvious ways and obscure where performance gains actually come from.
 - **Operational safety**: Testing and tuning can unintentionally change application behavior, so safety controls, backups, and clear rollback conditions are mandatory.
 - **Multi-tenant impact**: A single origin serves multiple domains; tuning must avoid improving one site at the cost of others.
 - **Edge vs origin visibility**: Cloudflare absorbs a large portion of requests; origin metrics can mislead if they do not distinguish cached from uncached traffic.
 
-## Methodology
+### Methodology
 We follow a single-change-at-a-time workflow with explicit measurement targets. Each test or adjustment records both the user-facing effects (latency percentiles, throughput, error rate) and origin pressure (CPU, memory, IO, DB latency). This aligns with `Operations.md` sections 3–5 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`) and prevents “tuning in the dark.”
 
 Methodology steps:
@@ -22,7 +22,7 @@ Methodology steps:
 3) **Measure and compare**: Use identical test parameters before and after the change.
 4) **Decide and record**: Keep a decision record with explicit rollback triggers.
 
-## Architecture of the Performance Approach
+### Layered architecture and references
 Performance decisions must follow the same dependency chain as operational setup. The architecture below is conceptual and links to the canonical operational runbook for exact settings and procedures.
 
 Layered model:
@@ -48,38 +48,10 @@ Before changing caching or running performance tests, confirm:
 - The cache baseline and security settings in `Operations.md` section 3 (`Operations.md#3-cloudflare-edge`) are applied.
 - You have a defined test window, a rollback plan, and a place to store raw outputs.
 
-## Baseline capture and verification
-Before tuning, capture the current runtime settings so later decisions are anchored to real values rather than assumptions. This reduces the risk of “tuning in the dark” and makes it easier to decide whether documentation should change instead of the runtime configuration.
-
-Create a run directory:
-```bash
-OUT=/var/tmp/perf-baseline-$(date +%Y%m%d-%H%M%S)
-mkdir -p "$OUT"
-```
-
-Capture edge headers:
-```bash
-for d in zero.directory alphaeos.net avtranscript.com recomp.one talkdao.org; do
-  curl -I "https://$d/" > "$OUT/headers_${d}.txt"
-done
-```
-
-Capture PHP and MySQL settings:
-```bash
-php -i | rg -n "opcache.enable|opcache.memory_consumption|opcache.max_accelerated_files|opcache.revalidate_freq" > "$OUT/php_opcache.txt"
-mysql -e "SHOW VARIABLES LIKE 'innodb_buffer_pool_size';" > "$OUT/mysql_innodb_buffer_pool.txt"
-mysql -e "SHOW VARIABLES LIKE 'slow_query_log';" > "$OUT/mysql_slow_query_log.txt"
-```
-
-If Redis is in use, record a quick health snapshot:
-```bash
-redis-cli INFO > "$OUT/redis_info.txt"
-```
-
-## Performance metrics focus
+## Performance metrics
 We care about both origin resource pressure and external experience. For each test, record latency percentiles (p50/p95/p99), throughput (requests/sec), and error rate alongside CPU, memory, and IO. That combination tells us whether a change improves actual user experience or simply shifts load around.
 
-## Caching Strategy
+## Caching strategy
 We use a layered strategy that avoids overlapping page caches and keeps invalidation paths clear. The primary cache is Cloudflare edge caching for anonymous traffic, with Redis object cache for dynamic requests. Apache is used for headers and PHP dispatch, not page caching. This keeps cache responsibility simple and reduces purge complexity.
 
 ### Edge reach and POP impact
@@ -149,10 +121,7 @@ Edge Cache TTL: <set to your tested value>
 Origin Cache Control: Bypass
 ```
 
-Notes:
-- Keep this rule to anonymous traffic only. Authenticated sessions should bypass edge cache to avoid serving private content.
-- Use one cache layer for HTML. If edge caching is on, do not enable a disk page cache plugin on WordPress.
-- POST is not cached by Cloudflare and should not be made cache-eligible.
+Keep this rule to anonymous traffic only; authenticated sessions should bypass edge cache to avoid serving private content. Use one cache layer for HTML—if edge caching is on, do not enable a disk page cache plugin on WordPress. POST is not cached by Cloudflare and should not be made cache-eligible.
 
 Cache analytics and paid options:
 Cloudflare Cache Analytics is not available on the Free tier. On Free, rely on response headers (`cf-cache-status`, `age`, `cf-ray`) and origin-side metrics to validate cache effectiveness. On paid plans (Pro/Business), Cache Analytics provides hit ratio and cache-served bytes and is useful for trend validation. APO (Automatic Platform Optimization) is also a paid option and can replace custom HTML caching rules if you decide to use it.
@@ -282,60 +251,43 @@ We use a single-change-at-a-time workflow with explicit safety and decision reco
 - If a zone is set to DNS-only temporarily, enable an origin page cache only for the duration of the DNS-only window and disable it when the proxy returns.
 - Purge at the active cache layer; avoid full purges unless you have no narrower option.
 
-#### Decision record
-For each change or test, record:
-- Domain, URL, scenario (cached/uncached), and test parameters.
-- Edge headers and any cache analytics snapshot (paid tiers only).
-- Latency percentiles (p50/p95/p99), throughput, and error rate.
-- Origin pressure: CPU, memory, IO, Apache workers.
-- Decision, expected impact, and rollback trigger.
-- Re-test delta.
-
 ### Benchmarking and validation
 The goal is to distinguish edge-cached versus origin behavior and record CPU, memory, and database pressure alongside latency and errors.
 
 #### Freeze and backup before testing
-Backups are written to `/var/backups/wp` so they live outside the web root, are owned by root, and can be retained independently of application deployments. If you use a separate volume for backups, adjust the path accordingly. Ensure the directory exists and is not writable by the web server.
+Use `back-wp.sh` to freeze WordPress file changes and create backups. By default it writes backups into `/var/www/html/<domain>` so each domain has a predictable default location; override this with `--backup-directory` to keep backups outside the web root and on a dedicated volume.
 
-Create the backup directory if needed:
+Use `back-wp.sh` to freeze WordPress file changes and create backups. By default it writes backups into `/var/backups/html/<wp-root-basename>` so the multisite root maps to `/var/backups/html/wordpress` and the single-site root maps to `/var/backups/html/zero.directory`. The script only sets `DISALLOW_FILE_MODS=true` when it is not already true, and it restores `DISALLOW_FILE_MODS=false` after the backup if it changed it. Override the backup location with `--backup-directory` if you want a different layout or a separate volume.
+
+If you use `/var/backups/html`, ensure it exists and is not writable by the web server:
 ```bash
-sudo mkdir -p /var/backups/wp
-sudo chown root:root /var/backups/wp
-sudo chmod 750 /var/backups/wp
+sudo mkdir -p /var/backups/html
+sudo chown root:root /var/backups/html
+sudo chmod 750 /var/backups/html
 ```
 
-Announce a change freeze for the test window and disable file modifications at the WordPress layer:
+Run the script (recommended):
+```bash
+./scripts/back-wp.sh --domain zero.directory
+./scripts/back-wp.sh --domain alphaeos.net
+```
+
+Manual equivalent (if you need to run the steps by hand):
 ```bash
 sudo -u www-data wp --path=/var/www/html/wordpress config set DISALLOW_FILE_MODS true --raw
 sudo -u www-data wp --path=/var/www/html/zero.directory config set DISALLOW_FILE_MODS true --raw
-```
-
-Set a run identifier:
-```bash
 RUN_ID=$(date +%Y%m%d-%H%M%S)
-```
 
-Back up multisite:
-```bash
 sudo -u www-data wp --path=/var/www/html/wordpress maintenance-mode activate
-sudo -u www-data wp --path=/var/www/html/wordpress db export "/var/backups/wp/multisite_${RUN_ID}.sql"
-sudo tar -czf "/var/backups/wp/multisite_wp-content_${RUN_ID}.tgz" -C /var/www/html/wordpress wp-content
+sudo -u www-data wp --path=/var/www/html/wordpress db export "/var/backups/html/wordpress/multisite_${RUN_ID}.sql"
+sudo tar -czf "/var/backups/html/wordpress/multisite_wp-content_${RUN_ID}.tgz" -C /var/www/html/wordpress wp-content
 sudo -u www-data wp --path=/var/www/html/wordpress maintenance-mode deactivate
-```
 
-Back up zero.directory:
-```bash
 sudo -u www-data wp --path=/var/www/html/zero.directory maintenance-mode activate
-sudo -u www-data wp --path=/var/www/html/zero.directory db export "/var/backups/wp/zero_directory_${RUN_ID}.sql"
-sudo tar -czf "/var/backups/wp/zero_directory_wp-content_${RUN_ID}.tgz" -C /var/www/html/zero.directory wp-content
+sudo -u www-data wp --path=/var/www/html/zero.directory db export "/var/backups/html/zero.directory/zero_directory_${RUN_ID}.sql"
+sudo tar -czf "/var/backups/html/zero.directory/zero_directory_wp-content_${RUN_ID}.tgz" -C /var/www/html/zero.directory wp-content
 sudo -u www-data wp --path=/var/www/html/zero.directory maintenance-mode deactivate
 ```
-
-## Deferred topics
-The following items are acknowledged but intentionally postponed so the execution workflow can stabilize before the tooling and data model are refactored:
-- Script design for automated performance runs and baseline comparisons.
-- Data model changes for associating performance results with domain inventory.
-- Cross-document restructuring of `HardenUbuntu.md` and `MULTI.md` for broader audience partitioning.
 
 After testing, restore `DISALLOW_FILE_MODS` to its prior value:
 ```bash
@@ -344,7 +296,7 @@ sudo -u www-data wp --path=/var/www/html/zero.directory config set DISALLOW_FILE
 ```
 
 ### Pre-flight checks
-Run read-only validations and capture edge headers for the test targets.
+Run read-only validations for the test targets.
 
 ```bash
 ./scripts/check-read.sh syn unit
@@ -354,17 +306,50 @@ Run read-only validations and capture edge headers for the test targets.
   alphaeos.net avtranscript.com recomp.one talkdao.org
 ```
 
-Capture headers:
+### Baseline capture and verification
+Before tuning, capture the current runtime settings so later decisions are anchored to real values rather than assumptions. This reduces the risk of “tuning in the dark” and makes it easier to decide whether documentation should change instead of the runtime configuration.
+
+Create a run directory:
 ```bash
-OUT=/var/tmp/perf-$(date +%Y%m%d-%H%M%S)
+RUN_ID=$(date +%Y%m%d-%H%M%S)
+OUT=/var/tmp/perf-${RUN_ID}
 mkdir -p "$OUT"
+```
+
+Capture edge headers:
+```bash
 for d in zero.directory alphaeos.net avtranscript.com recomp.one talkdao.org; do
   curl -I "https://$d/" > "$OUT/headers_${d}.txt"
 done
 ```
 
+Capture PHP and MySQL settings:
+```bash
+php -i | rg -n "opcache.enable|opcache.memory_consumption|opcache.max_accelerated_files|opcache.revalidate_freq" > "$OUT/php_opcache.txt"
+mysql -e "SHOW VARIABLES LIKE 'innodb_buffer_pool_size';" > "$OUT/mysql_innodb_buffer_pool.txt"
+mysql -e "SHOW VARIABLES LIKE 'slow_query_log';" > "$OUT/mysql_slow_query_log.txt"
+```
+
+If Redis is in use, record a quick health snapshot:
+```bash
+redis-cli INFO > "$OUT/redis_info.txt"
+```
+
 ### Initial tests
 These sanity checks confirm the stack responds as expected before sustained load. Use low concurrency and short durations so the tests are non-disruptive. Record results in the same run directory as the baseline headers and telemetry.
+
+`test-ini.sh` runs these checks and writes outputs into a run directory. Options:
+- `domain` (repeatable, or positional) target domain(s) to test.
+- `duration` short `wrk` duration for the initial run (default is conservative).
+- `threads`, `connections` low-load settings for `wrk`.
+- `run-id` identifier for file naming.
+- `out-dir` output directory (defaults to `/var/tmp/perf-<run-id>-init`).
+- `cache-bust` query parameter name (defaults to `cache_bust`).
+
+Example:
+```bash
+./scripts/test-ini.sh --domain zero.directory --domain alphaeos.net --duration 10s --threads 2 --connections 16
+```
 
 Initial tests to run:
 1) **Edge header sanity**: confirm `cf-cache-status`, `age`, and `cf-ray` appear for each target domain.
@@ -401,14 +386,23 @@ sudo apt-get update
 sudo apt-get install -y wrk sysstat
 ```
 
-Alternatives and tradeoffs:
-- `hey`: simpler output with JSON and percentile summaries; good for quick reports, but less flexible under very high concurrency.
-- `ab` (ApacheBench): widely available, but limited in reporting and less representative under modern HTTP patterns.
-- `k6`: best for scripted scenarios and complex workflows; heavier setup and requires more scripting.
-
 Use consistent parameters across runs and record them in the results.
 
-Example runs (replace values with your chosen duration and concurrency):
+`test-load.sh` runs `wrk` and telemetry together and names outputs so each run is easy to identify. Options:
+- `domain` (repeatable, or positional) target domain(s) to test.
+- `duration` load duration per run (for example, `30s` or `2m`).
+- `threads`, `connections` for `wrk`.
+- `run-id` identifier for file naming.
+- `out-dir` output directory (defaults to `/var/tmp/perf-<run-id>-load`).
+- `cache-bust` query parameter name (defaults to `cache_bust`).
+- `interval` telemetry sampling interval (seconds).
+
+Example:
+```bash
+./scripts/test-load.sh --domain zero.directory --domain alphaeos.net --duration 30s --threads 4 --connections 64
+```
+
+Manual runs (if you want to run `wrk` directly):
 ```bash
 wrk -t4 -c64 -d<duration> https://zero.directory/
 wrk -t4 -c64 -d<duration> "https://zero.directory/?cache_bust=${RUN_ID}"
@@ -422,7 +416,7 @@ done
 ```
 
 ### Host telemetry during tests
-Collect CPU, memory, and IO metrics during each test window so origin pressure can be correlated with latency.
+Collect CPU, memory, and IO metrics during each test window so origin pressure can be correlated with latency. `test-load.sh` starts and stops telemetry per domain and saves the logs alongside `wrk` output using the same run identifier.
 
 ```bash
 vmstat 1 > "$OUT/vmstat.log" &
@@ -445,15 +439,9 @@ What each tool provides:
 - `iostat`: disk IO latency and queue depth for storage bottlenecks.
 - `sar`: time-series summary across CPU, memory, and network for post-run analysis.
 
-Alternatives and integrated tooling:
-- `top` or `htop` for interactive diagnosis during short tests.
-- `atop` for historical system snapshots with per-process detail.
-- `dstat` for combined CPU/memory/network graphs (if installed).
-- `netdata` or `collectd` when you want continuous dashboards and long-term retention.
-
-If you need repeatable collections, wrap the telemetry start/stop commands in a small script and write outputs into a run directory alongside `wrk` results. This makes re-runs consistent and simplifies comparisons.
-
 ### Apache telemetry
+Apache status and timing logs explain whether latency is caused by PHP worker saturation, slow upstream responses, or client-side behavior. This is especially important when edge caching is bypassed, because the origin becomes the bottleneck. Use these signals to decide whether the next change should be PHP tuning, database work, or cache rule adjustment.
+
 If you need deeper visibility during tests, use Apache modules with restricted access:
 - `mod_status` for `/server-status` (restrict to trusted IPs).
 - Timing fields in `CustomLog` to capture request duration in logs.
@@ -469,9 +457,6 @@ Example timing log format (apply to a test vhost only):
 LogFormat "%h %l %u %t \"%r\" %>s %b %D" timed
 CustomLog ${APACHE_LOG_DIR}/access.log timed
 ```
-
-Why Apache visibility matters:
-Apache’s status and timing logs explain whether latency is caused by PHP worker saturation, slow upstream responses, or client-side behavior. This is especially important when edge caching is bypassed, because the origin becomes the bottleneck. Use these signals to decide whether the next change should be PHP tuning, database work, or cache rule adjustment.
 
 ### Cloudflare analytics
 Cache Analytics is not available on the Free tier. If you are on a paid tier, use it during the same window as load tests to confirm hit ratio and cache-served bytes, and record the snapshot or export results so they can be compared across changes. On Free, rely on edge headers and origin telemetry instead.
@@ -521,12 +506,6 @@ zero.directory:
 - Favor correctness over aggressive caching until plugins and cache behavior stabilize.
 - Start with conservative edge cache eligibility for HTML and focus on asset caching first.
 
-## Future improvements
-These are not required for the current stack but remain valid upgrade paths:
-- Optional microcache at the origin for short-lived anonymous caching. If added, keep TTL in the 1–5 second range, bypass on authenticated cookies and admin paths, and ensure purge hooks fire on publish.
-- Stale-while-revalidate at the edge or origin once purge behavior is proven and you want brief resilience during origin blips.
-- Cache key normalization when query strings drive the cache-bust behavior for specific templates.
-
 ## Plan
 This plan consolidates the methodology and tooling into a single, ordered workflow so each test produces comparable data and a clear decision. It is intentionally staged so that you can stop after any phase with a usable outcome.
 
@@ -545,14 +524,7 @@ Benchmarking tasks:
 1) Run `wrk` with fixed parameters for each domain and scenario (cached and cache-busted).
 2) Collect host telemetry during each run (`vmstat`, `pidstat`, `iostat`, `sar`) and store it alongside `wrk` output.
 3) Capture edge headers during the run window to validate cache behavior (`cf-cache-status`, `age`, `cf-ray`).
-
-### Decision record
-The decision record is the “why” behind each change and is required before applying new tuning. It keeps the plan safe and reversible.
-
-Decision tasks:
-1) Compare baseline vs. post-change results for p50/p95/p99, throughput, and error rate.
-2) Record the observed bottleneck (edge cache misses, PHP, DB, IO, or worker saturation).
-3) Decide: keep, roll back, or refine. Document the decision and the next step.
+Use the Decision record template in the Decisions section to capture outcomes and next steps.
 
 ### Phases
 These phases align to the dependency order (edge → origin → WordPress) and allow targeted improvements without overlapping caches.
@@ -577,6 +549,44 @@ Use this list as a repeatable checklist for each test window:
 5) Review results, compare against baseline, and log the decision.
 6) Apply a single change and re-run the same test matrix.
 7) Record the final outcome and either proceed to the next phase or stop.
+
+## Decisions and postponed items
+This section consolidates decision records, postponed work, future improvements, and tooling alternatives so the execution sections can stay focused on commands and repeatable steps.
+
+### Decision record
+For each change or test, record:
+- Domain, URL, scenario (cached/uncached), and test parameters.
+- Edge headers and any cache analytics snapshot (paid tiers only).
+- Latency percentiles (p50/p95/p99), throughput, and error rate.
+- Origin pressure: CPU, memory, IO, Apache workers.
+- Decision, expected impact, and rollback trigger.
+- Re-test delta.
+
+### Postponed items
+The following items are acknowledged but intentionally postponed so the execution workflow can stabilize before the tooling and data model are refactored:
+- Script design for automated performance runs and baseline comparisons.
+- Data model changes for associating performance results with domain inventory.
+- Cross-document restructuring of `HardenUbuntu.md` and `MULTI.md` for broader audience partitioning.
+
+### Future improvements
+These are not required for the current stack but remain valid upgrade paths:
+- Optional microcache at the origin for short-lived anonymous caching. If added, keep TTL in the 1–5 second range, bypass on authenticated cookies and admin paths, and ensure purge hooks fire on publish.
+- Stale-while-revalidate at the edge or origin once purge behavior is proven and you want brief resilience during origin blips.
+- Cache key normalization when query strings drive the cache-bust behavior for specific templates.
+
+### Alternatives and tooling (CLI-only focus)
+Our environment is remote and CLI-only, so prioritize tools that run from the shell without long-lived services.
+
+Applicable in CLI-only sessions:
+- Load tools: `wrk` (primary), `hey` (simple reports), `ab` (legacy baseline).
+- Telemetry: `vmstat`, `pidstat`, `iostat`, `sar`, plus interactive `top`/`htop`.
+- Short-lived profiling: WP-CLI `profile` and Query Monitor (enable briefly only).
+
+Service-style or heavier alternatives (use only if you want long-running daemons or dashboards):
+- `k6` for scripted scenarios and complex workflows.
+- `atop` for historical snapshots with per-process detail.
+- `dstat` for combined CPU/memory/network views.
+- `netdata` or `collectd` for continuous dashboards and long-term retention.
 
 ## References
 These references provide background on the tools and features used above:
