@@ -311,8 +311,8 @@ Before tuning, capture the current runtime settings so later decisions are ancho
 
 Create a run directory:
 ```bash
-RUN_ID=$(date +%Y%m%d-%H%M%S)
-OUT=/var/tmp/perf-${RUN_ID}
+RUN_ID=$(date +%Y%m%d_%H%M%S)
+OUT=/var/tmp/multiwp/perf_${RUN_ID}
 mkdir -p "$OUT"
 ```
 
@@ -338,18 +338,20 @@ redis-cli INFO > "$OUT/redis_info.txt"
 ### Initial tests
 These sanity checks confirm the stack responds as expected before sustained load. Use low concurrency and short durations so the tests are non-disruptive. Record results in the same run directory as the baseline headers and telemetry.
 
-`test-ini.sh` runs these checks and writes outputs into a run directory. Options:
+`test-load.sh --init` runs these checks and writes outputs into a run directory. Options:
 - `domain` (repeatable, or positional) target domain(s) to test.
 - `duration` short `wrk` duration for the initial run (default is conservative).
 - `threads`, `connections` low-load settings for `wrk`.
-- `run-id` identifier for file naming.
-- `out-dir` output directory (defaults to `/var/tmp/perf-<run-id>-init`).
+- `run-id` identifier for file naming (defaults to `YYYYmmdd_HHMMSS`).
+- `out-dir` output directory (defaults to `/var/tmp/multiwp/perf_<run-id>`).
 - `cache-bust` query parameter name (defaults to `cache_bust`).
 
 Example:
 ```bash
-./scripts/test-ini.sh --domain zero.directory --domain alphaeos.net --duration 10s --threads 2 --connections 16
+./scripts/test-load.sh --init --domain zero.directory --domain alphaeos.net --duration 10s --threads 2 --connections 16 --no-telemetry
 ```
+
+Add `--head` to write header snapshots into the run directory.
 
 Initial tests to run:
 1) **Edge header sanity**: confirm `cf-cache-status`, `age`, and `cf-ray` appear for each target domain.
@@ -388,18 +390,23 @@ sudo apt-get install -y wrk sysstat
 
 Use consistent parameters across runs and record them in the results.
 
-`test-load.sh` runs `wrk` and telemetry together and names outputs so each run is easy to identify. Options:
+`test-load.sh` runs init or load tests and can collect telemetry. Options:
 - `domain` (repeatable, or positional) target domain(s) to test.
+- `init`, `load` select the mode (defaults to `init`).
 - `duration` load duration per run (for example, `30s` or `2m`).
 - `threads`, `connections` for `wrk`.
-- `run-id` identifier for file naming.
-- `out-dir` output directory (defaults to `/var/tmp/perf-<run-id>-load`).
+- `run-id` identifier for file naming (defaults to `YYYYmmdd_HHMMSS`).
+- `out-dir` output directory (defaults to `/var/tmp/multiwp/perf_<run-id>`).
 - `cache-bust` query parameter name (defaults to `cache_bust`).
 - `interval` telemetry sampling interval (seconds).
+- `no-telemetry` disable telemetry collection for this run.
+- `head` write response headers for cached and cache-busted requests.
+
+When `--head` is used, cached headers are saved as `${prefix}_head.txt` and cache-busted headers as `${prefix}_head_bust.txt` in the run directory.
 
 Example:
 ```bash
-./scripts/test-load.sh --domain zero.directory --domain alphaeos.net --duration 30s --threads 4 --connections 64
+./scripts/test-load.sh --load --domain zero.directory --domain alphaeos.net --duration 30s --threads 4 --connections 64
 ```
 
 Manual runs (if you want to run `wrk` directly):
@@ -416,7 +423,7 @@ done
 ```
 
 ### Host telemetry during tests
-Collect CPU, memory, and IO metrics during each test window so origin pressure can be correlated with latency. `test-load.sh` starts and stops telemetry per domain and saves the logs alongside `wrk` output using the same run identifier.
+Collect CPU, memory, and IO metrics during each test window so origin pressure can be correlated with latency. When telemetry is enabled, `test-load.sh` starts and stops telemetry per domain and saves the logs alongside `wrk` output using the same run identifier.
 
 ```bash
 vmstat 1 > "$OUT/vmstat.log" &

@@ -85,6 +85,8 @@ Tables below list the **complete** set of `SECTION` values and expected `Topic` 
 | `WP` | `setup-wp.sh`, `install-site.sh`, `check-wp.sh` | `Install`, `Site`, `Mapping`, `Root`, `Config`, `Routing`, `Security`, `Templates` |
 | `ORCH` | `check-read.sh`, `test-record.sh`, `verify-domain.sh` | `Selection`, `Run`, `Record`, `Results` |
 | `MCP` | `mcp.sh`, `mcp-cf.sh` | `Server`, `Request`, `Response` |
+| `INIT` | `test-load.sh` | `Run`, `Domain` |
+| `LOAD` | `test-load.sh` | `Run`, `Domain` |
 | `TEST` | `test_common.sh`, `test_cli.sh`, `test_cf.sh`, `test_mcp.sh` | `Setup`, `Cases`, `Results` |
 
 #### Script-to-section mapping
@@ -115,6 +117,7 @@ Use this mapping when implementing or refactoring output so every script emits t
 | `verify-domain.sh` | `ORCH` | `Selection`, `Run`, `Results` |
 | `mcp.sh` | `MCP` | `Server`, `Request`, `Response` |
 | `mcp-cf.sh` | `MCP` | `Server`, `Request`, `Response` |
+| `test-load.sh` | `INIT`, `LOAD` | `Run`, `Domain` |
 | `test_common.sh` | `TEST` | `Setup`, `Cases`, `Results` |
 | `test_cli.sh` | `TEST` | `Setup`, `Cases`, `Results` |
 | `test_cf.sh` | `TEST` | `Setup`, `Cases`, `Results` |
@@ -170,6 +173,12 @@ Orchestration scripts combine multiple checks in a single run.
 
 - `test-record.sh` — verification + recording
 - `verify-domain.sh` — verification (read-only)
+
+### Performance and Benchmarking
+
+Performance scripts generate load or collect baseline measurements. They are read-only with respect to configuration but should be used carefully because they can saturate the origin.
+
+- `test-load.sh` — verification (read-only)
 
 ### Check Read
 
@@ -492,7 +501,7 @@ Practical guidance:
 
 ### Read-Only Scripts and Safe Options
 
-The following scripts are read-only by design and do not modify DNS, certificates, Apache configuration, or WordPress data. Read-only scripts: `check-edge.sh`, `check-cf.sh`, `verify-cf-auth.sh`, `check-auth-domains.sh`, `check-server.sh`, `check-origin.sh`, `check-wp.sh`, `verify-domain.sh`. Unit tests: `test_common.sh`, `test_cli.sh`, `test_cf.sh`.
+The following scripts are read-only by design and do not modify DNS, certificates, Apache configuration, or WordPress data. Read-only scripts: `check-edge.sh`, `check-cf.sh`, `verify-cf-auth.sh`, `check-auth-domains.sh`, `check-server.sh`, `check-origin.sh`, `check-wp.sh`, `test-load.sh`, `verify-domain.sh`. Unit tests: `test_common.sh`, `test_cli.sh`, `test_cf.sh`.
 
 Safe options for read-only scripts:
 - `--api` (enables Cloudflare API reads; no writes)
@@ -964,6 +973,43 @@ Common arguments: --ssl-dir, --wp-root, --allow-root, --no-sudo, --help.
 Environment variables:
 `HTTP_TIMEOUT`, `WORDPRESS_ROOT`, `SSL_DIR`, `APACHE_DIR`.
 
+### Performance and Benchmarking Interfaces
+
+These scripts are intended for repeatable benchmarking and sanity checks. They are read-only with respect to configuration, but they generate load and should be run with care on production systems.
+
+#### test-load.sh (verification/investigation)
+
+Purpose:
+- Runs init or sustained load checks with `wrk`, with optional telemetry collection for CPU, memory, IO, and network.
+
+Arguments:
+- One or more domain names, provided positionally or via `--domain` (repeatable).
+
+Options (script-specific):
+ - `--init` or `--load`
+ - `--domain NAME`
+ - `--duration DURATION`
+ - `--threads N`
+ - `--connections N`
+ - `--run-id ID`
+ - `--out-dir DIR`
+ - `--cache-bust PARAM`
+ - `--interval N`
+ - `--no-telemetry`
+ - `--head`
+
+Common arguments: --help.
+
+Environment variables:
+None.
+
+Notes:
+- Defaults are mode-specific: init uses lower concurrency and shorter durations; load uses higher concurrency and longer durations.
+- The default output directory is `/var/tmp/multiwp/perf_<run-id>`.
+- Telemetry is enabled by default; use `--no-telemetry` to disable it.
+- When `--head` is supplied, cached headers are saved as `${prefix}_head.txt` and cache-busted headers as `${prefix}_head_bust.txt`.
+- Telemetry relies on `vmstat`, `pidstat`, `iostat`, and `sar` and writes logs alongside `wrk` output in the run directory.
+
 ## Option Cross-Reference (Alphabetical)
 
 This cross-reference lists options alphabetically and the scripts that implement them. CSV files are exports for future processing; this list is the human-readable view.
@@ -985,38 +1031,48 @@ This cross-reference lists options alphabetically and the scripts that implement
 - --autosite,check-read.sh;check-wp.sh;test-record.sh
 - --bearer,mcp-cf.sh
 - --ca-key,get-cert.sh;test-record.sh;verify-cf-auth.sh
+- --cache-bust,test-load.sh
 - --catalog,mcp-cf.sh
 - --check-ids,check-auth-domains.sh
+- --connections,test-load.sh
 - --create,cloud-dns.sh
 - --date,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 - --dns-provider,onboard-zone.sh
-- --domain,apache-vhost.sh;check-edge.sh;check-origin.sh;check-read.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-domain.sh
+- --domain,apache-vhost.sh;check-edge.sh;check-origin.sh;check-read.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;onboard-zone.sh;rules-cf.sh;test-load.sh;test-record.sh;verify-domain.sh
 - --domains-file,check-auth-domains.sh;check-read.sh;cloud-redirect.sh;cloud-settings.sh;onboard-zone.sh;test-record.sh
 - --downgrade,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 - --dry-run,cloud-redirect.sh;cloud-settings.sh
+- --duration,test-load.sh
 - --email,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
 - --export,rules-cf.sh
 - --force,get-cert.sh
-- --help,apache-vhost.sh;check-auth-domains.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-read.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh;verify-domain.sh
+- --head,test-load.sh
+- --help,apache-vhost.sh;check-auth-domains.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-read.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-load.sh;test-record.sh;verify-cf-auth.sh;verify-domain.sh
 - --hsts,check-edge.sh;test-record.sh;verify-domain.sh
 - --http,apache-vhost.sh
 - --http-timeout,check-edge.sh;test-record.sh;verify-domain.sh
 - --include-ignore,check-read.sh;test-record.sh
+- --init,test-load.sh
 - --input,rules-cf.sh
+- --interval,test-load.sh
 - --ip,onboard-zone.sh
 - --key,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
+- --load,test-load.sh
 - --managed-add-security-headers,cloud-settings.sh
 - --manual,get-cert.sh
 - --min-tls-version,cloud-settings.sh
 - --multisite,check-read.sh;check-wp.sh;test-record.sh
 - --multisite-domain,onboard-zone.sh
 - --no-sudo,check-origin.sh;check-server.sh;check-wp.sh;cloudflare-ips.sh;test-record.sh;verify-domain.sh
+- --no-telemetry,test-load.sh
 - --norecord,cloud-redirect.sh;onboard-zone.sh;test-record.sh
+- --out-dir,test-load.sh
 - --output,cloudflare-ips.sh;rules-cf.sh
 - --portal-url,mcp-cf.sh
 - --raw,check-cf.sh
 - --redirect-url,cloud-redirect.sh;onboard-zone.sh
 - --registrar,onboard-zone.sh
+- --run-id,test-load.sh
 - --singlesite,check-read.sh;check-wp.sh;test-record.sh
 - --site-type,check-read.sh;onboard-zone.sh;test-record.sh
 - --site-types,cloud-settings.sh
@@ -1028,6 +1084,7 @@ This cross-reference lists options alphabetically and the scripts that implement
 - --template,apache-vhost.sh
 - --template-check,check-wp.sh
 - --template-dir,check-wp.sh
+- --threads,test-load.sh
 - --token,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
 - --ufw,cloudflare-ips.sh
 - --update,cloud-dns.sh
@@ -1040,8 +1097,8 @@ This cross-reference lists options alphabetically and the scripts that implement
 
 This cross-reference lists helper scripts and the programs or tests that source them. CSV files are exports for future processing; this list is the human-readable view.
 
-- common.sh: apache-vhost.sh;check-auth-domains.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-read.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;setup-wp.sh;test-record.sh;test_cf.sh;test_cli.sh;test_common.sh;verify-cf-auth.sh;verify-domain.sh
-- cli.sh: apache-vhost.sh;check-auth-domains.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-read.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;test_cli.sh;verify-cf-auth.sh;verify-domain.sh
+- common.sh: apache-vhost.sh;check-auth-domains.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-read.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;setup-wp.sh;test-load.sh;test-record.sh;test_cf.sh;test_cli.sh;test_common.sh;verify-cf-auth.sh;verify-domain.sh
+- cli.sh: apache-vhost.sh;check-auth-domains.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-read.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-load.sh;test-record.sh;test_cli.sh;verify-cf-auth.sh;verify-domain.sh
 - auth.sh: check-auth-domains.sh;check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;test_cf.sh;test_cli.sh;verify-cf-auth.sh
 - mcp.sh: mcp-cf.sh;test_mcp.sh
 
