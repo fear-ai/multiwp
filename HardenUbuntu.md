@@ -403,6 +403,50 @@ sudo apache2ctl configtest
 sudo systemctl reload apache2
 ```
 
+### Apache prefork and global tuning
+This host uses `mpm_prefork` with `mod_php`, so each Apache worker is a full PHP process. That makes concurrency settings and request timeouts the primary controls for CPU and memory pressure. Our tuning goal is to avoid over-committing a small host while keeping enough workers for normal traffic bursts. These are conservative starting values for Ubuntu 24 in this stack.
+
+Prefork tuning (`/etc/apache2/mods-available/mpm_prefork.conf`), current applied values:
+```apache
+<IfModule mpm_prefork_module>
+    StartServers             2
+    MinSpareServers          2
+    MaxSpareServers          4
+    MaxRequestWorkers        6
+    MaxConnectionsPerChild   800
+</IfModule>
+```
+
+Note: `ServerLimit` is not currently set; Apache will use its internal default. If you later raise `MaxRequestWorkers`, set `ServerLimit` to the same value to avoid implicit caps.
+
+Global tuning (`/etc/apache2/apache2.conf`):
+```apache
+Timeout 60
+KeepAlive On
+MaxKeepAliveRequests 100
+KeepAliveTimeout 2
+```
+
+Security posture (`/etc/apache2/conf-available/security.conf`):
+```apache
+ServerTokens Prod
+ServerSignature Off
+TraceEnable Off  # default; keep as-is
+```
+
+Reasons and tradeoffs:
+- Lower `MaxRequestWorkers` prevents CPU and memory thrash when PHP or WordPress requests spike.
+- The current `MaxRequestWorkers 6` is intentionally conservative while benchmarking; raise it only after measuring per-process RSS and available headroom.
+- `MaxConnectionsPerChild 800` helps recycle long-lived PHP workers so memory growth does not accumulate.
+- `Timeout 60` stops slow or stalled clients from occupying scarce prefork workers.
+- `KeepAliveTimeout 2` reduces idle worker time while still allowing short bursts of reuse.
+
+After adjusting, validate and reload:
+```bash
+sudo apache2ctl configtest
+sudo systemctl reload apache2
+```
+
 ### Default vhosts for direct IP traffic
 Default vhosts catch traffic that arrives by IP address or with an unknown `Host` header. Keep `DocumentRoot /var/www/html/construction` so a controlled fallback exists, but use `<Location /> Require all denied </Location>` in both default vhosts to reject requests immediately. This avoids serving content to unexpected hostnames while still keeping a controlled landing page ready if you later choose to allow it.
 

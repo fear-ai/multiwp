@@ -345,6 +345,7 @@ These sanity checks confirm the stack responds as expected before sustained load
 - `run-id` identifier for file naming (defaults to `YYYYmmdd_HHMMSS`).
 - `out-dir` output directory (defaults to `/var/tmp/multiwp/perf_<run-id>`).
 - `cache-bust` query parameter name (defaults to `cache_bust`).
+- `cache` selects cached, bust, or both runs (default: `both`).
 
 Example:
 ```bash
@@ -395,14 +396,26 @@ Use consistent parameters across runs and record them in the results.
 - `init`, `load` select the mode (defaults to `init`).
 - `duration` load duration per run (for example, `30s` or `2m`).
 - `threads`, `connections` for `wrk`.
+- `rate` sets the fixed request rate for `wrk2` (`-R`). `wrk2` is always used; mode defaults are init `threads=1`, `connections=1`, `rate=10` and load `threads=2`, `connections=4`, `rate=20`.
 - `run-id` identifier for file naming (defaults to `YYYYmmdd_HHMMSS`).
 - `out-dir` output directory (defaults to `/var/tmp/multiwp/perf_<run-id>`).
 - `cache-bust` query parameter name (defaults to `cache_bust`).
 - `interval` telemetry sampling interval (seconds).
 - `no-telemetry` disable telemetry collection for this run.
+- `telemetry-full` collects vmstat, pidstat, and iostat in addition to sar.
+- `pidstat` collects only `pidstat -u -C apache2` and skips sar/vmstat/iostat.
 - `head` write response headers for cached and cache-busted requests.
+- `cache` selects cached, bust, or both runs (default: `both`).
+- `report` emit a summary of key wrk metrics after each run.
 
 When `--head` is used, cached headers are saved as `${prefix}_head.txt` and cache-busted headers as `${prefix}_head_bust.txt` in the run directory.
+
+When running `test-load.sh` through an external command runner, use a timeout of at least 60 seconds.
+
+When `--report` is used, the summary always reports `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, and `NOT_200_PCT`, derived from wrk's "Non-2xx or 3xx responses" line.
+Both `--telemetry-full` and `--pidstat` use `pidstat -C apache2`, so Apache CPU summaries align across telemetry modes.
+
+When `--report` is used with telemetry enabled, the summary reports `CPU_TOTAL_PCT_MAX`, `CPU_BUSY_CORES_MAX`, and `LOAD_1_MAX`. With `--telemetry-full`, it also reports `MEM_AVAIL_MB_MIN`, `MEM_AVAIL_MB_AVG`, `MEM_USED_PCT_MAX`, `MEM_USED_PCT_AVG`, `CPU_USER_PCT_MAX`, `CPU_SYSTEM_PCT_MAX`, `CPU_IOWAIT_PCT_MAX`, `CPU_STEAL_PCT_MAX`, `CPU_TOTAL_BIN5_AVG`, `CPU_TOTAL_TREND`, and `LOAD_1_AVG`. With `--pidstat`, it reports `APACHE_CPU_SUM_AVG`, `APACHE_CPU_SUM_MAX`, `APACHE_CPU_SAMPLES`, `APACHE_CPU_SUM_BIN5_AVG`, and `APACHE_CPU_SUM_TREND`.
 
 Example:
 ```bash
@@ -446,6 +459,18 @@ What each tool provides:
 - `iostat`: disk IO latency and queue depth for storage bottlenecks.
 - `sar`: time-series summary across CPU, memory, and network for post-run analysis.
 
+### Test Duration
+Use this section to record how long runs actually take and to explain how to estimate or bound them. `wrk` duration is per run, not total time; a cached + bust run takes roughly 2 × duration plus startup overhead and telemetry shutdown.
+
+Record format:
+- Parameters: `cache`, `duration`, `threads`, `connections`, `telemetry`, `head`.
+- Observed wall time.
+- Notes about delays (for example, DNS, TLS, or slow origin).
+
+Estimation guidance:
+- Cached-only or bust-only: expected wall time ≈ duration + overhead.
+- Cached + bust: expected wall time ≈ 2 × duration + overhead.
+- Overhead grows with telemetry (starting/stopping tools) and with longer domains lists.
 ### Apache telemetry
 Apache status and timing logs explain whether latency is caused by PHP worker saturation, slow upstream responses, or client-side behavior. This is especially important when edge caching is bypassed, because the origin becomes the bottleneck. Use these signals to decide whether the next change should be PHP tuning, database work, or cache rule adjustment.
 

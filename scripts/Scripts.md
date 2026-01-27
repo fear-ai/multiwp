@@ -980,7 +980,7 @@ These scripts are intended for repeatable benchmarking and sanity checks. They a
 #### test-load.sh (verification/investigation)
 
 Purpose:
-- Runs init or sustained load checks with `wrk`, with optional telemetry collection for CPU, memory, IO, and network.
+- Runs init or sustained load checks with `wrk2` and an explicit rate (default per mode), with optional telemetry collection for CPU, memory, IO, and network.
 
 Arguments:
 - One or more domain names, provided positionally or via `--domain` (repeatable).
@@ -991,12 +991,17 @@ Options (script-specific):
  - `--duration DURATION`
  - `--threads N`
  - `--connections N`
+ - `--rate N`
  - `--run-id ID`
  - `--out-dir DIR`
  - `--cache-bust PARAM`
+ - `--cache MODE`
  - `--interval N`
  - `--no-telemetry`
+ - `--telemetry-full`
+ - `--pidstat`
  - `--head`
+ - `--report`
 
 Common arguments: --help.
 
@@ -1005,10 +1010,20 @@ None.
 
 Notes:
 - Defaults are mode-specific: init uses lower concurrency and shorter durations; load uses higher concurrency and longer durations.
+- Defaults are mode-specific and include a fixed rate: init defaults to `threads=1`, `connections=1`, `rate=10`; load defaults to `threads=2`, `connections=4`, `rate=20`.
 - The default output directory is `/var/tmp/multiwp/perf_<run-id>`.
 - Telemetry is enabled by default; use `--no-telemetry` to disable it.
 - When `--head` is supplied, cached headers are saved as `${prefix}_head.txt` and cache-busted headers as `${prefix}_head_bust.txt`.
-- Telemetry relies on `vmstat`, `pidstat`, `iostat`, and `sar` and writes logs alongside `wrk` output in the run directory.
+- `--cache` controls whether cached, cache-busted, or both runs are executed (`both`, `cached`, `bust`).
+- `--telemetry-full` adds `vmstat`, `pidstat`, and `iostat` alongside `sar`; default telemetry collects `sar` only.
+- `--pidstat` is a targeted telemetry mode that collects only `pidstat -u -C apache2`, which is useful for isolating Apache CPU usage during fixed-rate tests.
+- When `--rate` is set, the script uses `wrk2` with `-R` for fixed request rates instead of `wrk`.
+- Both `--telemetry-full` and `--pidstat` use `pidstat -C apache2` so Apache CPU summaries are consistent across modes.
+- `wrk2` is always used and always receives `-R <rate>`, either from `--rate` or from mode defaults.
+- When running `test-load.sh` through an external command runner, use a timeout of at least 60 seconds.
+- Telemetry writes logs alongside `wrk` or `wrk2` output in the run directory. Command dependencies vary by telemetry scope.
+- `--report` emits a per-run summary of `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, and `NOT_200_PCT`.
+- When telemetry is enabled, `--report` emits `CPU_TOTAL_PCT_MAX`, `CPU_BUSY_CORES_MAX`, and `LOAD_1_MAX`; with `--telemetry-full` it also emits `MEM_AVAIL_MB_MIN`, `MEM_AVAIL_MB_AVG`, `MEM_USED_PCT_MAX`, `MEM_USED_PCT_AVG`, `CPU_USER_PCT_MAX`, `CPU_SYSTEM_PCT_MAX`, `CPU_IOWAIT_PCT_MAX`, `CPU_STEAL_PCT_MAX`, `CPU_TOTAL_BIN5_AVG`, `CPU_TOTAL_TREND`, and `LOAD_1_AVG`. With `--pidstat`, `--report` emits `APACHE_CPU_SUM_AVG`, `APACHE_CPU_SUM_MAX`, `APACHE_CPU_SAMPLES`, `APACHE_CPU_SUM_BIN5_AVG`, and `APACHE_CPU_SUM_TREND`.
 
 ## Option Cross-Reference (Alphabetical)
 
@@ -1068,8 +1083,10 @@ This cross-reference lists options alphabetically and the scripts that implement
 - --norecord,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 - --out-dir,test-load.sh
 - --output,cloudflare-ips.sh;rules-cf.sh
+- --pidstat,test-load.sh
 - --portal-url,mcp-cf.sh
 - --raw,check-cf.sh
+- --rate,test-load.sh
 - --redirect-url,cloud-redirect.sh;onboard-zone.sh
 - --registrar,onboard-zone.sh
 - --run-id,test-load.sh
