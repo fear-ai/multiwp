@@ -68,6 +68,14 @@ cf_require_ca_key() {
     fi
 }
 
+auth_var() {
+    kv_file_var "$@"
+}
+
+auth_values() {
+    kv_file_values "$@"
+}
+
 load_cloudflare_auth() {
     local auth_file="${1:-${CF_AUTH_FILE:-$HOME/.config/cloudflare/default.auth}}"
     local prev_account_id="${CF_ACCOUNT_ID-}"
@@ -84,7 +92,7 @@ load_cloudflare_auth() {
     local all_zone_ids=""
 
     if [ -f "$auth_file" ]; then
-        all_zone_ids=$(awk -F= '/^[[:space:]]*CF_ZONE_ID=/{gsub(/^[[:space:]]*CF_ZONE_ID=|["'\'']/, "", $0); print $0}' "$auth_file")
+        all_zone_ids=$(auth_values "$auth_file" CF_ZONE_ID || true)
 
         set -a
         # shellcheck disable=SC1090

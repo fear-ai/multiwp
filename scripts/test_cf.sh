@@ -177,6 +177,11 @@ CF_ACCOUNT_ID="fileaccount"
 CF_ZONE_ID="filezone"
 EOF
 
+echo "== auth_var / auth_values =="
+assert_equal "filetoken" "$(auth_var "$auth_file" CF_API_TOKEN)" "auth_var reads key from file"
+auth_values_out=$(auth_values "$auth_file" CF_ZONE_ID)
+assert_equal "filezone" "$auth_values_out" "auth_values reads repeated key list"
+
 reset_auth_env
 load_cloudflare_auth "$auth_file"
 assert_equal "filetoken" "$CF_API_TOKEN" "load_cloudflare_auth sets token from file"

@@ -71,7 +71,7 @@ CF_AUTH_FILE="$AUTH_FILE"
 DOMAINS_FILE="$DOMAINS_FILE_LOCAL"
 
 AUTH_SOURCE="CF_DOMAINS"
-AUTH_DOMAINS_RAW="$(auth_file_var "$AUTH_FILE" CF_DOMAINS || true)"
+AUTH_DOMAINS_RAW="$(auth_var "$AUTH_FILE" CF_DOMAINS || true)"
 AUTH_DOMAINS=()
 if [ -n "$AUTH_DOMAINS_RAW" ]; then
     if ! parse_comma_list "$AUTH_DOMAINS_RAW" AUTH_DOMAINS "CF_DOMAINS"; then
@@ -80,25 +80,7 @@ if [ -n "$AUTH_DOMAINS_RAW" ]; then
 else
     warn "CF_DOMAINS is empty in $AUTH_FILE"
     AUTH_SOURCE="CF_ZONE"
-    AUTH_ZONE_RAW=$(python3 - "$AUTH_FILE" <<'PY'
-import sys
-
-path = sys.argv[1]
-with open(path, "r") as fh:
-    for line in fh:
-        raw = line.strip()
-        if not raw or raw.startswith("#"):
-            continue
-        if not raw.startswith("CF_ZONE="):
-            continue
-        val = raw.split("=", 1)[1].strip()
-        if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
-            val = val[1:-1]
-        val = val.strip()
-        if val:
-            print(val)
-PY
-)
+    AUTH_ZONE_RAW=$(auth_values "$AUTH_FILE" CF_ZONE || true)
     while read -r zone; do
         [ -n "$zone" ] || continue
         AUTH_DOMAINS+=("$zone")

@@ -21,7 +21,7 @@ Key scope decisions and standards:
 Host validation script design:
 We need a dedicated `check-server.sh` that reports host-level state for Ubuntu, Apache, PHP, and MySQL so the hardening baseline can be validated as consistently as edge and origin checks. The script should be read-only and should group its output into clear sections that map to this document. At minimum, it should:
 - Report OS and kernel versions (`lsb_release`, `uname`).
-- Report IPv6 runtime settings (`sysctl`), plus the contents of `/etc/sysctl.d/99-disable-ipv6.conf` and any netplan IPv6 directives.
+- Report IPv6 runtime settings (`sysctl`), plus the contents of `/etc/sysctl.d/99-disable-ipv6-forward.conf` and any netplan IPv6 directives.
 - Report UFW status, default policies, and the IPv6 toggle in `/etc/default/ufw`.
 - Report Apache version, enabled modules, and vhost layout (`apache2ctl -V`, `-M`, `-S`).
 - Report PHP runtime and OPcache settings.
@@ -266,7 +266,7 @@ sudo netplan apply
 If you need a temporary removal to test impact before editing netplan, you can remove the address directly with `ip addr del`, but that change is not persistent across reboots. When removing addresses, keep a separate SSH session open to prevent lockouts.
 
 ## Disabled IPv6
-If you do not publish AAAA records and do not intend to serve IPv6 directly, disabling IPv6 can reduce the attack surface and simplify firewall policy. The approach is to stop IPv6 address assignment in netplan, disable IPv6 at the kernel level, and (optionally) disable IPv6 handling in UFW so policy remains explicit.
+If you do not publish AAAA records and do not intend to serve IPv6 directly, disabling IPv6 can reduce the attack surface and simplify firewall policy. The approach is to stop IPv6 address assignment in netplan, disable IPv6 at the kernel level, and (optionally) disable IPv6 handling in UFW so policy remains explicit. Netplan `dhcp6` and `accept-ra` both accept boolean values (`true/false` or `yes/no`) and should be set to `no` or `false` for an IPv4-only stance.
 
 Netplan should disable DHCPv6 and router advertisements on the active interface. Update the active file under `/etc/netplan/*.yaml` so the interface has `dhcp6: no` and `accept-ra: no`.
 
@@ -305,14 +305,14 @@ sudo sh -c 'printf "%s\n" \
   "net.ipv6.conf.all.disable_ipv6 = 1" \
   "net.ipv6.conf.default.disable_ipv6 = 1" \
   "net.ipv6.conf.lo.disable_ipv6 = 1" \
-  > /etc/sysctl.d/99-disable-ipv6.conf'
+  > /etc/sysctl.d/99-disable-ipv6-forward.conf'
 sudo sysctl --system
 ```
 
-The spacing in `/etc/sysctl.d/99-disable-ipv6.conf` is flexible (`key = value` and `key=value` are both valid). Use the file above as the canonical location for persistence, then validate syntax and operation:
+The spacing in `/etc/sysctl.d/99-disable-ipv6-forward.conf` is flexible (`key = value` and `key=value` are both valid). Use the file above as the canonical location for persistence, then validate syntax and operation:
 ```bash
-sudo cat /etc/sysctl.d/99-disable-ipv6.conf
-sudo sysctl --system 2>&1 | rg -n "99-disable-ipv6|ipv6|error|invalid"
+sudo cat /etc/sysctl.d/99-disable-ipv6-forward.conf
+sudo sysctl --system 2>&1 | rg -n "99-disable-ipv6-forward|ipv6|error|invalid"
 sudo sysctl -n net.ipv6.conf.all.disable_ipv6
 sudo sysctl -n net.ipv6.conf.default.disable_ipv6
 sudo sysctl -n net.ipv6.conf.lo.disable_ipv6

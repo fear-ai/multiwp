@@ -194,6 +194,19 @@ status=$?
 assert_contains "$output" "FAIL:" "parse_comma_list reports empty token"
 assert_status 1 "$status" "parse_comma_list fails on empty token"
 
+echo "== kv_file_var / kv_file_values =="
+kv_file="$TMP_DIR/kv-file"
+cat <<'EOF' > "$kv_file"
+KEY=first
+KEY=second
+QUOTED="value"
+BLANK=
+EOF
+assert_equal "first" "$(kv_file_var "$kv_file" KEY)" "kv_file_var returns first match"
+assert_equal "value" "$(kv_file_var "$kv_file" QUOTED)" "kv_file_var strips quotes"
+values=$(kv_file_values "$kv_file" KEY)
+assert_equal $'first\nsecond' "$values" "kv_file_values returns all matches"
+
 echo "== warn =="
 output=$(run_subshell warn "test warning")
 assert_contains "$output" "Warning:" "warn prefixes output"

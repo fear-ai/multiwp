@@ -340,8 +340,8 @@ These sanity checks confirm the stack responds as expected before sustained load
 
 `test-load.sh --init` runs these checks and writes outputs into a run directory. Options:
 - `domain` (repeatable, or positional) target domain(s) to test.
-- `duration` short `wrk` duration for the initial run (default is conservative).
-- `threads`, `connections` low-load settings for `wrk`.
+- `duration` short `wrk2` duration for the initial run (default is conservative).
+- `threads`, `connections` low-load settings for `wrk2`.
 - `run-id` identifier for file naming (defaults to `YYYYmmdd_HHMMSS`).
 - `out-dir` output directory (defaults to `/var/tmp/multiwp/perf_<run-id>`).
 - `cache-bust` query parameter name (defaults to `cache_bust`).
@@ -349,7 +349,7 @@ These sanity checks confirm the stack responds as expected before sustained load
 
 Example:
 ```bash
-./scripts/test-load.sh --init --domain zero.directory --domain alphaeos.net --duration 10s --threads 2 --connections 16 --no-telemetry
+./scripts/test-load.sh --init --domain zero.directory --domain alphaeos.net --duration 10s --threads 2 --connections 16 --telemetry=none
 ```
 
 Add `--head` to write header snapshots into the run directory.
@@ -366,24 +366,25 @@ Initial tests to run:
    curl -I "https://zero.directory/"
    curl -I "https://zero.directory/?cache_bust=${RUN_ID}"
    ```
-3) **Low-load wrk sanity**: confirm a short run completes without errors before larger tests.
+3) **Low-load wrk2 sanity**: confirm a short run completes without errors before larger tests.
    ```bash
    DURATION=<set>
    CONCURRENCY=<set>
    THREADS=<set>
-   wrk -t"$THREADS" -c"$CONCURRENCY" -d"$DURATION" https://zero.directory/
-   wrk -t"$THREADS" -c"$CONCURRENCY" -d"$DURATION" "https://zero.directory/?cache_bust=${RUN_ID}"
+   RATE=<set>
+   wrk2 -t"$THREADS" -c"$CONCURRENCY" -d"$DURATION" -R"$RATE" https://zero.directory/
+   wrk2 -t"$THREADS" -c"$CONCURRENCY" -d"$DURATION" -R"$RATE" "https://zero.directory/?cache_bust=${RUN_ID}"
    ```
 4) **Multisite sanity**: run the same low-load test on a multisite domain.
    ```bash
-   wrk -t"$THREADS" -c"$CONCURRENCY" -d"$DURATION" https://alphaeos.net/
-   wrk -t"$THREADS" -c"$CONCURRENCY" -d"$DURATION" "https://alphaeos.net/?cache_bust=${RUN_ID}"
+   wrk2 -t"$THREADS" -c"$CONCURRENCY" -d"$DURATION" -R"$RATE" https://alphaeos.net/
+   wrk2 -t"$THREADS" -c"$CONCURRENCY" -d"$DURATION" -R"$RATE" "https://alphaeos.net/?cache_bust=${RUN_ID}"
    ```
 
 ### Load generation
-We use `wrk` for sustained load testing because it delivers stable latency distributions and high throughput with low overhead. It is a simple tool for GET/HEAD traffic and is ideal for repeated comparisons across configurations.
+We use `wrk2` for sustained load testing because it supports a fixed request rate and makes comparisons between configuration changes more reliable. The fixed-rate model avoids unbounded client pressure and makes it easier to attribute changes in latency and CPU to the configuration change rather than to changing load. `wrk` remains useful when you explicitly want to push the origin as fast as it can go, but the default workflow in this repository uses `wrk2`.
 
-Install `wrk` and the sysstat tooling for telemetry:
+Install sysstat for telemetry. `wrk2` is not packaged in Ubuntu by default and is typically built from source; `wrk` is available from APT if you want the unbounded variant for quick manual checks.
 ```bash
 sudo apt-get update
 sudo apt-get install -y wrk sysstat
@@ -395,52 +396,141 @@ Use consistent parameters across runs and record them in the results.
 - `domain` (repeatable, or positional) target domain(s) to test.
 - `init`, `load` select the mode (defaults to `init`).
 - `duration` load duration per run (for example, `30s` or `2m`).
-- `threads`, `connections` for `wrk`.
+- `threads`, `connections` for `wrk2`.
 - `rate` sets the fixed request rate for `wrk2` (`-R`). `wrk2` is always used; mode defaults are init `threads=1`, `connections=1`, `rate=10` and load `threads=2`, `connections=4`, `rate=20`.
 - `run-id` identifier for file naming (defaults to `YYYYmmdd_HHMMSS`).
 - `out-dir` output directory (defaults to `/var/tmp/multiwp/perf_<run-id>`).
 - `cache-bust` query parameter name (defaults to `cache_bust`).
 - `interval` telemetry sampling interval (seconds).
-- `no-telemetry` disable telemetry collection for this run.
-- `telemetry-full` collects vmstat, pidstat, and iostat in addition to sar.
-- `pidstat` collects only `pidstat -u -C apache2` and skips sar/vmstat/iostat.
+- `telemetry` selects telemetry tools (`sar`, `pidstat`, `vmstat`, `iostat`, `all`, `none`), with comma lists allowed.
 - `head` write response headers for cached and cache-busted requests.
 - `cache` selects cached, bust, or both runs (default: `both`).
-- `report` emit a summary of key wrk metrics after each run.
+- `report` emit a summary of key wrk2 metrics after each run.
 
 When `--head` is used, cached headers are saved as `${prefix}_head.txt` and cache-busted headers as `${prefix}_head_bust.txt` in the run directory.
 
 When running `test-load.sh` through an external command runner, use a timeout of at least 60 seconds.
 
-When `--report` is used, the summary always reports `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, and `NOT_200_PCT`, derived from wrk's "Non-2xx or 3xx responses" line.
-Both `--telemetry-full` and `--pidstat` use `pidstat -C apache2`, so Apache CPU summaries align across telemetry modes.
+When `--report` is used, the summary always reports `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, and `NOT_200_PCT`, derived from wrk2's "Non-2xx or 3xx responses" line.
 
-When `--report` is used with telemetry enabled, the summary reports `CPU_TOTAL_PCT_MAX`, `CPU_BUSY_CORES_MAX`, and `LOAD_1_MAX`. With `--telemetry-full`, it also reports `MEM_AVAIL_MB_MIN`, `MEM_AVAIL_MB_AVG`, `MEM_USED_PCT_MAX`, `MEM_USED_PCT_AVG`, `CPU_USER_PCT_MAX`, `CPU_SYSTEM_PCT_MAX`, `CPU_IOWAIT_PCT_MAX`, `CPU_STEAL_PCT_MAX`, `CPU_TOTAL_BIN5_AVG`, `CPU_TOTAL_TREND`, and `LOAD_1_AVG`. With `--pidstat`, it reports `APACHE_CPU_SUM_AVG`, `APACHE_CPU_SUM_MAX`, `APACHE_CPU_SAMPLES`, `APACHE_CPU_SUM_BIN5_AVG`, and `APACHE_CPU_SUM_TREND`.
+When `--report` is used with telemetry enabled, the summary reports `CPU_TOTAL_PCT_MAX`, `CPU_BUSY_CORES_MAX`, and `LOAD_1_MAX` if `sar` is selected. If telemetry includes `sar` plus any other tool, it also reports `MEM_AVAIL_MB_MIN`, `MEM_AVAIL_MB_AVG`, `MEM_USED_PCT_MAX`, `MEM_USED_PCT_AVG`, `CPU_USER_PCT_MAX`, `CPU_SYSTEM_PCT_MAX`, `CPU_IOWAIT_PCT_MAX`, `CPU_STEAL_PCT_MAX`, `CPU_TOTAL_BIN5_AVG`, `CPU_TOTAL_TREND`, and `LOAD_1_AVG`. If telemetry includes `pidstat`, it reports `APACHE_CPU_SUM_AVG`, `APACHE_CPU_SUM_MAX`, `APACHE_CPU_SAMPLES`, `APACHE_CPU_SUM_BIN5_AVG`, and `APACHE_CPU_SUM_TREND`.
+
+### Run metadata file
+Each perf run directory should include a `run.param` file with the run parameters and time bounds. This file is intended to make post-processing and correlation reliable without relying on filename conventions. The format is `KEY: value` with one entry per line so it can be parsed by simple tooling.
+
+We use UTC internally for time bounds to match Cloudflare and Apache access logs, and we also record local time and timezone for operator context. Timestamps use second resolution and a trailing `Z` in UTC. A small log padding value is recorded so the same correlation window can be reused later without guessing.
+
+Required fields (all runs):
+- `HOSTNAME`, `ORIGIN_IPV4`
+- `RUN_ID`, `KIND` (`idle` or `load`), `DOMAIN`, `MODE`, `CACHE_MODE`
+- `UTC_START`, `UTC_END`
+- `LOCAL_TZ`, `LOCAL_OFFSET`, `LOCAL_START`, `LOCAL_END`
+- `LOG_PAD_SEC`
+- `SCRIPT_EXIT`
+
+Load fields (only when load tools run):
+- `RATE`, `THREADS`, `CONNECTIONS`, `DURATION`
+- `LOAD_TOOL`, `LOAD_CMD`
+- `LOAD_EXIT`
+
+Header fields (only when `--head` is used):
+- `HEAD_CMD`
+- `HEAD_EXIT`
+
+Telemetry fields (only when telemetry runs):
+- `TELEMETRY`, `TELEMETRY_SCOPE`, `TELEMETRY_INTERVAL_SEC`
+- `SAR_CMD`, `PIDSTAT_CMD`, `VMSTAT_CMD`, `IOSTAT_CMD` (only for the tools that actually ran)
+
+Rationale:
+- `SCRIPT_EXIT`, `LOAD_EXIT`, and `HEAD_EXIT` tell us whether the run produced valid output without assuming that every tool was enabled. Telemetry exit status is postponed because those processes are intentionally stopped and report signal-based exits that look like failures.
+- Recording both parameter variables and the full command lines makes the metadata self-documenting even when arguments are derived from defaults.
+- UTC-first timestamps avoid ambiguous log correlations; local timestamps preserve operator context.
+
+Postponed items (record here but do not implement yet):
+- Telemetry exit status and stop signals (`SAR_EXIT`, `PIDSTAT_EXIT`, etc.) because signal-based stops make a raw exit code misleading.
+- Sub-run labels for cached/bust runs when `CACHE_MODE=both`; for now we correlate via timestamps only.
+- Cache-bust value and parameter name (explicitly omitted unless a future workflow requires it).
+- Automated log collection and log slicing with `LOG_PAD_SEC`; this is planned but not active.
 
 Example:
 ```bash
 ./scripts/test-load.sh --load --domain zero.directory --domain alphaeos.net --duration 30s --threads 4 --connections 64
 ```
 
-Manual runs (if you want to run `wrk` directly):
+Manual runs (if you want to run `wrk2` directly):
+
+### Log Formats
+This section captures the log and metadata conventions for performance runs. The goal is to make every run self-contained and reproducible, and to make later correlation possible even if filenames are copied elsewhere. The conventions apply to scripted runs and to manual runs that follow the same layout.
+
+#### Run directory layout
+Each run writes to a single directory named by the run identifier. The directory should contain the raw tool output, the run metadata file, and (optionally) a synthesized summary.
+
+- Run directory: `/var/tmp/multiwp/perf_<RUN_ID>`
+- Metadata: `run.param`
+- Raw output: `head*.txt`, `wrk*.txt`, telemetry logs (`sar.log`, `pidstat.log`, `vmstat.log`, `iostat.log`)
+- Summary: `report.txt` (only when `--report` is used)
+
+Avoid embedding cache mode or load type in the directory name. We prefer a single run directory that contains all cached and cache-busted results, and we capture those details in `run.param` instead. This keeps filenames stable and avoids accidental mismatches when runs are copied or compared.
+
+#### File naming rules
+Header and load outputs follow a consistent naming pattern so tools can be found without parsing the metadata file.
+
+- `head.txt` and `head_bust.txt` for cached and cache-busted headers.
+- `wrk.txt` and `wrk_bust.txt` for cached and cache-busted load runs.
+- When `--cache` is not `both`, only the applicable file is written.
+- Telemetry logs retain the tool name (for example, `sar.log` and `pidstat.log`) so they remain usable outside the script.
+
+The suffix `_bust` is the only cache-specific marker in filenames. All other mode or run context is captured in `run.param`.
+
+#### Metadata file format
+The `run.param` file is the authoritative record of a run. It is intentionally line-oriented so it can be parsed with basic tooling (shell, `awk`, Python) without requiring JSON or YAML parsing.
+
+- Format: `KEY: value`, one entry per line.
+- Keys are uppercase with underscores and avoid spaces.
+- Values are recorded exactly as used, including derived defaults.
+
+Required fields are listed in the Run metadata file section above and are expected for every run. When a tool does not run, its command and exit fields are omitted so the metadata reflects what actually happened.
+
+#### Time format and log correlation
+We use UTC for all time bounds because Cloudflare and Apache logs are recorded in UTC by default, and it simplifies cross-system correlation.
+
+- UTC timestamps end with `Z` and are recorded at second resolution.
+- Local time and timezone are recorded for operator context.
+- `LOG_PAD_SEC` captures the correlation padding window so log slicing can be repeated later.
+
+This design avoids relying on filesystem timestamps, which can drift when files are copied or rotated.
+
+#### Telemetry selection and reporting
+Telemetry selection is driven by `--telemetry`. The metadata file records:
+
+- The selected telemetry list (for example, `sar,pidstat`).
+- The sample interval.
+- The exact command line for each tool that ran.
+
+The summary report (`report.txt`) is optional and is derived from raw files; it should never replace the raw tool output. The report is intended for quick triage, while the raw logs are the source of truth for deeper analysis.
+
+#### Cache handling and run modes
+When `--cache=both` is selected, the script performs two runs and writes two files (`*_bust.txt` and the cached base name). For single-cache modes, only one file is written, and the cache mode is recorded in `run.param`.
+
+This approach keeps the file naming stable while still making cache behavior explicit in metadata. It also ensures the run directory remains the single source of truth for that run, regardless of how many cache variants were executed.
 ```bash
-wrk -t4 -c64 -d<duration> https://zero.directory/
-wrk -t4 -c64 -d<duration> "https://zero.directory/?cache_bust=${RUN_ID}"
+wrk2 -t4 -c64 -d<duration> -R<rate> https://zero.directory/
+wrk2 -t4 -c64 -d<duration> -R<rate> "https://zero.directory/?cache_bust=${RUN_ID}"
 ```
 
 ```bash
 for d in alphaeos.net avtranscript.com recomp.one talkdao.org; do
-  wrk -t4 -c64 -d<duration> "https://$d/"
-  wrk -t4 -c64 -d<duration> "https://$d/?cache_bust=${RUN_ID}"
+  wrk2 -t4 -c64 -d<duration> -R<rate> "https://$d/"
+  wrk2 -t4 -c64 -d<duration> -R<rate> "https://$d/?cache_bust=${RUN_ID}"
 done
 ```
 
 ### Host telemetry during tests
-Collect CPU, memory, and IO metrics during each test window so origin pressure can be correlated with latency. When telemetry is enabled, `test-load.sh` starts and stops telemetry per domain and saves the logs alongside `wrk` output using the same run identifier.
+Collect CPU, memory, and IO metrics during each test window so origin pressure can be correlated with latency. When telemetry is enabled, `test-load.sh` starts and stops telemetry per domain and saves the logs alongside `wrk2` output using the same run identifier.
 
 ```bash
 vmstat 1 > "$OUT/vmstat.log" &
-pidstat -ru -p $(pgrep -d, -x apache2) 1 > "$OUT/pidstat-apache.log" &
+pidstat -ru -C apache2 1 > "$OUT/pidstat-apache.log" &
 iostat -xz 1 > "$OUT/iostat.log" &
 sar -u -r -n DEV 1 > "$OUT/sar.log" &
 ```
@@ -459,8 +549,32 @@ What each tool provides:
 - `iostat`: disk IO latency and queue depth for storage bottlenecks.
 - `sar`: time-series summary across CPU, memory, and network for post-run analysis.
 
+### Load & Telemetry Tools
+The load and telemetry tools we rely on come from distinct projects and they emit different formats. This matters for correlation and post-processing, so we record the origin, scope, and output shape here. All of the tools listed below are open source.
+
+**Load generation**
+`wrk` and `wrk2` are C-based HTTP load generators derived from the original `wrk` codebase. `wrk2` adds fixed-rate scheduling to prevent coordinated omission and to keep requests/sec stable across runs. Both tools emit plain-text output with no timestamps, which means that correlation with system logs relies on explicit start/end timestamps recorded by the test harness.
+
+Key arguments:
+- `wrk`: `-t` (threads), `-c` (connections), `-d` (duration). It runs as fast as possible.
+- `wrk2`: `-t` (threads), `-c` (connections), `-d` (duration), `-R` (rate). It requires an explicit rate.
+
+**Process and system telemetry**
+`pidstat` and `sar` are part of the sysstat suite. `pidstat` reports per-process CPU and memory, while `sar` reports system-wide CPU, memory, load, and network. `vmstat` and `iostat` are lightweight system monitors commonly installed with `procps` and `sysstat`; they provide fast, low-overhead summaries of CPU, memory, and storage latency.
+
+Key arguments and format notes:
+- `pidstat`: `-u` (CPU), `-r` (memory), `-C <name>` (filter by command). Output is time-stamped and split into CPU and memory sections.
+- `sar`: `-u` (CPU), `-r` (memory), `-n DEV` (network), `-q` (load). Output is time-stamped and sectioned by resource type.
+- `vmstat`: interval only (for example, `vmstat 1`), no timestamps by default; the interval and line order imply time progression.
+- `iostat`: `-xz` (extended stats and utilization), optional `-t` if you need explicit timestamps. Without `-t`, output is block-based with time implied by interval.
+
+Overlap and uniqueness:
+- `vmstat` and `sar` both report CPU and memory, but `sar` is easier for time-series parsing and aggregation.
+- `pidstat` is the only tool that attributes CPU/memory to a specific process, which is essential for separating Apache from MySQL.
+- `iostat` is the only tool that provides queue depth and device latency metrics, which are required to identify storage bottlenecks.
+
 ### Test Duration
-Use this section to record how long runs actually take and to explain how to estimate or bound them. `wrk` duration is per run, not total time; a cached + bust run takes roughly 2 × duration plus startup overhead and telemetry shutdown.
+Use this section to record how long runs actually take and to explain how to estimate or bound them. `wrk2` duration is per run, not total time; a cached + bust run takes roughly 2 × duration plus startup overhead and telemetry shutdown.
 
 Record format:
 - Parameters: `cache`, `duration`, `threads`, `connections`, `telemetry`, `head`.
@@ -553,8 +667,8 @@ Baseline tasks:
 The benchmarking phase runs reproducible tests against cached and uncached scenarios while capturing host telemetry. The intent is to measure both external experience (latency/throughput/errors) and origin pressure (CPU, memory, IO).
 
 Benchmarking tasks:
-1) Run `wrk` with fixed parameters for each domain and scenario (cached and cache-busted).
-2) Collect host telemetry during each run (`vmstat`, `pidstat`, `iostat`, `sar`) and store it alongside `wrk` output.
+1) Run `wrk2` with fixed parameters for each domain and scenario (cached and cache-busted).
+2) Collect host telemetry during each run (`vmstat`, `pidstat`, `iostat`, `sar`) and store it alongside `wrk2` output.
 3) Capture edge headers during the run window to validate cache behavior (`cf-cache-status`, `age`, `cf-ray`).
 Use the Decision record template in the Decisions section to capture outcomes and next steps.
 
@@ -576,7 +690,7 @@ Phase 3: WordPress object caching
 Use this list as a repeatable checklist for each test window:
 1) Freeze changes and record a backup (multisite and zero.directory).
 2) Create a run directory and capture baseline settings and headers.
-3) Run cached and uncached `wrk` tests with fixed parameters.
+3) Run cached and uncached `wrk2` tests with fixed parameters.
 4) Collect host telemetry during each run and save outputs.
 5) Review results, compare against baseline, and log the decision.
 6) Apply a single change and re-run the same test matrix.
@@ -610,7 +724,7 @@ These are not required for the current stack but remain valid upgrade paths:
 Our environment is remote and CLI-only, so prioritize tools that run from the shell without long-lived services.
 
 Applicable in CLI-only sessions:
-- Load tools: `wrk` (primary), `hey` (simple reports), `ab` (legacy baseline).
+- Load tools: `wrk2` (primary), `wrk` (unbounded), `hey` (simple reports), `ab` (legacy baseline).
 - Telemetry: `vmstat`, `pidstat`, `iostat`, `sar`, plus interactive `top`/`htop`.
 - Short-lived profiling: WP-CLI `profile` and Query Monitor (enable briefly only).
 

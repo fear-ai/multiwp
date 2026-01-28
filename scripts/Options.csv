@@ -50,12 +50,10 @@ Option,Scripts
 --multisite,check-read.sh;check-wp.sh;test-record.sh
 --multisite-domain,onboard-zone.sh
 --no-sudo,check-origin.sh;check-server.sh;check-wp.sh;cloudflare-ips.sh;test-record.sh;verify-domain.sh
---no-telemetry,test-load.sh
+--telemetry,test-load.sh
 --norecord,cloud-redirect.sh;onboard-zone.sh;test-record.sh
---telemetry-full,test-load.sh
 --out-dir,test-load.sh
 --output,cloudflare-ips.sh;rules-cf.sh
---pidstat,test-load.sh
 --portal-url,mcp-cf.sh
 --raw,check-cf.sh
 --rate,test-load.sh

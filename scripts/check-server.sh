@@ -63,7 +63,7 @@ show_file_lines() {
         warn "File not found: $file"
         return 0
     fi
-    if ! grep -nE "$pattern" "$file" || true; then
+    if ! grep -nE "$pattern" "$file"; then
         warn "No matches for ${pattern} in $file"
     fi
 }
@@ -92,14 +92,18 @@ fi
 show_file_lines "sshd_config ports" /etc/ssh/sshd_config "^[[:space:]]*Port[[:space:]]+"
 
 section "SERVER" "Network"
-show_file_lines "sysctl overrides" /etc/sysctl.d/99-disable-ipv6.conf "^net\\.ipv6\\.conf"
+if [ -f /etc/sysctl.d/99-disable-ipv6-forward.conf ]; then
+    show_file_lines "sysctl overrides" /etc/sysctl.d/99-disable-ipv6-forward.conf "^net\\.ipv6\\.conf"
+else
+    show_file_lines "sysctl overrides" /etc/sysctl.d/99-disable-ipv6.conf "^net\\.ipv6\\.conf"
+fi
 for key in net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6 net.ipv6.conf.lo.disable_ipv6 net.ipv6.conf.all.accept_ra net.ipv6.conf.default.accept_ra; do
     value=$(sysctl -n "$key" 2>/dev/null || true)
     echo "$key = ${value:-<unknown>}"
 done
 if ls /etc/netplan/*.yaml >/dev/null 2>&1; then
     echo "netplan IPv6 entries:"
-    if ! grep -nE "accept-ra|dhcp6|ipv6|addresses" /etc/netplan/*.yaml 2>/dev/null || true; then
+    if ! grep -nE "accept-ra|dhcp6|ipv6|addresses" /etc/netplan/*.yaml 2>/dev/null; then
         warn "No IPv6 directives found in netplan files"
     fi
 else
@@ -126,7 +130,12 @@ fi
 
 section "SERVER" "Redis"
 if command -v redis-cli >/dev/null 2>&1; then
-    show_cmd "redis ping" redis-cli ping
+    echo "redis ping:"
+    if redis-cli ping; then
+        :
+    else
+        status_info "Redis not running (expected if disabled)"
+    fi
 else
     warn "redis-cli is not installed"
 fi

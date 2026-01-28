@@ -301,7 +301,7 @@ EOF
 }
 
 
-auth_file_var() {
+kv_file_var() {
     local path="$1"
     local key="$2"
     [ -n "$path" ] && [ -n "$key" ] || return 1
@@ -313,6 +313,25 @@ auth_file_var() {
             print $0;
             exit
         }' "$path"
+}
+
+kv_file_values() {
+    local path="$1"
+    local key="$2"
+    [ -n "$path" ] && [ -n "$key" ] || return 1
+    [ -f "$path" ] || return 1
+    awk -F= -v k="$key" '
+        $0 ~ "^[[:space:]]*"k"[[:space:]]*=" {
+            sub("^[[:space:]]*"k"[[:space:]]*=", "", $0);
+            gsub(/["'\''"]/, "", $0);
+            if ($0 != "") {
+                print $0;
+            }
+        }' "$path"
+}
+
+auth_file_var() {
+    kv_file_var "$@"
 }
 
 load_dns_redirects() {

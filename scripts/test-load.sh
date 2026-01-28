@@ -22,8 +22,12 @@ CACHE_BUST_PARAM="cache_bust"
 CACHE_MODE="both"
 INTERVAL=1
 MODE="init"
-TELEMETRY_MODE="true"
-TELEMETRY_SCOPE="sar"
+TELEMETRY_LIST="sar"
+USE_SAR=false
+USE_PIDSTAT=false
+USE_VMSTAT=false
+USE_IOSTAT=false
+TELEMETRY_DETAIL=false
 MODE_SET=false
 SET_DURATION=false
 SET_THREADS=false
@@ -51,17 +55,14 @@ Options:
   --cache-bust PARAM  Cache-bust query parameter name (default: cache_bust)
   --cache MODE  Run cached, bust, or both (default: both; values: both|cached|bust)
   --interval N  Telemetry interval in seconds (default: 1)
-  --no-telemetry  Disable system telemetry for this run
-  --telemetry-full  Collect vmstat, pidstat, and iostat in addition to sar (sar is always collected)
-  --pidstat  Collect pidstat only (apache2 CPU), skipping sar/vmstat/iostat
+  --telemetry LIST  Telemetry tools (default: sar; values: sar,pidstat,vmstat,iostat,all,none)
   --head  Write response headers for cached and cache-busted requests
   --report  Emit summary metrics after each wrk run
   --help  Show this help
 
 Notes:
   - wrk2 is always used; a rate is always applied (default per mode).
-  - Telemetry is enabled by default; disable it with --no-telemetry.
-  - --pidstat is a focused telemetry mode and skips sar/vmstat/iostat.
+  - Telemetry defaults to sar; override with --telemetry=none or a comma list.
   - When running through an external command runner, use a timeout of at least 60 seconds.
   - Output files include the domain and run ID for easy correlation.
 EOF
@@ -156,11 +157,17 @@ while getopts ":-:" opt; do
                     INTERVAL="${!OPTIND}"
                     OPTIND=$((OPTIND+1))
                     ;;
-                no-telemetry) TELEMETRY_MODE="false" ;;
-                telemetry-full) TELEMETRY_SCOPE="full" ;;
-                pidstat) TELEMETRY_SCOPE="pidstat" ;;
+                telemetry=*) TELEMETRY_LIST="${OPTARG#*=}" ;;
+                telemetry)
+                    [ -n "${!OPTIND-}" ] || err "--telemetry requires a value"
+                    TELEMETRY_LIST="${!OPTIND}"
+                    OPTIND=$((OPTIND+1))
+                    ;;
                 head) HEAD_MODE="true" ;;
                 report) REPORT_MODE="true" ;;
+                no-telemetry|telemetry-full|pidstat)
+                    err "--${OPTARG} removed; use --telemetry=none or --telemetry=all"
+                    ;;
                 *)
                     if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
                         :
@@ -201,23 +208,67 @@ fi
 
 WRK_BIN="wrk2"
 
-if [ "$TELEMETRY_MODE" = "true" ]; then
-    case "$TELEMETRY_SCOPE" in
-        full)
-            require_cmds "$WRK_BIN" vmstat pidstat iostat sar python3
+parse_telemetry_list() {
+    local list="$1"
+    local expanded=""
+    local item
+
+    case "$list" in
+        none)
+            USE_SAR=false
+            USE_PIDSTAT=false
+            USE_VMSTAT=false
+            USE_IOSTAT=false
+            TELEMETRY_DETAIL=false
+            return
             ;;
-        pidstat)
-            require_cmds "$WRK_BIN" pidstat python3
-            ;;
-        sar)
-            require_cmds "$WRK_BIN" sar python3
+        all)
+            expanded="sar,pidstat,vmstat,iostat"
             ;;
         *)
-            err "--telemetry scope must be one of: sar, full, pidstat"
+            expanded="$list"
             ;;
     esac
-else
-    require_cmds "$WRK_BIN"
+
+    USE_SAR=false
+    USE_PIDSTAT=false
+    USE_VMSTAT=false
+    USE_IOSTAT=false
+
+    IFS=',' read -r -a items <<<"$expanded"
+    for item in "${items[@]}"; do
+        case "$item" in
+            sar) USE_SAR=true ;;
+            pidstat) USE_PIDSTAT=true ;;
+            vmstat) USE_VMSTAT=true ;;
+            iostat) USE_IOSTAT=true ;;
+            none) err "--telemetry=none cannot be combined with other values" ;;
+            *) err "--telemetry invalid value: $item" ;;
+        esac
+    done
+    TELEMETRY_DETAIL=false
+    if $USE_SAR && { $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT; }; then
+        TELEMETRY_DETAIL=true
+    fi
+}
+
+parse_telemetry_list "$TELEMETRY_LIST"
+
+require_cmds "$WRK_BIN"
+if $USE_SAR; then
+    require_cmds sar
+fi
+if $USE_PIDSTAT; then
+    require_cmds pidstat
+fi
+if $USE_VMSTAT; then
+    require_cmds vmstat
+fi
+if $USE_IOSTAT; then
+    require_cmds iostat
+fi
+if [ "$REPORT_MODE" = "true" ] && { $USE_SAR || $USE_PIDSTAT; }; then
+    require_cmds python3
 fi
 
 if [ "$HEAD_MODE" = "true" ]; then
@@ -245,8 +296,7 @@ kv "RATE" "${RATE:-na}"
 kv "WRK_BIN" "$WRK_BIN"
 kv "CACHE" "$CACHE_MODE"
 kv "INTERVAL" "$INTERVAL"
-kv "TELEMETRY" "$TELEMETRY_MODE"
-kv "TELEMETRY_SCOPE" "$TELEMETRY_SCOPE"
+kv "TELEMETRY" "$TELEMETRY_LIST"
 kv "HEAD" "$HEAD_MODE"
 kv "REPORT" "$REPORT_MODE"
 
@@ -572,7 +622,7 @@ summarize_sar() {
     section "PERF" "Telemetry"
     kv "DOMAIN" "$domain"
     kv "CACHE" "$cache"
-    if [ "$TELEMETRY_SCOPE" = "full" ]; then
+    if [ "$TELEMETRY_DETAIL" = "true" ]; then
         kv "MEM_AVAIL_MB_MIN" "${mem_avail_mb_min:-na}"
         kv "MEM_AVAIL_MB_AVG" "${mem_avail_mb_avg:-na}"
         kv "MEM_USED_PCT_MAX" "${mem_used_pct_max:-na}"
@@ -658,32 +708,27 @@ summarize_pidstat() {
 start_telemetry() {
     local prefix="$1"
 
-    case "$TELEMETRY_SCOPE" in
-        full)
-            vmstat "$INTERVAL" > "$OUT_DIR/${prefix}_vmstat.log" &
-            VMSTAT_PID=$!
-            pidstat -ru -C apache2 "$INTERVAL" > "$OUT_DIR/${prefix}_pidstat.log" &
-            PIDSTAT_PID=$!
-            iostat -xz "$INTERVAL" > "$OUT_DIR/${prefix}_iostat.log" &
-            IOSTAT_PID=$!
-            sar -u -r -n DEV -q "$INTERVAL" > "$OUT_DIR/${prefix}_sar.log" &
-            SAR_PID=$!
-            ;;
-        pidstat)
-            VMSTAT_PID=""
-            IOSTAT_PID=""
-            SAR_PID=""
-            pidstat -u -C apache2 "$INTERVAL" > "$OUT_DIR/${prefix}_pidstat.log" &
-            PIDSTAT_PID=$!
-            ;;
-        sar)
-            VMSTAT_PID=""
-            PIDSTAT_PID=""
-            IOSTAT_PID=""
-            sar -u -r -n DEV -q "$INTERVAL" > "$OUT_DIR/${prefix}_sar.log" &
-            SAR_PID=$!
-            ;;
-    esac
+    VMSTAT_PID=""
+    PIDSTAT_PID=""
+    IOSTAT_PID=""
+    SAR_PID=""
+
+    if $USE_VMSTAT; then
+        vmstat "$INTERVAL" > "$OUT_DIR/${prefix}_vmstat.log" &
+        VMSTAT_PID=$!
+    fi
+    if $USE_PIDSTAT; then
+        pidstat -ru -C apache2 "$INTERVAL" > "$OUT_DIR/${prefix}_pidstat.log" &
+        PIDSTAT_PID=$!
+    fi
+    if $USE_IOSTAT; then
+        iostat -xz "$INTERVAL" > "$OUT_DIR/${prefix}_iostat.log" &
+        IOSTAT_PID=$!
+    fi
+    if $USE_SAR; then
+        sar -u -r -n DEV -q "$INTERVAL" > "$OUT_DIR/${prefix}_sar.log" &
+        SAR_PID=$!
+    fi
 }
 
 stop_telemetry() {
@@ -701,7 +746,7 @@ for domain in "${DOMAINS[@]}"; do
 
     label=$(echo "$domain" | tr '.-' '__')
     prefix="${label}_${RUN_ID}"
-    if [ "$TELEMETRY_MODE" = "true" ]; then
+    if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT; then
         start_telemetry "$prefix"
     fi
 
@@ -726,10 +771,11 @@ for domain in "${DOMAINS[@]}"; do
         "${wrk_cmd_cached[@]}" "$base_url" > "$OUT_DIR/${prefix}_wrk.txt"
         check_expected_file "$OUT_DIR/${prefix}_wrk.txt" "wrk output (cached)"
         summarize_wrk "$domain" "cached" "$OUT_DIR/${prefix}_wrk.txt"
-        if [ "$REPORT_MODE" = "true" ] && [ "$TELEMETRY_MODE" = "true" ]; then
-            if [ "$TELEMETRY_SCOPE" = "pidstat" ]; then
+        if [ "$REPORT_MODE" = "true" ]; then
+            if $USE_PIDSTAT; then
                 summarize_pidstat "$domain" "cached" "$OUT_DIR/${prefix}_pidstat.log"
-            elif [ "$TELEMETRY_SCOPE" = "sar" ] || [ "$TELEMETRY_SCOPE" = "full" ]; then
+            fi
+            if $USE_SAR; then
                 summarize_sar "$domain" "cached" "$OUT_DIR/${prefix}_sar.log"
             fi
         fi
@@ -738,16 +784,17 @@ for domain in "${DOMAINS[@]}"; do
         "${wrk_cmd_bust[@]}" "$bust_url" > "$OUT_DIR/${prefix}_wrk_bust.txt"
         check_expected_file "$OUT_DIR/${prefix}_wrk_bust.txt" "wrk output (bust)"
         summarize_wrk "$domain" "bust" "$OUT_DIR/${prefix}_wrk_bust.txt"
-        if [ "$REPORT_MODE" = "true" ] && [ "$TELEMETRY_MODE" = "true" ]; then
-            if [ "$TELEMETRY_SCOPE" = "pidstat" ]; then
+        if [ "$REPORT_MODE" = "true" ]; then
+            if $USE_PIDSTAT; then
                 summarize_pidstat "$domain" "bust" "$OUT_DIR/${prefix}_pidstat.log"
-            elif [ "$TELEMETRY_SCOPE" = "sar" ] || [ "$TELEMETRY_SCOPE" = "full" ]; then
+            fi
+            if $USE_SAR; then
                 summarize_sar "$domain" "bust" "$OUT_DIR/${prefix}_sar.log"
             fi
         fi
     fi
 
-    if [ "$TELEMETRY_MODE" = "true" ]; then
+    if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT; then
         stop_telemetry
     fi
 done

@@ -109,7 +109,7 @@ Use the Security Settings page to enable baseline protections. These settings ar
 - Enable Browser integrity check.
 - Enable Replace insecure JavaScript libraries.
 - Schema validation is currently OFF, pending further investigation. TODO: Revisit schema validation; it is not exposed by the standard zone settings API, so confirm where it can be read or set before automating.
-- Leaked credentials detection is not enabled in this runbook; evaluate separately before enabling.
+- Leaked credentials detection is enabled for WordPress zones to reduce credential-stuffing risk and should be kept consistent across the multisite and single-site zones.
 
 #### 3.4.6 Security Headers
 Use Managed Transforms to add standard response headers at the edge.
