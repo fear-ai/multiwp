@@ -1,8 +1,8 @@
 #!/bin/bash
-# verify-domain.sh - Run edge, origin, and WordPress checks for domains.
+# check-domain.sh - Run edge, origin, and WordPress checks for domains.
 # For options, environment variables, defaults see usage().
 #
-# Example: verify-domain.sh [OPTIONS] domain1 [domain2...]
+# Example: check-domain.sh [OPTIONS] domain1 [domain2...]
 
 set -euo pipefail
 
@@ -19,8 +19,8 @@ DOMAINS=()
 
 usage() {
     cat <<EOF
-verify-domain.sh - Run edge, origin, and WordPress checks for domains.
-Example: verify-domain.sh [OPTIONS] domain1 [domain2...]
+check-domain.sh - Run edge, origin, and WordPress checks for domains.
+Example: check-domain.sh [OPTIONS] domain1 [domain2...]
 
 Options:
   --api  Enable Cloudflare API checks in check-edge.sh

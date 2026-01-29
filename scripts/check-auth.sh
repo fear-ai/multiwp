@@ -1,8 +1,8 @@
 #!/bin/bash
-# check-auth-domains.sh - Compare domain lists between auth files and domains.csv.
+# check-auth.sh - Compare domain lists between auth files and domains.csv.
 # For options, environment variables, defaults see usage().
 #
-# Example: check-auth-domains.sh --auth-file ~/.config/cloudflare/alphaeos.auth
+# Example: check-auth.sh --auth-file ~/.config/cloudflare/alphaeos.auth
 
 set -euo pipefail
 
@@ -18,8 +18,8 @@ CHECK_IDS=false
 
 usage() {
     cat <<'EOF'
-check-auth-domains.sh - Compare domain lists between auth files and domains.csv.
-Example: check-auth-domains.sh --auth-file ~/.config/cloudflare/alphaeos.auth
+check-auth.sh - Compare domain lists between auth files and domains.csv.
+Example: check-auth.sh --auth-file ~/.config/cloudflare/alphaeos.auth
 
 Options:
   --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)

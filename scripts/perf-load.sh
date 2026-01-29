@@ -1,8 +1,8 @@
 #!/bin/bash
-# test-load.sh - Run init or load tests with optional telemetry collection.
+# perf-load.sh - Run init or load tests with optional telemetry collection.
 # For options, environment variables, defaults see usage().
 #
-# Example: test-load.sh --load --domain zero.directory --duration 30s --threads 4 --connections 64
+# Example: perf-load.sh --load --domain zero.directory
 
 set -euo pipefail
 
@@ -21,12 +21,14 @@ RATE=""
 CACHE_BUST_PARAM="cache_bust"
 CACHE_MODE="both"
 INTERVAL=1
+LOG_PAD_SEC="${LOG_PAD_SEC:-5}"
 MODE="init"
 TELEMETRY_LIST="sar"
 USE_SAR=false
 USE_PIDSTAT=false
 USE_VMSTAT=false
 USE_IOSTAT=false
+USE_CGTOP=false
 TELEMETRY_DETAIL=false
 MODE_SET=false
 SET_DURATION=false
@@ -39,23 +41,23 @@ ALLOW_ROOT=false
 
 usage() {
     cat <<'EOF'
-test-load.sh - Run init or load tests with optional telemetry collection.
-Example: test-load.sh --load --domain zero.directory --duration 30s --threads 4 --connections 64
+perf-load.sh - Run init or load tests with optional telemetry collection.
+Example: perf-load.sh --load --domain zero.directory
 
 Options:
   --domain NAME  Domain to test (repeatable; positional also accepted)
   --init  Run init-mode tests (default)
   --load  Run load-mode tests
-  --duration DURATION  wrk duration per run (default: 10s init, 30s load)
-  --threads N  wrk threads (default: 2 init, 4 load)
-  --connections N  wrk connections (default: 16 init, 64 load)
-  --rate N  wrk2 fixed request rate N req/sec (default: 20 init, 60 load)
+  --duration DURATION  wrk duration per run (default: 20s init and load)
+  --threads N  wrk threads (default: 1 init, 2 load)
+  --connections N  wrk connections (default: 1 init, 4 load)
+  --rate N  wrk2 fixed request rate N req/sec (default: 10 init, 20 load)
   --run-id ID  Override the run identifier used in filenames (default: YYYYmmdd_HHMMSS)
   --out-dir DIR  Output directory (default: /var/tmp/multiwp/perf_<run-id>)
   --cache-bust PARAM  Cache-bust query parameter name (default: cache_bust)
   --cache MODE  Run cached, bust, or both (default: both; values: both|cached|bust)
   --interval N  Telemetry interval in seconds (default: 1)
-  --telemetry LIST  Telemetry tools (default: sar; values: sar,pidstat,vmstat,iostat,all,none)
+  --telemetry LIST  Telemetry tools (default: sar; values: sar,pidstat,vmstat,iostat,cgtop,all,none)
   --head  Write response headers for cached and cache-busted requests
   --report  Emit summary metrics after each wrk run
   --help  Show this help
@@ -195,18 +197,25 @@ cli_require_non_root
 CPU_CORES=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
 
 if [ "$MODE" = "init" ]; then
-    $SET_DURATION || DURATION="10s"
+    $SET_DURATION || DURATION="20s"
     $SET_THREADS || THREADS=1
     $SET_CONNECTIONS || CONNECTIONS=1
     $SET_RATE || RATE=10
 else
-    $SET_DURATION || DURATION="30s"
+    $SET_DURATION || DURATION="20s"
     $SET_THREADS || THREADS=2
     $SET_CONNECTIONS || CONNECTIONS=4
     $SET_RATE || RATE=20
 fi
 
-WRK_BIN="wrk2"
+WRK_BIN="${WRK_BIN:-}"
+if [ -z "$WRK_BIN" ]; then
+    if [ -x "/home/ubuntu/WP/wrk2/wrk" ]; then
+        WRK_BIN="/home/ubuntu/WP/wrk2/wrk"
+    else
+        WRK_BIN="wrk2"
+    fi
+fi
 
 parse_telemetry_list() {
     local list="$1"
@@ -223,7 +232,7 @@ parse_telemetry_list() {
             return
             ;;
         all)
-            expanded="sar,pidstat,vmstat,iostat"
+            expanded="sar,pidstat,vmstat,iostat,cgtop"
             ;;
         *)
             expanded="$list"
@@ -234,6 +243,7 @@ parse_telemetry_list() {
     USE_PIDSTAT=false
     USE_VMSTAT=false
     USE_IOSTAT=false
+    USE_CGTOP=false
 
     IFS=',' read -r -a items <<<"$expanded"
     for item in "${items[@]}"; do
@@ -242,12 +252,13 @@ parse_telemetry_list() {
             pidstat) USE_PIDSTAT=true ;;
             vmstat) USE_VMSTAT=true ;;
             iostat) USE_IOSTAT=true ;;
+            cgtop) USE_CGTOP=true ;;
             none) err "--telemetry=none cannot be combined with other values" ;;
             *) err "--telemetry invalid value: $item" ;;
         esac
     done
     TELEMETRY_DETAIL=false
-    if $USE_SAR && { $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT; }; then
+    if $USE_SAR && { $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP; }; then
         TELEMETRY_DETAIL=true
     fi
 }
@@ -266,6 +277,9 @@ if $USE_VMSTAT; then
 fi
 if $USE_IOSTAT; then
     require_cmds iostat
+fi
+if $USE_CGTOP; then
+    require_cmds /usr/bin/systemd-cgtop
 fi
 if [ "$REPORT_MODE" = "true" ] && { $USE_SAR || $USE_PIDSTAT; }; then
     require_cmds python3
@@ -300,6 +314,13 @@ kv "TELEMETRY" "$TELEMETRY_LIST"
 kv "HEAD" "$HEAD_MODE"
 kv "REPORT" "$REPORT_MODE"
 
+HOSTNAME_VAL=$(hostname 2>/dev/null || echo "unknown")
+ORIGIN_IPV4_VAL=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+START_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+START_LOCAL=$(date +%Y-%m-%dT%H:%M:%S)
+LOCAL_TZ=$(date +%Z)
+LOCAL_OFFSET=$(date +%z)
+
 check_expected_file() {
     local path="$1"
     local label="$2"
@@ -333,10 +354,20 @@ summarize_wrk() {
 
     case "$latency_avg" in
         *nan*|*NAN*) latency_avg="na" ;;
+        0.00us) latency_avg="na" ;;
     esac
     case "$latency_max" in
         *nan*|*NAN*) latency_max="na" ;;
     esac
+    if [ "$latency_avg" = "na" ]; then
+        calib_latency=$(awk -F 'mean lat.: ' '/Thread calibration: mean lat.:/ {print $2}' "$file" | awk '{print $1}' | tr -d ',')
+        if [ -n "$calib_latency" ]; then
+            latency_avg="$calib_latency"
+        fi
+    fi
+    if [ "$latency_max" = "0.00us" ]; then
+        latency_max="na"
+    fi
 
     if [ -n "$total_requests" ] && [ "$total_requests" -gt 0 ] 2>/dev/null; then
         not_200_pct=$(awk -v n="$non_2xx" -v t="$total_requests" 'BEGIN {printf "%.2f", (n / t) * 100}')
@@ -345,13 +376,13 @@ summarize_wrk() {
     fi
 
     if [ "$REPORT_MODE" = "true" ]; then
-        section "PERF" "Summary"
-        kv "DOMAIN" "$domain"
-        kv "CACHE" "$cache"
-        kv "REQ_PER_SEC" "${req_per_sec:-na}"
-        kv "LATENCY_AVG" "${latency_avg:-na}"
-        kv "LATENCY_MAX" "${latency_max:-na}"
-        kv "NOT_200_PCT" "$not_200_pct"
+        report_section "PERF" "Summary"
+        report_kv "DOMAIN" "$domain"
+        report_kv "CACHE" "$cache"
+        report_kv "REQ_PER_SEC" "${req_per_sec:-na}"
+        report_kv "LATENCY_AVG" "${latency_avg:-na}"
+        report_kv "LATENCY_MAX" "${latency_max:-na}"
+        report_kv "NOT_200_PCT" "$not_200_pct"
     fi
 }
 
@@ -619,28 +650,28 @@ summarize_sar() {
         done < <(bin5_trend_sar_cpu "$file")
     fi
 
-    section "PERF" "Telemetry"
-    kv "DOMAIN" "$domain"
-    kv "CACHE" "$cache"
+    report_section "PERF" "Telemetry"
+    report_kv "DOMAIN" "$domain"
+    report_kv "CACHE" "$cache"
     if [ "$TELEMETRY_DETAIL" = "true" ]; then
-        kv "MEM_AVAIL_MB_MIN" "${mem_avail_mb_min:-na}"
-        kv "MEM_AVAIL_MB_AVG" "${mem_avail_mb_avg:-na}"
-        kv "MEM_USED_PCT_MAX" "${mem_used_pct_max:-na}"
-        kv "MEM_USED_PCT_AVG" "${mem_used_pct_avg:-na}"
-        kv "CPU_TOTAL_PCT_MAX" "${cpu_total_max:-na}"
-        kv "CPU_USER_PCT_MAX" "${cpu_user_max:-na}"
-        kv "CPU_SYSTEM_PCT_MAX" "${cpu_system_max:-na}"
-        kv "CPU_IOWAIT_PCT_MAX" "${cpu_iowait_max:-na}"
-        kv "CPU_STEAL_PCT_MAX" "${cpu_steal_max:-na}"
-        kv "CPU_BUSY_CORES_MAX" "${cpu_busy_cores_max:-na}"
-        kv "CPU_TOTAL_BIN5_AVG" "$cpu_bin5"
-        kv "CPU_TOTAL_TREND" "$cpu_trend"
-        kv "LOAD_1_MAX" "${load_1_max:-na}"
-        kv "LOAD_1_AVG" "${load_1_avg:-na}"
+        report_kv "MEM_AVAIL_MB_MIN" "${mem_avail_mb_min:-na}"
+        report_kv "MEM_AVAIL_MB_AVG" "${mem_avail_mb_avg:-na}"
+        report_kv "MEM_USED_PCT_MAX" "${mem_used_pct_max:-na}"
+        report_kv "MEM_USED_PCT_AVG" "${mem_used_pct_avg:-na}"
+        report_kv "CPU_TOTAL_PCT_MAX" "${cpu_total_max:-na}"
+        report_kv "CPU_USER_PCT_MAX" "${cpu_user_max:-na}"
+        report_kv "CPU_SYSTEM_PCT_MAX" "${cpu_system_max:-na}"
+        report_kv "CPU_IOWAIT_PCT_MAX" "${cpu_iowait_max:-na}"
+        report_kv "CPU_STEAL_PCT_MAX" "${cpu_steal_max:-na}"
+        report_kv "CPU_BUSY_CORES_MAX" "${cpu_busy_cores_max:-na}"
+        report_kv "CPU_TOTAL_BIN5_AVG" "$cpu_bin5"
+        report_kv "CPU_TOTAL_TREND" "$cpu_trend"
+        report_kv "LOAD_1_MAX" "${load_1_max:-na}"
+        report_kv "LOAD_1_AVG" "${load_1_avg:-na}"
     else
-        kv "CPU_TOTAL_PCT_MAX" "${cpu_total_max:-na}"
-        kv "CPU_BUSY_CORES_MAX" "${cpu_busy_cores_max:-na}"
-        kv "LOAD_1_MAX" "${load_1_max:-na}"
+        report_kv "CPU_TOTAL_PCT_MAX" "${cpu_total_max:-na}"
+        report_kv "CPU_BUSY_CORES_MAX" "${cpu_busy_cores_max:-na}"
+        report_kv "LOAD_1_MAX" "${load_1_max:-na}"
     fi
 }
 
@@ -695,14 +726,28 @@ summarize_pidstat() {
         done < <(bin5_trend_pidstat_apache "$file")
     fi
 
-    section "PERF" "Telemetry"
-    kv "DOMAIN" "$domain"
-    kv "CACHE" "$cache"
-    kv "APACHE_CPU_SUM_AVG" "${cpu_sum_avg:-na}"
-    kv "APACHE_CPU_SUM_MAX" "${cpu_sum_max:-na}"
-    kv "APACHE_CPU_SAMPLES" "${samples:-0}"
-    kv "APACHE_CPU_SUM_BIN5_AVG" "$cpu_bin5"
-    kv "APACHE_CPU_SUM_TREND" "$cpu_trend"
+    report_section "PERF" "Telemetry"
+    report_kv "DOMAIN" "$domain"
+    report_kv "CACHE" "$cache"
+    report_kv "APACHE_CPU_SUM_AVG" "${cpu_sum_avg:-na}"
+    report_kv "APACHE_CPU_SUM_MAX" "${cpu_sum_max:-na}"
+    report_kv "APACHE_CPU_SAMPLES" "${samples:-0}"
+    report_kv "APACHE_CPU_SUM_BIN5_AVG" "$cpu_bin5"
+    report_kv "APACHE_CPU_SUM_TREND" "$cpu_trend"
+}
+
+report_section() {
+    section "$1" "$2"
+    if [ -n "${REPORT_FILE-}" ]; then
+        echo "== $1:$2" >> "$REPORT_FILE"
+    fi
+}
+
+report_kv() {
+    kv "$1" "$2"
+    if [ -n "${REPORT_FILE-}" ]; then
+        echo "$1=$2" >> "$REPORT_FILE"
+    fi
 }
 
 start_telemetry() {
@@ -712,6 +757,7 @@ start_telemetry() {
     PIDSTAT_PID=""
     IOSTAT_PID=""
     SAR_PID=""
+    CGTOP_PID=""
 
     if $USE_VMSTAT; then
         vmstat "$INTERVAL" > "$OUT_DIR/${prefix}_vmstat.log" &
@@ -729,11 +775,15 @@ start_telemetry() {
         sar -u -r -n DEV -q "$INTERVAL" > "$OUT_DIR/${prefix}_sar.log" &
         SAR_PID=$!
     fi
+    if $USE_CGTOP; then
+        /usr/bin/systemd-cgtop -b -d "$INTERVAL" > "$OUT_DIR/${prefix}_cgtop.log" &
+        CGTOP_PID=$!
+    fi
 }
 
 stop_telemetry() {
     local pid
-    for pid in "${VMSTAT_PID-}" "${PIDSTAT_PID-}" "${IOSTAT_PID-}" "${SAR_PID-}"; do
+    for pid in "${VMSTAT_PID-}" "${PIDSTAT_PID-}" "${IOSTAT_PID-}" "${SAR_PID-}" "${CGTOP_PID-}"; do
         if [ -n "${pid-}" ]; then
             kill "$pid" >/dev/null 2>&1 || true
         fi
@@ -746,7 +796,42 @@ for domain in "${DOMAINS[@]}"; do
 
     label=$(echo "$domain" | tr '.-' '__')
     prefix="${label}_${RUN_ID}"
-    if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT; then
+    REPORT_FILE=""
+    if [ "$REPORT_MODE" = "true" ]; then
+        REPORT_FILE="$OUT_DIR/${prefix}_report.txt"
+        : > "$REPORT_FILE"
+    fi
+
+    DOMAIN_START_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    DOMAIN_START_LOCAL=$(date +%Y-%m-%dT%H:%M:%S)
+    HEAD_EXIT=""
+    LOAD_EXIT=""
+    HEAD_CMD=""
+    HEAD_BUST_CMD=""
+    LOAD_CMD=""
+    LOAD_BUST_CMD=""
+    SAR_CMD=""
+    PIDSTAT_CMD=""
+    VMSTAT_CMD=""
+    IOSTAT_CMD=""
+    CGTOP_CMD=""
+    TELEMETRY_SCOPE="domain"
+    if $USE_VMSTAT; then
+        VMSTAT_CMD="vmstat ${INTERVAL}"
+    fi
+    if $USE_PIDSTAT; then
+        PIDSTAT_CMD="pidstat -ru -C apache2 ${INTERVAL}"
+    fi
+    if $USE_IOSTAT; then
+        IOSTAT_CMD="iostat -xz ${INTERVAL}"
+    fi
+    if $USE_SAR; then
+        SAR_CMD="sar -u -r -n DEV -q ${INTERVAL}"
+    fi
+    if $USE_CGTOP; then
+        CGTOP_CMD="/usr/bin/systemd-cgtop -b -d ${INTERVAL}"
+    fi
+    if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP; then
         start_telemetry "$prefix"
     fi
 
@@ -755,11 +840,25 @@ for domain in "${DOMAINS[@]}"; do
 
     if [ "$HEAD_MODE" = "true" ]; then
         if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "cached" ]; then
+            HEAD_CMD="curl -I \"$base_url\""
+            set +e
             curl -I "$base_url" > "$OUT_DIR/${prefix}_head.txt"
+            head_status=$?
+            set -e
+            if [ -z "$HEAD_EXIT" ] || [ "$HEAD_EXIT" -eq 0 ] 2>/dev/null; then
+                HEAD_EXIT="$head_status"
+            fi
             check_expected_file "$OUT_DIR/${prefix}_head.txt" "head headers (cached)"
         fi
         if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "bust" ]; then
+            HEAD_BUST_CMD="curl -I \"$bust_url\""
+            set +e
             curl -I "$bust_url" > "$OUT_DIR/${prefix}_head_bust.txt"
+            head_status=$?
+            set -e
+            if [ -z "$HEAD_EXIT" ] || [ "$HEAD_EXIT" -eq 0 ] 2>/dev/null; then
+                HEAD_EXIT="$head_status"
+            fi
             check_expected_file "$OUT_DIR/${prefix}_head_bust.txt" "head headers (bust)"
         fi
     fi
@@ -768,7 +867,14 @@ for domain in "${DOMAINS[@]}"; do
     wrk_cmd_bust=("$WRK_BIN" -t"$THREADS" -c"$CONNECTIONS" -d"$DURATION" -R"$RATE")
 
     if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "cached" ]; then
+        LOAD_CMD="${wrk_cmd_cached[*]} \"$base_url\""
+        set +e
         "${wrk_cmd_cached[@]}" "$base_url" > "$OUT_DIR/${prefix}_wrk.txt"
+        wrk_status=$?
+        set -e
+        if [ -z "$LOAD_EXIT" ] || [ "$LOAD_EXIT" -eq 0 ] 2>/dev/null; then
+            LOAD_EXIT="$wrk_status"
+        fi
         check_expected_file "$OUT_DIR/${prefix}_wrk.txt" "wrk output (cached)"
         summarize_wrk "$domain" "cached" "$OUT_DIR/${prefix}_wrk.txt"
         if [ "$REPORT_MODE" = "true" ]; then
@@ -781,7 +887,14 @@ for domain in "${DOMAINS[@]}"; do
         fi
     fi
     if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "bust" ]; then
+        LOAD_BUST_CMD="${wrk_cmd_bust[*]} \"$bust_url\""
+        set +e
         "${wrk_cmd_bust[@]}" "$bust_url" > "$OUT_DIR/${prefix}_wrk_bust.txt"
+        wrk_status=$?
+        set -e
+        if [ -z "$LOAD_EXIT" ] || [ "$LOAD_EXIT" -eq 0 ] 2>/dev/null; then
+            LOAD_EXIT="$wrk_status"
+        fi
         check_expected_file "$OUT_DIR/${prefix}_wrk_bust.txt" "wrk output (bust)"
         summarize_wrk "$domain" "bust" "$OUT_DIR/${prefix}_wrk_bust.txt"
         if [ "$REPORT_MODE" = "true" ]; then
@@ -794,9 +907,73 @@ for domain in "${DOMAINS[@]}"; do
         fi
     fi
 
-    if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT; then
+    if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP; then
         stop_telemetry
     fi
+
+    DOMAIN_END_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    DOMAIN_END_LOCAL=$(date +%Y-%m-%dT%H:%M:%S)
+    {
+        echo "HOSTNAME: $HOSTNAME_VAL"
+        echo "ORIGIN_IPV4: $ORIGIN_IPV4_VAL"
+        echo "RUN_ID: $RUN_ID"
+        echo "RUN_DIR: $OUT_DIR"
+        echo "KIND: load"
+        echo "DOMAIN: $domain"
+        echo "MODE: $MODE"
+        echo "CACHE_MODE: $CACHE_MODE"
+        echo "UTC_START: $DOMAIN_START_UTC"
+        echo "UTC_END: $DOMAIN_END_UTC"
+        echo "LOCAL_TZ: $LOCAL_TZ"
+        echo "LOCAL_OFFSET: $LOCAL_OFFSET"
+        echo "LOCAL_START: $DOMAIN_START_LOCAL"
+        echo "LOCAL_END: $DOMAIN_END_LOCAL"
+        echo "LOG_PAD_SEC: $LOG_PAD_SEC"
+        echo "SCRIPT_EXIT: 0"
+        if [ -n "$HEAD_EXIT" ]; then
+            echo "HEAD_EXIT: $HEAD_EXIT"
+        fi
+        if [ -n "$LOAD_EXIT" ]; then
+            echo "LOAD_EXIT: $LOAD_EXIT"
+        fi
+        echo "RATE: $RATE"
+        echo "THREADS: $THREADS"
+        echo "CONNECTIONS: $CONNECTIONS"
+        echo "DURATION: $DURATION"
+        echo "LOAD_TOOL: $WRK_BIN"
+        if [ -n "$LOAD_CMD" ]; then
+            echo "LOAD_CMD: $LOAD_CMD"
+        fi
+        if [ -n "$LOAD_BUST_CMD" ]; then
+            echo "LOAD_BUST_CMD: $LOAD_BUST_CMD"
+        fi
+        if [ -n "$HEAD_CMD" ]; then
+            echo "HEAD_CMD: $HEAD_CMD"
+        fi
+        if [ -n "$HEAD_BUST_CMD" ]; then
+            echo "HEAD_BUST_CMD: $HEAD_BUST_CMD"
+        fi
+        if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP; then
+            echo "TELEMETRY: $TELEMETRY_LIST"
+            echo "TELEMETRY_SCOPE: $TELEMETRY_SCOPE"
+            echo "TELEMETRY_INTERVAL_SEC: $INTERVAL"
+        fi
+        if $USE_SAR; then
+            echo "SAR_CMD: $SAR_CMD"
+        fi
+        if $USE_PIDSTAT; then
+            echo "PIDSTAT_CMD: $PIDSTAT_CMD"
+        fi
+        if $USE_VMSTAT; then
+            echo "VMSTAT_CMD: $VMSTAT_CMD"
+        fi
+        if $USE_IOSTAT; then
+            echo "IOSTAT_CMD: $IOSTAT_CMD"
+        fi
+        if $USE_CGTOP; then
+            echo "CGTOP_CMD: $CGTOP_CMD"
+        fi
+    } > "$OUT_DIR/${prefix}_run.param"
 done
 
 status_pass "run=ok"

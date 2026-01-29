@@ -71,7 +71,7 @@ Tables below list the **complete** set of `SECTION` values and expected `Topic` 
 
 | SECTION | Scripts | Topics (expected values) |
 | --- | --- | --- |
-| `AUTH` | `verify-cf-auth.sh`, `check-auth-domains.sh` | `AuthFile`, `Env`, `Token`, `Key`, `OriginCa`, `Domains`, `ZoneIds`, `Mismatches` |
+| `AUTH` | `verify-cf-auth.sh`, `check-auth.sh` | `AuthFile`, `Env`, `Token`, `Key`, `OriginCa`, `Domains`, `ZoneIds`, `Mismatches` |
 | `CF` | `check-cf.sh` | `Zone`, `Dns`, `Settings`, `Api` |
 | `DNS` | `cloud-dns.sh` | `Zone`, `Records`, `Proxy`, `Create` |
 | `EDGE` | `check-edge.sh`, `cloud-redirect.sh` | `Dns`, `Https`, `RedirectRule`, `Headers` |
@@ -83,10 +83,10 @@ Tables below list the **complete** set of `SECTION` values and expected `Topic` 
 | `ORIGIN` | `apache-vhost.sh`, `check-origin.sh` | `Apache`, `Modules`, `Vhosts`, `Tls`, `Php`, `Enable` |
 | `SERVER` | `check-server.sh` | `Os`, `Updates`, `Ssh`, `Network`, `Ufw`, `Mysql`, `Redis`, `Cron` |
 | `WP` | `setup-wp.sh`, `install-site.sh`, `check-wp.sh` | `Install`, `Site`, `Mapping`, `Root`, `Config`, `Routing`, `Security`, `Templates` |
-| `ORCH` | `check-read.sh`, `test-record.sh`, `verify-domain.sh` | `Selection`, `Run`, `Record`, `Results` |
+| `ORCH` | `check-read.sh`, `test-record.sh`, `check-domain.sh` | `Selection`, `Run`, `Record`, `Results` |
 | `MCP` | `mcp.sh`, `mcp-cf.sh` | `Server`, `Request`, `Response` |
-| `INIT` | `test-load.sh` | `Run`, `Domain` |
-| `LOAD` | `test-load.sh` | `Run`, `Domain` |
+| `INIT` | `perf-load.sh` | `Run`, `Domain` |
+| `LOAD` | `perf-load.sh` | `Run`, `Domain` |
 | `TEST` | `test_common.sh`, `test_cli.sh`, `test_cf.sh`, `test_mcp.sh` | `Setup`, `Cases`, `Results` |
 
 #### Script-to-section mapping
@@ -96,7 +96,7 @@ Use this mapping when implementing or refactoring output so every script emits t
 | Script | SECTION | Topics |
 | --- | --- | --- |
 | `verify-cf-auth.sh` | `AUTH` | `AuthFile`, `Env`, `Token`, `Key`, `OriginCa` |
-| `check-auth-domains.sh` | `AUTH` | `Domains`, `ZoneIds`, `Mismatches` |
+| `check-auth.sh` | `AUTH` | `Domains`, `ZoneIds`, `Mismatches` |
 | `check-cf.sh` | `CF` | `Zone`, `Dns`, `Settings`, `Api` |
 | `cloud-dns.sh` | `DNS` | `Zone`, `Records`, `Proxy`, `Create` |
 | `check-edge.sh` | `EDGE` | `Dns`, `Https`, `RedirectRule`, `Headers` |
@@ -114,10 +114,10 @@ Use this mapping when implementing or refactoring output so every script emits t
 | `check-wp.sh` | `WP` | `Root`, `Config`, `Routing`, `Security`, `Templates` |
 | `check-read.sh` | `ORCH` | `Selection`, `Run`, `Results` |
 | `test-record.sh` | `ORCH` | `Selection`, `Record`, `Results` |
-| `verify-domain.sh` | `ORCH` | `Selection`, `Run`, `Results` |
+| `check-domain.sh` | `ORCH` | `Selection`, `Run`, `Results` |
 | `mcp.sh` | `MCP` | `Server`, `Request`, `Response` |
 | `mcp-cf.sh` | `MCP` | `Server`, `Request`, `Response` |
-| `test-load.sh` | `INIT`, `LOAD` | `Run`, `Domain` |
+| `perf-load.sh` | `INIT`, `LOAD` | `Run`, `Domain` |
 | `test_common.sh` | `TEST` | `Setup`, `Cases`, `Results` |
 | `test_cli.sh` | `TEST` | `Setup`, `Cases`, `Results` |
 | `test_cf.sh` | `TEST` | `Setup`, `Cases`, `Results` |
@@ -132,7 +132,7 @@ This catalog groups scripts by operational layer and marks each script as provis
 Cloudflare scripts handle credentials, DNS records, certificates, and edge validation. A typical flow starts with credential checks, provisions DNS inside an existing zone, then issues certificates, and ends with settings and edge validation. Zone creation is out of scope for these scripts and must be completed before DNS provisioning begins.
 
 Verification (read-only), alphabetical:
-- `check-auth-domains.sh`
+- `check-auth.sh`
 - `check-cf.sh`
 - `check-edge.sh`
 - `verify-cf-auth.sh`
@@ -172,13 +172,13 @@ WordPress scripts bootstrap or validate multisite configuration and mapping. Pro
 Orchestration scripts combine multiple checks in a single run.
 
 - `test-record.sh` — verification + recording
-- `verify-domain.sh` — verification (read-only)
+- `check-domain.sh` — verification (read-only)
 
 ### Performance and Benchmarking
 
 Performance scripts generate load or collect baseline measurements. They are read-only with respect to configuration but should be used carefully because they can saturate the origin.
 
-- `test-load.sh` — verification (read-only)
+- `perf-load.sh` — verification (read-only)
 
 ### Check Read
 
@@ -477,7 +477,7 @@ Notes:
 - When `CF_AUTH=auto` and both token and key credentials are present, scripts use the key and log a warning noting the choice.
 
 Domain resolution priority (policy):
-Resolution order is: auth file match by zone name, then `domains.csv` `zone_id`, then API lookup. This keeps ad-hoc overrides possible, but it also risks masking stale auth-file entries or cross-account drift if the `.auth` file lists zones not present in the inventory. The policy conclusion is: treat `domains.csv` as the canonical inventory for batch runs, allow auth-file overrides for ad-hoc checks, and treat API lookup as a last resort. Orchestrators should not auto-discover zones outside the inventory. Use `check-auth-domains.sh check-ids` to surface mismatches early.
+Resolution order is: auth file match by zone name, then `domains.csv` `zone_id`, then API lookup. This keeps ad-hoc overrides possible, but it also risks masking stale auth-file entries or cross-account drift if the `.auth` file lists zones not present in the inventory. The policy conclusion is: treat `domains.csv` as the canonical inventory for batch runs, allow auth-file overrides for ad-hoc checks, and treat API lookup as a last resort. Orchestrators should not auto-discover zones outside the inventory. Use `check-auth.sh check-ids` to surface mismatches early.
 
 ### Knowledge
 
@@ -501,7 +501,7 @@ Practical guidance:
 
 ### Read-Only Scripts and Safe Options
 
-The following scripts are read-only by design and do not modify DNS, certificates, Apache configuration, or WordPress data. Read-only scripts: `check-edge.sh`, `check-cf.sh`, `verify-cf-auth.sh`, `check-auth-domains.sh`, `check-server.sh`, `check-origin.sh`, `check-wp.sh`, `test-load.sh`, `verify-domain.sh`. Unit tests: `test_common.sh`, `test_cli.sh`, `test_cf.sh`.
+The following scripts are read-only by design and do not modify DNS, certificates, Apache configuration, or WordPress data. Read-only scripts: `check-edge.sh`, `check-cf.sh`, `verify-cf-auth.sh`, `check-auth.sh`, `check-server.sh`, `check-origin.sh`, `check-wp.sh`, `perf-load.sh`, `check-domain.sh`. Unit tests: `test_common.sh`, `test_cli.sh`, `test_cf.sh`.
 
 Safe options for read-only scripts:
 - `--api` (enables Cloudflare API reads; no writes)
@@ -535,7 +535,7 @@ Notes:
 - Global API keys are verified with X-Auth-Email + X-Auth-Key against `/user`.
 - Origin CA keys are verified with a read-only GET to `/certificates?zone_id=...`. If `CF_ZONE_ID` is missing but `CF_ZONE` is present, the script will attempt to resolve the zone ID using available API credentials.
 
-#### check-auth-domains.sh (verification/investigation)
+#### check-auth.sh (verification/investigation)
 
 Purpose:
 - Compares `CF_DOMAINS` from an auth file to the domains listed in `domains.csv`, highlighting mismatches.
@@ -953,7 +953,7 @@ Notes:
 - Successful WordPress checks record `status_wp=config`.
 - Empty `site_type` values are normalized to `none`; `site_type=none`, `site_type=ignore`, and `site_type=worker` are skipped regardless of status filters.
 
-#### verify-domain.sh (verification/investigation)
+#### check-domain.sh (verification/investigation)
 
 Purpose:
 - Runs `check-origin.sh`, `check-wp.sh`, and `check-edge.sh` in sequence for each domain.
@@ -977,7 +977,7 @@ Environment variables:
 
 These scripts are intended for repeatable benchmarking and sanity checks. They are read-only with respect to configuration, but they generate load and should be run with care on production systems.
 
-#### test-load.sh (verification/investigation)
+#### perf-load.sh (verification/investigation)
 
 Purpose:
 - Runs init or sustained load checks with `wrk2` and an explicit rate (default per mode), with optional telemetry collection for CPU, memory, IO, and network.
@@ -1007,18 +1007,44 @@ Environment variables:
 None.
 
 Notes:
-- Defaults are mode-specific: init uses lower concurrency and shorter durations; load uses higher concurrency and longer durations.
+- Defaults are mode-specific for concurrency and rate, but duration is 20s for both init and load unless overridden.
 - Defaults are mode-specific and include a fixed rate: init defaults to `threads=1`, `connections=1`, `rate=10`; load defaults to `threads=2`, `connections=4`, `rate=20`.
-- The default output directory is `/var/tmp/multiwp/perf_<run-id>`.
+- `perf-load.sh` prefers `/home/ubuntu/WP/wrk2/wrk` if present; set `WRK_BIN` to override the binary.
+- The default output directory is `/var/tmp/multiwp/perf_<run-id>`, and output files use a per-domain prefix.
 - Telemetry defaults to `sar`; use `--telemetry=none` or a comma list to change it.
 - When `--head` is supplied, cached headers are saved as `${prefix}_head.txt` and cache-busted headers as `${prefix}_head_bust.txt`.
 - `--cache` controls whether cached, cache-busted, or both runs are executed (`both`, `cached`, `bust`).
-- `--telemetry` accepts `sar`, `pidstat`, `vmstat`, `iostat`, `all`, or `none`, and it accepts comma lists (for example, `sar,pidstat`).
+- `--telemetry` accepts `sar`, `pidstat`, `vmstat`, `iostat`, `cgtop`, `all`, or `none`, and it accepts comma lists (for example, `sar,pidstat`).
 - `wrk2` is always used and always receives `-R <rate>`, either from `--rate` or from mode defaults.
-- When running `test-load.sh` through an external command runner, use a timeout of at least 60 seconds.
+- When running `perf-load.sh` through an external command runner, use a timeout of at least 60 seconds.
 - Telemetry writes logs alongside `wrk` or `wrk2` output in the run directory. Command dependencies vary by telemetry scope.
 - `--report` emits a per-run summary of `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, and `NOT_200_PCT`.
 - When telemetry includes `sar`, `--report` emits `CPU_TOTAL_PCT_MAX`, `CPU_BUSY_CORES_MAX`, and `LOAD_1_MAX`. If telemetry includes `sar` plus any other tool, it also emits `MEM_AVAIL_MB_MIN`, `MEM_AVAIL_MB_AVG`, `MEM_USED_PCT_MAX`, `MEM_USED_PCT_AVG`, `CPU_USER_PCT_MAX`, `CPU_SYSTEM_PCT_MAX`, `CPU_IOWAIT_PCT_MAX`, `CPU_STEAL_PCT_MAX`, `CPU_TOTAL_BIN5_AVG`, `CPU_TOTAL_TREND`, and `LOAD_1_AVG`. When telemetry includes `pidstat`, `--report` emits `APACHE_CPU_SUM_AVG`, `APACHE_CPU_SUM_MAX`, `APACHE_CPU_SAMPLES`, `APACHE_CPU_SUM_BIN5_AVG`, and `APACHE_CPU_SUM_TREND`.
+
+#### slice-logs.sh (verification/investigation)
+
+Purpose:
+- Extracts log slices for a perf run based on the `run.param` metadata file.
+
+Arguments:
+- None. All inputs are supplied as options.
+
+Options (script-specific):
+ - `--run-param PATH`
+ - `--out-dir DIR`
+ - `--pad SEC`
+
+Common arguments: --help.
+
+Environment variables:
+None.
+
+Notes:
+- Reads `run.param` in `KEY: value` format and writes sliced logs using the same prefix.
+- Apache log selection is best-effort and warns if a matching file is not found.
+- Uses `sudo` for log reads if the file is not readable by the current user.
+- When a `${prefix}_report.txt` and Apache access slice exist, the script appends
+  summary rows to `perf_runs.csv` and `perf_segments.csv` in the output directory.
 
 ## Option Cross-Reference (Alphabetical)
 
@@ -1030,76 +1056,78 @@ This cross-reference lists options alphabetically and the scripts that implement
 - --account-name,cloud-redirect.sh;cloud-settings.sh;onboard-zone.sh
 - --all,rules-cf.sh
 - --allow-redirects,rules-cf.sh
-- --allow-root,check-origin.sh;check-server.sh;check-wp.sh;cloudflare-ips.sh;test-record.sh;verify-domain.sh
+- --allow-root,check-origin.sh;check-server.sh;check-wp.sh;cloudflare-ips.sh;test-record.sh;check-domain.sh
 - --always-use-https,cloud-settings.sh
-- --apache-dir,apache-vhost.sh;check-origin.sh;check-read.sh;test-record.sh;verify-domain.sh
-- --api,check-edge.sh;check-read.sh;get-cert.sh;test-record.sh;verify-domain.sh
+- --apache-dir,apache-vhost.sh;check-origin.sh;check-read.sh;test-record.sh;check-domain.sh
+- --api,check-edge.sh;check-read.sh;get-cert.sh;test-record.sh;check-domain.sh
 - --apply,mcp-cf.sh;rules-cf.sh
 - --auth,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
-- --auth-file,check-auth-domains.sh;check-cf.sh;check-edge.sh;check-read.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
+- --auth-file,check-auth.sh;check-cf.sh;check-edge.sh;check-read.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
 - --auto,get-cert.sh
 - --autosite,check-read.sh;check-wp.sh;test-record.sh
 - --bearer,mcp-cf.sh
 - --ca-key,get-cert.sh;test-record.sh;verify-cf-auth.sh
-- --cache-bust,test-load.sh
+- --cache-bust,perf-load.sh
 - --catalog,mcp-cf.sh
-- --check-ids,check-auth-domains.sh
-- --connections,test-load.sh
+- --check-ids,check-auth.sh
+- --connections,perf-load.sh
 - --create,cloud-dns.sh
 - --date,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 - --dns-provider,onboard-zone.sh
-- --domain,apache-vhost.sh;check-edge.sh;check-origin.sh;check-read.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;onboard-zone.sh;rules-cf.sh;test-load.sh;test-record.sh;verify-domain.sh
-- --domains-file,check-auth-domains.sh;check-read.sh;cloud-redirect.sh;cloud-settings.sh;onboard-zone.sh;test-record.sh
+- --domain,apache-vhost.sh;check-edge.sh;check-origin.sh;check-read.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;onboard-zone.sh;rules-cf.sh;perf-load.sh;test-record.sh;check-domain.sh
+- --domains-file,check-auth.sh;check-read.sh;cloud-redirect.sh;cloud-settings.sh;onboard-zone.sh;test-record.sh
 - --downgrade,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 - --dry-run,cloud-redirect.sh;cloud-settings.sh
-- --duration,test-load.sh
+- --duration,perf-load.sh
 - --email,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
 - --export,rules-cf.sh
 - --force,get-cert.sh
-- --head,test-load.sh
-- --help,apache-vhost.sh;check-auth-domains.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-read.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-load.sh;test-record.sh;verify-cf-auth.sh;verify-domain.sh
-- --hsts,check-edge.sh;test-record.sh;verify-domain.sh
+- --head,perf-load.sh
+- --help,apache-vhost.sh;check-auth.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-read.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;perf-load.sh;test-record.sh;verify-cf-auth.sh;check-domain.sh
+- --hsts,check-edge.sh;test-record.sh;check-domain.sh
 - --http,apache-vhost.sh
-- --http-timeout,check-edge.sh;test-record.sh;verify-domain.sh
+- --http-timeout,check-edge.sh;test-record.sh;check-domain.sh
 - --include-ignore,check-read.sh;test-record.sh
-- --init,test-load.sh
+- --init,perf-load.sh
 - --input,rules-cf.sh
-- --interval,test-load.sh
+- --interval,perf-load.sh
 - --ip,onboard-zone.sh
 - --key,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
-- --load,test-load.sh
+- --load,perf-load.sh
 - --managed-add-security-headers,cloud-settings.sh
 - --manual,get-cert.sh
 - --min-tls-version,cloud-settings.sh
 - --multisite,check-read.sh;check-wp.sh;test-record.sh
 - --multisite-domain,onboard-zone.sh
-- --no-sudo,check-origin.sh;check-server.sh;check-wp.sh;cloudflare-ips.sh;test-record.sh;verify-domain.sh
+- --no-sudo,check-origin.sh;check-server.sh;check-wp.sh;cloudflare-ips.sh;test-record.sh;check-domain.sh
 - --norecord,cloud-redirect.sh;onboard-zone.sh;test-record.sh
-- --out-dir,test-load.sh
+- --out-dir,perf-load.sh;slice-logs.sh
 - --output,cloudflare-ips.sh;rules-cf.sh
 - --portal-url,mcp-cf.sh
 - --raw,check-cf.sh
-- --rate,test-load.sh
+- --pad,slice-logs.sh
+- --rate,perf-load.sh
 - --redirect-url,cloud-redirect.sh;onboard-zone.sh
 - --registrar,onboard-zone.sh
-- --run-id,test-load.sh
+- --run-id,perf-load.sh
+- --run-param,slice-logs.sh
 - --singlesite,check-read.sh;check-wp.sh;test-record.sh
 - --site-type,check-read.sh;onboard-zone.sh;test-record.sh
 - --site-types,cloud-settings.sh
 - --source,rules-cf.sh
 - --ssl,apache-vhost.sh;cloud-settings.sh
-- --ssl-dir,apache-vhost.sh;check-origin.sh;check-read.sh;get-cert.sh;test-record.sh;verify-domain.sh
+- --ssl-dir,apache-vhost.sh;check-origin.sh;check-read.sh;get-cert.sh;test-record.sh;check-domain.sh
 - --stage,check-wp.sh
 - --state,check-read.sh;test-record.sh
 - --template,apache-vhost.sh
 - --template-check,check-wp.sh
 - --template-dir,check-wp.sh
-- --telemetry,test-load.sh
-- --threads,test-load.sh
+- --telemetry,perf-load.sh
+- --threads,perf-load.sh
 - --token,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
 - --ufw,cloudflare-ips.sh
 - --update,cloud-dns.sh
-- --wp-root,apache-vhost.sh;check-origin.sh;check-read.sh;check-wp.sh;install-site.sh;test-record.sh;verify-domain.sh
+- --wp-root,apache-vhost.sh;check-origin.sh;check-read.sh;check-wp.sh;install-site.sh;test-record.sh;check-domain.sh
 - --zone,check-cf.sh;check-edge.sh
 - --zone-id,check-cf.sh;check-edge.sh;verify-cf-auth.sh
 
@@ -1108,9 +1136,9 @@ This cross-reference lists options alphabetically and the scripts that implement
 
 This cross-reference lists helper scripts and the programs or tests that source them. CSV files are exports for future processing; this list is the human-readable view.
 
-- common.sh: apache-vhost.sh;check-auth-domains.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-read.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;setup-wp.sh;test-load.sh;test-record.sh;test_cf.sh;test_cli.sh;test_common.sh;verify-cf-auth.sh;verify-domain.sh
-- cli.sh: apache-vhost.sh;check-auth-domains.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-read.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-load.sh;test-record.sh;test_cli.sh;verify-cf-auth.sh;verify-domain.sh
-- auth.sh: check-auth-domains.sh;check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;test_cf.sh;test_cli.sh;verify-cf-auth.sh
+- common.sh: apache-vhost.sh;check-auth.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-read.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;setup-wp.sh;perf-load.sh;test-record.sh;test_cf.sh;test_cli.sh;test_common.sh;verify-cf-auth.sh;check-domain.sh
+- cli.sh: apache-vhost.sh;check-auth.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-read.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;perf-load.sh;test-record.sh;test_cli.sh;verify-cf-auth.sh;check-domain.sh
+- auth.sh: check-auth.sh;check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;test_cf.sh;test_cli.sh;verify-cf-auth.sh
 - mcp.sh: mcp-cf.sh;test_mcp.sh
 
 ## TODO (Revisit)
@@ -1120,4 +1148,4 @@ The items below capture small, implementation-focused follow-ups that keep helpe
 - Helper predicates: document the shared `cf_has_env`/`cf_has_all` pattern used by `cf_has_*` helpers so future additions follow the same empty-vs-unset semantics and avoid divergent checks.
 - Enum parsing: evaluate whether option values with limited sets (for example `--site-type`, `singlesite|multisite|autosite`, or `api|manual|auto`) should accept environment equivalents with explicit enum validation, and if so, keep CLI/env/auth error messaging aligned.
 - Origin cert auth policy: revisit whether `get-cert.sh` should prefer the global API key for Origin CA issuance, with `CF_CA_KEY` as a fallback, and document the rationale and any security tradeoffs before changing the default.
-- Review `test-record.sh` uses and `verify-domain.sh` overlap to decide whether to consolidate or keep distinct.
+- Review `test-record.sh` uses and `check-domain.sh` overlap to decide whether to consolidate or keep distinct.
