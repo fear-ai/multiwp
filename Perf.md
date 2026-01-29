@@ -338,9 +338,9 @@ redis-cli INFO > "$OUT/redis_info.txt"
 ### Initial tests
 These sanity checks confirm the stack responds as expected before sustained load. Use low concurrency and short durations so the tests are non-disruptive. Record results in the same run directory as the baseline headers and telemetry.
 
-`test-load.sh --init` runs these checks and writes outputs into a run directory. Options:
+`perf-load.sh --init` runs these checks and writes outputs into a run directory. Options:
 - `domain` (repeatable, or positional) target domain(s) to test.
-- `duration` short `wrk2` duration for the initial run (default is conservative).
+- `duration` short `wrk2` duration for the initial run (default is 20s).
 - `threads`, `connections` low-load settings for `wrk2`.
 - `run-id` identifier for file naming (defaults to `YYYYmmdd_HHMMSS`).
 - `out-dir` output directory (defaults to `/var/tmp/multiwp/perf_<run-id>`).
@@ -349,7 +349,7 @@ These sanity checks confirm the stack responds as expected before sustained load
 
 Example:
 ```bash
-./scripts/test-load.sh --init --domain zero.directory --domain alphaeos.net --duration 10s --threads 2 --connections 16 --telemetry=none
+./scripts/perf-load.sh --init --domain zero.directory --domain alphaeos.net --duration 20s --threads 2 --connections 16 --telemetry=none
 ```
 
 Add `--head` to write header snapshots into the run directory.
@@ -384,6 +384,23 @@ Initial tests to run:
 ### Load generation
 We use `wrk2` for sustained load testing because it supports a fixed request rate and makes comparisons between configuration changes more reliable. The fixed-rate model avoids unbounded client pressure and makes it easier to attribute changes in latency and CPU to the configuration change rather than to changing load. `wrk` remains useful when you explicitly want to push the origin as fast as it can go, but the default workflow in this repository uses `wrk2`.
 
+`perf-load.sh` prefers a local `wrk2` build at `/home/ubuntu/WP/wrk2/wrk` when present, and falls back to `wrk2` on `PATH`. Override this with `WRK_BIN` if you need a specific binary.
+
+#### wrk2 calibration and short-run latency
+`wrk2` performs a calibration step after a fixed warm-up period (`CALIBRATE_DELAY_MS`, currently 10,000ms in the source). During calibration it resets the latency histograms and starts the periodic rate sampler. If the total run duration is at or near the calibration delay (for example, 10s runs), the histogram reset can happen at the end of the run, resulting in `Latency 0.00us` or `NaN` and a `Total count = 0` even when requests completed successfully. Apache logs confirm that the requests completed in this case; the missing latency data is a tool behavior, not an origin failure.
+
+We patched the local `wrk2` source to return `0` (not `NaN`) when the histogram has zero samples. This avoids spurious NaN output but does not solve the underlying measurement gap; a zero-sample histogram still means the latency data is not valid for that run.
+
+We also added a `--warmup <T>` option to the local `wrk2` build and skip calibration when `duration <= warmup`. This prevents the histogram reset from wiping short runs and makes 10s runs usable when a warmup is not desired.
+
+We treat this as a known limitation of short runs and document the following solutions and rationale:
+- Prefer longer durations so the post-calibration window is non-trivial. The default run duration is now 20s.
+- Reduce `CALIBRATE_DELAY_MS` in the `wrk2` source (for example, 1–2 seconds) and rebuild so short runs still include a measured window.
+- Add a CLI option (for example, `--warmup` or `--calibrate-ms`) to make calibration delay configurable per test.
+- Patch `wrk2` to skip the histogram reset when the run duration is shorter than the calibration delay so the collected data is retained.
+
+When `--report` is used, the summary falls back to the `Thread calibration: mean lat.` value if the `Latency` line is `NaN` or `0.00us`. This ensures we still emit a consistent value, but it is a fallback and should be interpreted with that limitation in mind.
+
 Install sysstat for telemetry. `wrk2` is not packaged in Ubuntu by default and is typically built from source; `wrk` is available from APT if you want the unbounded variant for quick manual checks.
 ```bash
 sudo apt-get update
@@ -392,10 +409,10 @@ sudo apt-get install -y wrk sysstat
 
 Use consistent parameters across runs and record them in the results.
 
-`test-load.sh` runs init or load tests and can collect telemetry. Options:
+`perf-load.sh` runs init or load tests and can collect telemetry. Options:
 - `domain` (repeatable, or positional) target domain(s) to test.
 - `init`, `load` select the mode (defaults to `init`).
-- `duration` load duration per run (for example, `30s` or `2m`).
+- `duration` load duration per run (for example, `20s` or `2m`). Default is 20s for both init and load.
 - `threads`, `connections` for `wrk2`.
 - `rate` sets the fixed request rate for `wrk2` (`-R`). `wrk2` is always used; mode defaults are init `threads=1`, `connections=1`, `rate=10` and load `threads=2`, `connections=4`, `rate=20`.
 - `run-id` identifier for file naming (defaults to `YYYYmmdd_HHMMSS`).
@@ -409,20 +426,20 @@ Use consistent parameters across runs and record them in the results.
 
 When `--head` is used, cached headers are saved as `${prefix}_head.txt` and cache-busted headers as `${prefix}_head_bust.txt` in the run directory.
 
-When running `test-load.sh` through an external command runner, use a timeout of at least 60 seconds.
+When running `perf-load.sh` through an external command runner, use a timeout of at least 60 seconds.
 
-When `--report` is used, the summary always reports `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, and `NOT_200_PCT`, derived from wrk2's "Non-2xx or 3xx responses" line.
+When `--report` is used, the summary always reports `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, and `NOT_200_PCT`. `LATENCY_AVG` is taken from the `Latency` line; if wrk2 reports NaN or `0.00us` there, the script falls back to the `Thread calibration: mean lat.` value.
 
 When `--report` is used with telemetry enabled, the summary reports `CPU_TOTAL_PCT_MAX`, `CPU_BUSY_CORES_MAX`, and `LOAD_1_MAX` if `sar` is selected. If telemetry includes `sar` plus any other tool, it also reports `MEM_AVAIL_MB_MIN`, `MEM_AVAIL_MB_AVG`, `MEM_USED_PCT_MAX`, `MEM_USED_PCT_AVG`, `CPU_USER_PCT_MAX`, `CPU_SYSTEM_PCT_MAX`, `CPU_IOWAIT_PCT_MAX`, `CPU_STEAL_PCT_MAX`, `CPU_TOTAL_BIN5_AVG`, `CPU_TOTAL_TREND`, and `LOAD_1_AVG`. If telemetry includes `pidstat`, it reports `APACHE_CPU_SUM_AVG`, `APACHE_CPU_SUM_MAX`, `APACHE_CPU_SAMPLES`, `APACHE_CPU_SUM_BIN5_AVG`, and `APACHE_CPU_SUM_TREND`.
 
 ### Run metadata file
-Each perf run directory should include a `run.param` file with the run parameters and time bounds. This file is intended to make post-processing and correlation reliable without relying on filename conventions. The format is `KEY: value` with one entry per line so it can be parsed by simple tooling.
+Each perf run directory should include a `run.param` file per domain with the run parameters and time bounds. This file is intended to make post-processing and correlation reliable without relying on filename conventions. The format is `KEY: value` with one entry per line so it can be parsed by simple tooling. Each `run.param` is named with the same prefix as its corresponding output files.
 
 We use UTC internally for time bounds to match Cloudflare and Apache access logs, and we also record local time and timezone for operator context. Timestamps use second resolution and a trailing `Z` in UTC. A small log padding value is recorded so the same correlation window can be reused later without guessing.
 
 Required fields (all runs):
 - `HOSTNAME`, `ORIGIN_IPV4`
-- `RUN_ID`, `KIND` (`idle` or `load`), `DOMAIN`, `MODE`, `CACHE_MODE`
+- `RUN_ID`, `RUN_DIR`, `KIND` (`idle` or `load`), `DOMAIN`, `MODE`, `CACHE_MODE`
 - `UTC_START`, `UTC_END`
 - `LOCAL_TZ`, `LOCAL_OFFSET`, `LOCAL_START`, `LOCAL_END`
 - `LOG_PAD_SEC`
@@ -454,7 +471,7 @@ Postponed items (record here but do not implement yet):
 
 Example:
 ```bash
-./scripts/test-load.sh --load --domain zero.directory --domain alphaeos.net --duration 30s --threads 4 --connections 64
+./scripts/perf-load.sh --load --domain zero.directory --domain alphaeos.net --duration 30s --threads 4 --connections 64
 ```
 
 Manual runs (if you want to run `wrk2` directly):
@@ -463,20 +480,20 @@ Manual runs (if you want to run `wrk2` directly):
 This section captures the log and metadata conventions for performance runs. The goal is to make every run self-contained and reproducible, and to make later correlation possible even if filenames are copied elsewhere. The conventions apply to scripted runs and to manual runs that follow the same layout.
 
 #### Run directory layout
-Each run writes to a single directory named by the run identifier. The directory should contain the raw tool output, the run metadata file, and (optionally) a synthesized summary.
+Each run writes to a directory named by the run identifier. Output files are written into that run directory using a per-domain prefix so multiple domains do not collide.
 
 - Run directory: `/var/tmp/multiwp/perf_<RUN_ID>`
-- Metadata: `run.param`
-- Raw output: `head*.txt`, `wrk*.txt`, telemetry logs (`sar.log`, `pidstat.log`, `vmstat.log`, `iostat.log`)
-- Summary: `report.txt` (only when `--report` is used)
+- Metadata: `${prefix}_run.param`
+- Raw output: `${prefix}_head*.txt`, `${prefix}_wrk*.txt`, `${prefix}_sar.log`, `${prefix}_pidstat.log`, `${prefix}_vmstat.log`, `${prefix}_iostat.log`, `${prefix}_cgtop.log`
+- Summary: `${prefix}_report.txt` (only when `--report` is used)
 
 Avoid embedding cache mode or load type in the directory name. We prefer a single run directory that contains all cached and cache-busted results, and we capture those details in `run.param` instead. This keeps filenames stable and avoids accidental mismatches when runs are copied or compared.
 
 #### File naming rules
-Header and load outputs follow a consistent naming pattern so tools can be found without parsing the metadata file.
+Header and load outputs follow a consistent naming pattern inside the run directory so tools can be found without parsing the metadata file.
 
-- `head.txt` and `head_bust.txt` for cached and cache-busted headers.
-- `wrk.txt` and `wrk_bust.txt` for cached and cache-busted load runs.
+- `${prefix}_head.txt` and `${prefix}_head_bust.txt` for cached and cache-busted headers.
+- `${prefix}_wrk.txt` and `${prefix}_wrk_bust.txt` for cached and cache-busted load runs.
 - When `--cache` is not `both`, only the applicable file is written.
 - Telemetry logs retain the tool name (for example, `sar.log` and `pidstat.log`) so they remain usable outside the script.
 
@@ -507,12 +524,108 @@ Telemetry selection is driven by `--telemetry`. The metadata file records:
 - The sample interval.
 - The exact command line for each tool that ran.
 
-The summary report (`report.txt`) is optional and is derived from raw files; it should never replace the raw tool output. The report is intended for quick triage, while the raw logs are the source of truth for deeper analysis.
+The summary report (`${prefix}_report.txt`) is optional and is derived from raw files; it should never replace the raw tool output. The report is intended for quick triage, while the raw logs are the source of truth for deeper analysis.
 
 #### Cache handling and run modes
 When `--cache=both` is selected, the script performs two runs and writes two files (`*_bust.txt` and the cached base name). For single-cache modes, only one file is written, and the cache mode is recorded in `run.param`.
 
 This approach keeps the file naming stable while still making cache behavior explicit in metadata. It also ensures the run directory remains the single source of truth for that run, regardless of how many cache variants were executed.
+
+#### Log collection and review design
+Use `scripts/slice-logs.sh` to extract Apache and system log slices for a run based on its `run.param` file. This provides a consistent, repeatable log window without relying on filename timestamps. Example:
+```bash
+./scripts/slice-logs.sh --run-param /var/tmp/multiwp/perf_<run-id>/<prefix>_run.param
+```
+
+This design describes how to automate log slicing and review for each perf run. The goal is to keep raw logs intact, use the run metadata as a source of truth, and produce deterministic slices and summaries that can be compared across runs.
+
+##### Inputs and time window
+Log slicing is driven by `run.param` for a given domain/run. The script reads:
+
+- `UTC_START` and `UTC_END` for the run time bounds.
+- `LOG_PAD_SEC` as a symmetric padding value.
+- `DOMAIN` for domain-specific Apache log selection.
+- `RUN_ID` and `RUN_DIR` for output naming.
+
+The slice window is computed as:
+
+- `WINDOW_START = UTC_START - LOG_PAD_SEC`
+- `WINDOW_END = UTC_END + LOG_PAD_SEC`
+
+The log slicer uses UTC for Apache logs and local time for system logs unless the system timezone is also UTC (as on this host). Time conversion should be explicit and recorded in the outputs to avoid ambiguous correlations.
+
+##### Log sources
+The initial implementation targets the following sources and does not modify or rotate any log files:
+
+Apache (domain-specific):
+- SSL access log for the domain (`alphaeos_ssl_access.log` pattern)
+- SSL error log for the domain (`alphaeos_ssl_error.log` pattern)
+- HTTP access/error logs only when a non-SSL origin is expected for the domain
+
+System:
+- `/var/log/syslog`
+- `/var/log/auth.log`
+- `/var/log/kern.log`
+- `/var/log/ufw.log` (if enabled)
+
+The log list is explicit to prevent accidental expansion. If no log file exists, record a warning and continue.
+
+##### Output files
+Sliced logs are written into the same run directory with a consistent naming convention:
+
+- `${prefix}_apache_access.log`
+- `${prefix}_apache_error.log`
+- `${prefix}_syslog.log`
+- `${prefix}_auth.log`
+- `${prefix}_kern.log`
+- `${prefix}_ufw.log`
+- `${prefix}_log_summary.txt`
+
+Each file preserves the original log order and includes only entries inside the window. No reformatting is performed. The summary file is derived from the slices and is optional.
+
+##### Parsing rules
+Apache and system logs use different timestamp formats. The slicer should parse each log with a format-specific matcher:
+
+- Apache access/error: `[%d/%b/%Y:%H:%M:%S %z]`
+- Syslog/auth/kern/ufw: `Mon DD HH:MM:SS` (local time, without year)
+
+For syslog-style entries, the current year and local timezone are assumed; the script should record these assumptions in the summary.
+
+##### Summary content
+The summary should be concise and focused on diagnosis:
+
+Apache access:
+- Request count by status (2xx, 3xx, 4xx, 5xx)
+- Top paths (by count)
+- Top remote IPs (by count)
+
+Apache error:
+- Unique error lines and counts
+- Any 5xx error messages, if present
+
+System logs:
+- Auth failures and SSH login attempts (auth.log)
+- Kernel warnings (kern.log)
+- UFW blocks (ufw.log)
+
+The summary does not replace the raw slices; it provides a quick review and highlights anomalies.
+
+##### CLI and integration
+Implement log slicing as a standalone script (for example, `scripts/slice-logs.sh`) so it can be used after a run or against historical data. Suggested interface:
+
+```
+slice-logs.sh --run-dir /var/tmp/multiwp/perf_<RUN_ID> --domain alphaeos.net
+```
+
+The script should locate the matching `${prefix}_run.param`, compute the window, and write the sliced logs alongside the perf outputs. Integrating log slicing into `perf-load.sh` can be deferred until the log slicer stabilizes.
+
+##### Reliability and safety
+The log slicer must be read-only and must not edit log files. It should:
+
+- Fail fast if the run metadata is missing or unreadable.
+- Warn (not fail) if a log file is missing.
+- Record the computed window and any parsing assumptions in the summary.
+- Avoid parsing compressed logs in the initial version; add gzip support later if needed.
 ```bash
 wrk2 -t4 -c64 -d<duration> -R<rate> https://zero.directory/
 wrk2 -t4 -c64 -d<duration> -R<rate> "https://zero.directory/?cache_bust=${RUN_ID}"
@@ -526,7 +639,7 @@ done
 ```
 
 ### Host telemetry during tests
-Collect CPU, memory, and IO metrics during each test window so origin pressure can be correlated with latency. When telemetry is enabled, `test-load.sh` starts and stops telemetry per domain and saves the logs alongside `wrk2` output using the same run identifier.
+Collect CPU, memory, and IO metrics during each test window so origin pressure can be correlated with latency. When telemetry is enabled, `perf-load.sh` starts and stops telemetry per domain and saves the logs alongside `wrk2` output using the same run identifier.
 
 ```bash
 vmstat 1 > "$OUT/vmstat.log" &
@@ -557,7 +670,7 @@ The load and telemetry tools we rely on come from distinct projects and they emi
 
 Key arguments:
 - `wrk`: `-t` (threads), `-c` (connections), `-d` (duration). It runs as fast as possible.
-- `wrk2`: `-t` (threads), `-c` (connections), `-d` (duration), `-R` (rate). It requires an explicit rate.
+- `wrk2`: `-t` (threads), `-c` (connections), `-d` (duration), `-R` (rate). It requires an explicit rate. The local build also supports `--warmup <T>` to set the calibration delay; `0` disables calibration.
 
 **Process and system telemetry**
 `pidstat` and `sar` are part of the sysstat suite. `pidstat` reports per-process CPU and memory, while `sar` reports system-wide CPU, memory, load, and network. `vmstat` and `iostat` are lightweight system monitors commonly installed with `procps` and `sysstat`; they provide fast, low-overhead summaries of CPU, memory, and storage latency.

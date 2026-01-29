@@ -229,7 +229,7 @@ Stage 3: Limited write operations (future, gated)
 - Log every change, and write an audit record (timestamp + inputs) to a local file.
 
 Stage 4: Integration hooks (future)
-- Integrate with `verify-domain.sh` or `check-cf.sh` to cross-reference portal availability with zone metadata.
+- Integrate with `check-domain.sh` or `check-cf.sh` to cross-reference portal availability with zone metadata.
 
 Open items for the script:
 - Confirm whether Cloudflare exposes API endpoints for MCP portals in the Access API.

@@ -44,7 +44,7 @@ Follow `Operations.md` section 4.4 (`Operations.md#44-origin-certs`) for the UI 
 Assumes WordPress multisite is already installed; see `Operations.md` section 5.1 (`Operations.md#51-site-onboarding`) for the setup sequence.
 
 #### Verify
-`./scripts/verify-domain.sh domain.com`
+`./scripts/check-domain.sh domain.com`
 
 ### Query Multisite Setup
 Use `Operations.md` sections 5.2 and 6.1 (`Operations.md#52-site-troubleshooting`, `Operations.md#61-validation-checks`) for the authoritative validation checks and troubleshooting sequence.
@@ -100,7 +100,7 @@ Program scripts (alphabetical):
 | Script | Purpose | Status |
 |--------|---------|--------|
 | `apache-vhost.sh` | Create Apache HTTP + SSL vhosts for domain | Exercised |
-| `check-auth-domains.sh` | Compare CF_DOMAINS in auth files to domains.csv | Not exercised |
+| `check-auth.sh` | Compare CF_DOMAINS in auth files to domains.csv | Not exercised |
 | `check-cf.sh` | Inspect Cloudflare zone settings via API | Exercised |
 | `check-edge.sh` | Validate Cloudflare edge behavior and headers | Exercised |
 | `check-origin.sh` | Validate origin certs, vhosts, and Apache health | Exercised |
@@ -116,7 +116,7 @@ Program scripts (alphabetical):
 | `setup-wp.sh` | Bootstrap WordPress multisite base configuration | Not exercised |
 | `test-record.sh` | Run validation checks and record status updates in domains.csv | Not exercised |
 | `verify-cf-auth.sh` | Validate Cloudflare credentials (token/key) | Exercised |
-| `verify-domain.sh` | End-to-end validation (edge, origin, WP) | Exercised |
+| `check-domain.sh` | End-to-end validation (edge, origin, WP) | Exercised |
 
 Helper scripts:
 | Script | Purpose | Status |

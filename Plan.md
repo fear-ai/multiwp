@@ -16,7 +16,7 @@ Gather the domain inventory, map each domain to the correct Cloudflare account/z
 Confirm CLI options, usage format, and helper behavior are aligned with current scripts. Ensure `scripts/Scripts.md`, `scripts/Options.csv`, `scripts/Helpers.csv`, `scripts/Prompt.md`, and `scripts/example.auth` are consistent so automation tooling relies on a clear contract.
 
 3) Read-only validation pipeline
-Run linting and unit tests, then execute read-only verification scripts (`verify-cf-auth.sh`, `check-cf.sh`, `check-edge.sh`, `check-origin.sh`, `check-wp.sh`, `verify-domain.sh`) on a small pilot set. Use the domain inventory format (Pending 1) to pull a representative sample: at least one domain per Cloudflare account, one redirect-only domain (non-empty `redirect_url`), one fully provisioned multisite domain, and one intentionally incomplete/test domain. Define pass/fail criteria and stop if any credential or API mismatch appears.
+Run linting and unit tests, then execute read-only verification scripts (`verify-cf-auth.sh`, `check-cf.sh`, `check-edge.sh`, `check-origin.sh`, `check-wp.sh`, `check-domain.sh`) on a small pilot set. Use the domain inventory format (Pending 1) to pull a representative sample: at least one domain per Cloudflare account, one redirect-only domain (non-empty `redirect_url`), one fully provisioned multisite domain, and one intentionally incomplete/test domain. Define pass/fail criteria and stop if any credential or API mismatch appears.
 
 4) Batch automation runner
 Implement a runner that reads the domain inventory format (Pending 1), separates provisioning steps (DNS, cert issuance, vhosts) from verification steps, and logs per-domain outcomes with retries and idempotent behavior. Treat non-empty `redirect_url` as redirect-only so origin/WP checks are skipped.
@@ -74,7 +74,7 @@ Define and document the install-time output fields that are recorded for later C
 Evaluate whether to add redirect validation options to `check-edge.sh` (expected status and Location) once the current redirect-only behavior is stable.
 
 6) Cloudflare zone selection improvements
-Decide whether `check-edge.sh` and `verify-domain.sh` should support per-domain zone mappings rather than relying on a single `CF_ZONE_ID` per run, and document the chosen approach.
+Decide whether `check-edge.sh` and `check-domain.sh` should support per-domain zone mappings rather than relying on a single `CF_ZONE_ID` per run, and document the chosen approach.
 
 7) Cloudflare settings hygiene
 Consider adding explicit handling for clearing CF_* variables on the CLI, and whether `check-cf.sh` should iterate `CF_ZONE_IDS` when no zone is supplied. These are candidates for a future hardening pass, not active behavior.

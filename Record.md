@@ -92,7 +92,7 @@ The orchestrators (`check-read.sh` and `test-record.sh`) intentionally handle zo
 2) **Operational safety:** API lookups during broad orchestration can mask inventory gaps by silently resolving missing zone ids. That makes the inventory look complete when it is not. Skipping the API instead forces the missing zone id to be recorded explicitly.
 3) **Performance and rate limits:** Orchestrators are designed to be fast, read-only sweeps. Avoiding per-domain API lookups reduces API load and keeps routine runs predictable.
 
-When a zone id is missing, the intended path is to fix the inventory first (for example, by running `onboard-zone.sh` or `check-auth-domains.sh --check-ids`) rather than letting the orchestration layer infer it on the fly.
+When a zone id is missing, the intended path is to fix the inventory first (for example, by running `onboard-zone.sh` or `check-auth.sh --check-ids`) rather than letting the orchestration layer infer it on the fly.
 
 ## Account-Scoped Auth and Inventory Alignment
 The current model allows multiple zones in a single `.auth` file while `domains.csv` may reference multiple accounts. This blurs the account/zone/domain relationship and makes it easy for scripts to resolve the wrong zone when a stale `CF_ZONE_ID` is set or a domain is missing from the inventory. The proposed design is to make `.auth` files account-scoped and to align `domains.csv` with that account scope.
