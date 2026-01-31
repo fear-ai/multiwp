@@ -10,6 +10,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/common.sh"
 . "$SCRIPTS_DIR/cli.sh"
+. "$SCRIPTS_DIR/orch.sh"
 
 EDGE_ARGS=()
 ORIGIN_ARGS=()
@@ -126,15 +127,7 @@ for domain in "${DOMAINS[@]}"; do
     section "ORCH" "Run"
     kv "DOMAIN" "$domain"
 
-    if ! "$ORIGIN_SCRIPT" "${ORIGIN_ARGS[@]}" "$domain"; then
-        overall_ok=false
-    fi
-
-    if ! "$WP_SCRIPT" "${WP_ARGS[@]}" "$domain"; then
-        overall_ok=false
-    fi
-
-    if ! "$EDGE_SCRIPT" "${EDGE_ARGS[@]}" "$domain"; then
+    if ! run_domain_checks "$domain"; then
         overall_ok=false
     fi
 

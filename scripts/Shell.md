@@ -5,6 +5,17 @@ This document defines Bash development conventions for the scripts in this repos
 
 This document is authoritative for Bash conventions and shared helper usage. `scripts/Scripts.md` is authoritative for option and environment variable definitions, including current interface conventions and validations.
 
+## Script Roles
+
+This repository uses four script roles to keep expectations clear:
+
+- **Helper/library scripts** are sourced by other scripts and should never be executed directly. They provide shared helpers and keep behavior consistent across entrypoints.
+- **Program scripts** are user-facing entrypoints. They implement `usage()`, parse options, and perform a single operation such as provisioning, validation, or performance measurement.
+- **Orchestration scripts** are program scripts that call other program scripts in a controlled sequence. They provide multi-step workflows without duplicating logic.
+- **Test scripts** run standalone unit checks for helpers and shared parsing logic.
+
+Program scripts include orchestration scripts, so all program scripts must follow the same Bash conventions and helper usage described below.
+
 ## Baseline Bash Practices
 
 The scripts prioritize predictable behavior, explicit error handling, and clear input validation. These conventions are the foundation for the shared helpers and are expected in all program scripts.

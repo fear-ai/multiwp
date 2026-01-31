@@ -211,7 +211,7 @@ check_domain() {
         location=$(echo "$headers" | awk -F': ' 'tolower($1)=="location" {print $2}' | tail -n 1 | tr -d '\r')
         if [ "$status" = "301" ]; then
             if [[ "$location" == "${expected_prefix}"* ]] || { [ -n "$alt_prefix" ] && [[ "$location" == "${alt_prefix}"* ]]; }; then
-                echo "${label}: 301 -> ${location}"
+                kv "REDIRECT_${label// /_}" "301 -> ${location}"
             else
                 fail "${label} redirect target mismatch (Location: $location)"
                 ok=false
@@ -228,18 +228,18 @@ check_domain() {
         fail "DNS A records not found for $canonical_domain"
         ok=false
     else
-        echo "DNS A: $a_records"
+        kv "DNS_A" "$a_records"
     fi
 
     local cname_records
     cname_records=$(dig +short CNAME "$www_domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
     if [ -n "$cname_records" ]; then
-        echo "DNS CNAME (www): $cname_records"
+        kv "DNS_CNAME_WWW" "$cname_records"
     else
         local www_a_records
         www_a_records=$(dig +short A "$www_domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
         if [ -n "$www_a_records" ]; then
-            echo "DNS A (www): $www_a_records"
+            kv "DNS_A_WWW" "$www_a_records"
         else
             fail "DNS CNAME or A record not found for $www_domain"
             ok=false
@@ -249,13 +249,13 @@ check_domain() {
     local wildcard_cname
     wildcard_cname=$(dig +short CNAME "*.${canonical_domain}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
     if [ -n "$wildcard_cname" ]; then
-        echo "DNS CNAME (*): $wildcard_cname"
+        kv "DNS_CNAME_WILDCARD" "$wildcard_cname"
     fi
 
     local aaaa_records
     aaaa_records=$(dig +short AAAA "$canonical_domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
     if [ -n "$aaaa_records" ]; then
-        echo "DNS AAAA: $aaaa_records"
+        kv "DNS_AAAA" "$aaaa_records"
     fi
 
     section "EDGE" "RedirectRule"
@@ -280,7 +280,7 @@ check_domain() {
             local https_status
             https_status=$(echo "$https_headers" | awk 'NR==1 {print $2}')
             if [ "$https_status" = "200" ]; then
-                echo "HTTPS apex status: 200"
+                kv "HTTPS_APEX_STATUS" "200"
             else
                 fail "HTTPS apex expected 200 (status: ${https_status})"
                 ok=false
@@ -292,7 +292,7 @@ check_domain() {
             server_header=$(echo "$https_headers" | awk -F': ' 'tolower($1)=="server" {print $2}' | tail -n 1 | tr -d '\r')
 
             if [ -n "$cf_ray" ] || echo "$server_header" | grep -qi "cloudflare"; then
-                echo "Cloudflare proxy detected"
+                status_info "Cloudflare proxy detected"
             else
                 warn "Cloudflare proxy headers not detected"
             fi
@@ -306,15 +306,12 @@ check_domain() {
                 "x-xss-protection"
                 "expect-ct"
             )
-            if [ "$HSTS_REQUIRED" = true ]; then
-                required_headers+=("strict-transport-security")
-            fi
 
             section "EDGE" "Headers"
             local header
             for header in "${required_headers[@]}"; do
                 if echo "$https_headers" | grep -qi "^${header}:"; then
-                    echo "Header present: ${header}"
+                    kv "HEADER_PRESENT" "$header"
                 else
                     fail "Missing required header: ${header}"
                     ok=false
@@ -323,14 +320,27 @@ check_domain() {
 
             for header in "${optional_headers[@]}"; do
                 if echo "$https_headers" | grep -qi "^${header}:"; then
-                    echo "Header present: ${header}"
+                    kv "HEADER_PRESENT_OPTIONAL" "$header"
                 else
                     warn "Optional header not found: ${header}"
                 fi
             done
 
-            if [ "$HSTS_REQUIRED" = false ] && echo "$https_headers" | grep -qi "^strict-transport-security:"; then
-                echo "Header present: strict-transport-security"
+            local hsts_value
+            hsts_value=$(echo "$https_headers" | awk -F': ' 'tolower($1)=="strict-transport-security" {print $2}' | tail -n 1 | tr -d '\r')
+            if [ -n "$hsts_value" ]; then
+                if [ "$HSTS_REQUIRED" = true ]; then
+                    kv "HEADER_HSTS" "$hsts_value"
+                else
+                    status_info "HSTS header present: ${hsts_value}"
+                fi
+            else
+                if [ "$HSTS_REQUIRED" = true ]; then
+                    fail "Missing required header: strict-transport-security"
+                    ok=false
+                else
+                    status_info "HSTS header not present (optional)"
+                fi
             fi
         fi
     fi
@@ -342,7 +352,7 @@ check_domain() {
             ok=false
         else
             if grep -qiE '/wp-(content|includes)/' <<<"$html_body"; then
-                echo "WordPress asset markers present"
+                kv "WORDPRESS_ASSET_MARKERS" "present"
             else
                 fail "WordPress asset markers not found"
                 ok=false

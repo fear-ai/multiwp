@@ -21,6 +21,7 @@ RATE=""
 CACHE_BUST_PARAM="cache_bust"
 CACHE_MODE="both"
 INTERVAL=1
+MYSQL_INTERVAL="${MYSQL_INTERVAL:-5}"
 LOG_PAD_SEC="${LOG_PAD_SEC:-5}"
 MODE="init"
 TELEMETRY_LIST="sar"
@@ -29,12 +30,14 @@ USE_PIDSTAT=false
 USE_VMSTAT=false
 USE_IOSTAT=false
 USE_CGTOP=false
+USE_MYSQL_PERF=false
 TELEMETRY_DETAIL=false
 MODE_SET=false
 SET_DURATION=false
 SET_THREADS=false
 SET_CONNECTIONS=false
 SET_RATE=false
+SET_MYSQL_INTERVAL=false
 HEAD_MODE="false"
 REPORT_MODE="false"
 ALLOW_ROOT=false
@@ -57,7 +60,8 @@ Options:
   --cache-bust PARAM  Cache-bust query parameter name (default: cache_bust)
   --cache MODE  Run cached, bust, or both (default: both; values: both|cached|bust)
   --interval N  Telemetry interval in seconds (default: 1)
-  --telemetry LIST  Telemetry tools (default: sar; values: sar,pidstat,vmstat,iostat,cgtop,all,none)
+  --mysql-interval N  MySQL perf sampling interval in seconds (default: 5)
+  --telemetry LIST  Telemetry tools (default: sar; values: sar,pidstat,vmstat,iostat,cgtop,mysql,all,none)
   --head  Write response headers for cached and cache-busted requests
   --report  Emit summary metrics after each wrk run
   --help  Show this help
@@ -159,6 +163,16 @@ while getopts ":-:" opt; do
                     INTERVAL="${!OPTIND}"
                     OPTIND=$((OPTIND+1))
                     ;;
+                mysql-interval=*)
+                    MYSQL_INTERVAL="${OPTARG#*=}"
+                    SET_MYSQL_INTERVAL=true
+                    ;;
+                mysql-interval)
+                    [ -n "${!OPTIND-}" ] || err "--mysql-interval requires a value"
+                    MYSQL_INTERVAL="${!OPTIND}"
+                    OPTIND=$((OPTIND+1))
+                    SET_MYSQL_INTERVAL=true
+                    ;;
                 telemetry=*) TELEMETRY_LIST="${OPTARG#*=}" ;;
                 telemetry)
                     [ -n "${!OPTIND-}" ] || err "--telemetry requires a value"
@@ -221,6 +235,8 @@ parse_telemetry_list() {
     local list="$1"
     local expanded=""
     local item
+    local items=()
+    local use_all=false
 
     case "$list" in
         none)
@@ -228,14 +244,10 @@ parse_telemetry_list() {
             USE_PIDSTAT=false
             USE_VMSTAT=false
             USE_IOSTAT=false
+            USE_CGTOP=false
+            USE_MYSQL_PERF=false
             TELEMETRY_DETAIL=false
             return
-            ;;
-        all)
-            expanded="sar,pidstat,vmstat,iostat,cgtop"
-            ;;
-        *)
-            expanded="$list"
             ;;
     esac
 
@@ -244,19 +256,30 @@ parse_telemetry_list() {
     USE_VMSTAT=false
     USE_IOSTAT=false
     USE_CGTOP=false
+    USE_MYSQL_PERF=false
 
-    IFS=',' read -r -a items <<<"$expanded"
+    IFS=',' read -r -a items <<<"$list"
     for item in "${items[@]}"; do
         case "$item" in
+            all) use_all=true ;;
             sar) USE_SAR=true ;;
             pidstat) USE_PIDSTAT=true ;;
             vmstat) USE_VMSTAT=true ;;
             iostat) USE_IOSTAT=true ;;
             cgtop) USE_CGTOP=true ;;
+            mysql) USE_MYSQL_PERF=true ;;
             none) err "--telemetry=none cannot be combined with other values" ;;
             *) err "--telemetry invalid value: $item" ;;
         esac
     done
+    if $use_all; then
+        USE_SAR=true
+        USE_PIDSTAT=true
+        USE_VMSTAT=true
+        USE_IOSTAT=true
+        USE_CGTOP=true
+        USE_MYSQL_PERF=true
+    fi
     TELEMETRY_DETAIL=false
     if $USE_SAR && { $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP; }; then
         TELEMETRY_DETAIL=true
@@ -280,6 +303,9 @@ if $USE_IOSTAT; then
 fi
 if $USE_CGTOP; then
     require_cmds /usr/bin/systemd-cgtop
+fi
+if $USE_MYSQL_PERF; then
+    require_cmds mysql
 fi
 if [ "$REPORT_MODE" = "true" ] && { $USE_SAR || $USE_PIDSTAT; }; then
     require_cmds python3
@@ -310,6 +336,7 @@ kv "RATE" "${RATE:-na}"
 kv "WRK_BIN" "$WRK_BIN"
 kv "CACHE" "$CACHE_MODE"
 kv "INTERVAL" "$INTERVAL"
+kv "MYSQL_INTERVAL" "$MYSQL_INTERVAL"
 kv "TELEMETRY" "$TELEMETRY_LIST"
 kv "HEAD" "$HEAD_MODE"
 kv "REPORT" "$REPORT_MODE"
@@ -326,6 +353,85 @@ check_expected_file() {
     local label="$2"
     if [ ! -s "$path" ]; then
         warn "Missing or empty ${label}: $path"
+    fi
+}
+
+mysql_perf_sample() {
+    local file="$1"
+    local output
+    local pool_data
+    local pool_total
+    local pool_pages_data
+    local pool_pages_total
+    local page_size
+    local buffer_size
+    local reads
+    local requests
+    local questions
+    local pool_used_pct="na"
+    local hit_rate="na"
+    local now
+
+    output=$(priv mysql -N -e "SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_reads'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read_requests'; SHOW GLOBAL STATUS LIKE 'Questions'; SHOW VARIABLES LIKE 'innodb_buffer_pool_size'; SHOW VARIABLES LIKE 'innodb_page_size';" 2>/dev/null || true)
+    if [ -z "$output" ]; then
+        return 1
+    fi
+
+    pool_data=$(awk '$1=="Innodb_buffer_pool_bytes_data" {print $2}' <<<"$output")
+    pool_total=$(awk '$1=="Innodb_buffer_pool_bytes_total" {print $2}' <<<"$output")
+    pool_pages_data=$(awk '$1=="Innodb_buffer_pool_pages_data" {print $2}' <<<"$output")
+    pool_pages_total=$(awk '$1=="Innodb_buffer_pool_pages_total" {print $2}' <<<"$output")
+    reads=$(awk '$1=="Innodb_buffer_pool_reads" {print $2}' <<<"$output")
+    requests=$(awk '$1=="Innodb_buffer_pool_read_requests" {print $2}' <<<"$output")
+    questions=$(awk '$1=="Questions" {print $2}' <<<"$output")
+    buffer_size=$(awk '$1=="innodb_buffer_pool_size" {print $2}' <<<"$output")
+    page_size=$(awk '$1=="innodb_page_size" {print $2}' <<<"$output")
+
+    if [ -z "$pool_data" ] && [ -n "$pool_pages_data" ] && [ -n "$page_size" ]; then
+        pool_data=$((pool_pages_data * page_size))
+    fi
+    if [ -z "$pool_total" ]; then
+        if [ -n "$buffer_size" ]; then
+            pool_total="$buffer_size"
+        elif [ -n "$pool_pages_total" ] && [ -n "$page_size" ]; then
+            pool_total=$((pool_pages_total * page_size))
+        fi
+    fi
+
+    if [ -n "$pool_total" ] && [ "$pool_total" -gt 0 ] 2>/dev/null; then
+        pool_used_pct=$(awk -v d="$pool_data" -v t="$pool_total" 'BEGIN {printf "%.2f", (d/t)*100}')
+    fi
+    if [ -n "$requests" ] && [ "$requests" -gt 0 ] 2>/dev/null; then
+        hit_rate=$(awk -v r="$reads" -v q="$requests" 'BEGIN {printf "%.4f", 1 - (r/q)}')
+    fi
+
+    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    echo "$now pool_used_pct=${pool_used_pct} hit_rate=${hit_rate} queries=${questions:-na}" >> "$file"
+}
+
+start_mysql_perf() {
+    local file="$1"
+    MYSQL_PERF_PID=""
+    if ! $USE_MYSQL_PERF; then
+        return 0
+    fi
+    if ! mysql_perf_sample "$file"; then
+        warn "Unable to collect MySQL perf sample; skipping mysql-perf log"
+        USE_MYSQL_PERF=false
+        return 0
+    fi
+    (
+        while true; do
+            sleep "$MYSQL_INTERVAL"
+            mysql_perf_sample "$file" || break
+        done
+    ) &
+    MYSQL_PERF_PID=$!
+}
+
+stop_mysql_perf() {
+    if [ -n "${MYSQL_PERF_PID-}" ]; then
+        kill "$MYSQL_PERF_PID" >/dev/null 2>&1 || true
     fi
 }
 
@@ -388,7 +494,7 @@ summarize_wrk() {
 
 bin5_trend_sar_cpu() {
     local file="$1"
-    python3 - "$file" <<'EOF'
+    python3 - "$file" "$cmd" <<'EOF'
 import re
 import sys
 
@@ -462,13 +568,15 @@ print(f"TREND={trend}")
 EOF
 }
 
-bin5_trend_pidstat_apache() {
+bin5_trend_pidstat_cmd() {
     local file="$1"
-    python3 - "$file" <<'EOF'
+    local cmd="$2"
+    python3 - "$file" "$cmd" <<'EOF'
 import re
 import sys
 
 path = sys.argv[1]
+cmd = sys.argv[2] if len(sys.argv) > 2 else "apache2"
 mode = None
 ts_sum = {}
 
@@ -491,7 +599,7 @@ with open(path, "r", encoding="utf-8", errors="replace") as fh:
         if mode != "cpu":
             continue
         parts = line.split()
-        if len(parts) < 10 or parts[-1] != "apache2":
+        if len(parts) < 10 or parts[-1] != cmd:
             continue
         cpu = parts[-3]
         if not re.match(r"^[0-9.]+$", cpu):
@@ -535,6 +643,34 @@ else:
 print(f"BIN5_AVG={bin_str}")
 print(f"TREND={trend}")
 EOF
+}
+
+pidstat_summary_for_cmd() {
+    local file="$1"
+    local cmd="$2"
+    awk -v cmd="$cmd" '
+        /%usr +%system/ {mode="cpu"; next}
+        /minflt\/s/ {mode="mem"; next}
+        mode=="cpu" && $NF==cmd && $9 ~ /^[0-9.]+$/ {
+            ts=$1" "$2
+            sum[ts]+=$9
+        }
+        END {
+            max=-1
+            count=0
+            total=0
+            for (t in sum) {
+                total+=sum[t]
+                count++
+                if (sum[t]>max) {
+                    max=sum[t]
+                }
+            }
+            if (count>0) {
+                printf "%.2f %.2f %d\n", total/count, max, count
+            }
+        }
+    ' "$file"
 }
 
 summarize_sar() {
@@ -679,61 +815,80 @@ summarize_pidstat() {
     local domain="$1"
     local cache="$2"
     local file="$3"
-    local cpu_sum_avg
-    local cpu_sum_max
-    local samples
+    local apache_avg
+    local apache_max
+    local apache_samples
+    local mysql_avg
+    local mysql_max
+    local mysql_samples
+    local wrk_avg
+    local wrk_max
+    local wrk_samples
     local pidstat_summary
-    local cpu_bin5
-    local cpu_trend
+    local apache_bin5
+    local apache_trend
+    local mysql_bin5
+    local mysql_trend
+    local wrk_bin5
+    local wrk_trend
 
     if [ ! -s "$file" ]; then
         warn "Missing or empty pidstat output for ${domain} (${cache}): $file"
         return
     fi
 
-    pidstat_summary=$(awk '
-        /%usr +%system/ {mode="cpu"; next}
-        /minflt\/s/ {mode="mem"; next}
-        mode=="cpu" && $NF=="apache2" && $9 ~ /^[0-9.]+$/ {
-            ts=$1" "$2
-            sum[ts]+=$9
-        }
-        END {
-            max=-1
-            count=0
-            total=0
-            for (t in sum) {
-                total+=sum[t]
-                count++
-                if (sum[t]>max) {
-                    max=sum[t]
-                }
-            }
-            if (count>0) {
-                printf "%.2f %.2f %d\n", total/count, max, count
-            }
-        }
-    ' "$file")
-    read -r cpu_sum_avg cpu_sum_max samples <<<"$pidstat_summary"
-    cpu_bin5="na"
-    cpu_trend="na"
+    pidstat_summary=$(pidstat_summary_for_cmd "$file" apache2 || true)
+    read -r apache_avg apache_max apache_samples <<<"$pidstat_summary"
+    pidstat_summary=$(pidstat_summary_for_cmd "$file" mysqld || true)
+    read -r mysql_avg mysql_max mysql_samples <<<"$pidstat_summary"
+    pidstat_summary=$(pidstat_summary_for_cmd "$file" wrk || true)
+    read -r wrk_avg wrk_max wrk_samples <<<"$pidstat_summary"
+
+    apache_bin5="na"
+    apache_trend="na"
+    mysql_bin5="na"
+    mysql_trend="na"
+    wrk_bin5="na"
+    wrk_trend="na"
     if [ "$REPORT_MODE" = "true" ]; then
         while IFS='=' read -r k v; do
             case "$k" in
-                BIN5_AVG) cpu_bin5="$v" ;;
-                TREND) cpu_trend="$v" ;;
+                BIN5_AVG) apache_bin5="$v" ;;
+                TREND) apache_trend="$v" ;;
             esac
-        done < <(bin5_trend_pidstat_apache "$file")
+        done < <(bin5_trend_pidstat_cmd "$file" apache2)
+        while IFS='=' read -r k v; do
+            case "$k" in
+                BIN5_AVG) mysql_bin5="$v" ;;
+                TREND) mysql_trend="$v" ;;
+            esac
+        done < <(bin5_trend_pidstat_cmd "$file" mysqld)
+        while IFS='=' read -r k v; do
+            case "$k" in
+                BIN5_AVG) wrk_bin5="$v" ;;
+                TREND) wrk_trend="$v" ;;
+            esac
+        done < <(bin5_trend_pidstat_cmd "$file" wrk)
     fi
 
     report_section "PERF" "Telemetry"
     report_kv "DOMAIN" "$domain"
     report_kv "CACHE" "$cache"
-    report_kv "APACHE_CPU_SUM_AVG" "${cpu_sum_avg:-na}"
-    report_kv "APACHE_CPU_SUM_MAX" "${cpu_sum_max:-na}"
-    report_kv "APACHE_CPU_SAMPLES" "${samples:-0}"
-    report_kv "APACHE_CPU_SUM_BIN5_AVG" "$cpu_bin5"
-    report_kv "APACHE_CPU_SUM_TREND" "$cpu_trend"
+    report_kv "APACHE_CPU_SUM_AVG" "${apache_avg:-na}"
+    report_kv "APACHE_CPU_SUM_MAX" "${apache_max:-na}"
+    report_kv "APACHE_CPU_SAMPLES" "${apache_samples:-0}"
+    report_kv "APACHE_CPU_SUM_BIN5_AVG" "$apache_bin5"
+    report_kv "APACHE_CPU_SUM_TREND" "$apache_trend"
+    report_kv "MYSQL_CPU_SUM_AVG" "${mysql_avg:-na}"
+    report_kv "MYSQL_CPU_SUM_MAX" "${mysql_max:-na}"
+    report_kv "MYSQL_CPU_SAMPLES" "${mysql_samples:-0}"
+    report_kv "MYSQL_CPU_SUM_BIN5_AVG" "$mysql_bin5"
+    report_kv "MYSQL_CPU_SUM_TREND" "$mysql_trend"
+    report_kv "WRK_CPU_SUM_AVG" "${wrk_avg:-na}"
+    report_kv "WRK_CPU_SUM_MAX" "${wrk_max:-na}"
+    report_kv "WRK_CPU_SAMPLES" "${wrk_samples:-0}"
+    report_kv "WRK_CPU_SUM_BIN5_AVG" "$wrk_bin5"
+    report_kv "WRK_CPU_SUM_TREND" "$wrk_trend"
 }
 
 report_section() {
@@ -758,13 +913,14 @@ start_telemetry() {
     IOSTAT_PID=""
     SAR_PID=""
     CGTOP_PID=""
+    MYSQL_PERF_PID=""
 
     if $USE_VMSTAT; then
         vmstat "$INTERVAL" > "$OUT_DIR/${prefix}_vmstat.log" &
         VMSTAT_PID=$!
     fi
     if $USE_PIDSTAT; then
-        pidstat -ru -C apache2 "$INTERVAL" > "$OUT_DIR/${prefix}_pidstat.log" &
+        pidstat -ru -C 'apache2|mysqld|wrk' "$INTERVAL" > "$OUT_DIR/${prefix}_pidstat.log" &
         PIDSTAT_PID=$!
     fi
     if $USE_IOSTAT; then
@@ -816,11 +972,12 @@ for domain in "${DOMAINS[@]}"; do
     IOSTAT_CMD=""
     CGTOP_CMD=""
     TELEMETRY_SCOPE="domain"
+    MYSQL_PERF_LOG=""
     if $USE_VMSTAT; then
         VMSTAT_CMD="vmstat ${INTERVAL}"
     fi
     if $USE_PIDSTAT; then
-        PIDSTAT_CMD="pidstat -ru -C apache2 ${INTERVAL}"
+        PIDSTAT_CMD="pidstat -ru -C 'apache2|mysqld|wrk' ${INTERVAL}"
     fi
     if $USE_IOSTAT; then
         IOSTAT_CMD="iostat -xz ${INTERVAL}"
@@ -833,6 +990,10 @@ for domain in "${DOMAINS[@]}"; do
     fi
     if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP; then
         start_telemetry "$prefix"
+        if $USE_MYSQL_PERF; then
+            MYSQL_PERF_LOG="$OUT_DIR/${prefix}_mysql-perf.log"
+            start_mysql_perf "$MYSQL_PERF_LOG"
+        fi
     fi
 
     base_url="https://${domain}/"
@@ -909,6 +1070,10 @@ for domain in "${DOMAINS[@]}"; do
 
     if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP; then
         stop_telemetry
+        stop_mysql_perf
+        if [ -n "$MYSQL_PERF_LOG" ]; then
+            check_expected_file "$MYSQL_PERF_LOG" "mysql perf log"
+        fi
     fi
 
     DOMAIN_END_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -972,6 +1137,11 @@ for domain in "${DOMAINS[@]}"; do
         fi
         if $USE_CGTOP; then
             echo "CGTOP_CMD: $CGTOP_CMD"
+        fi
+        if $USE_MYSQL_PERF; then
+            echo "MYSQL_PERF_LOG: $MYSQL_PERF_LOG"
+            echo "MYSQL_PERF_CMD: mysql -N -e SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_reads'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read_requests'; SHOW GLOBAL STATUS LIKE 'Questions'; SHOW VARIABLES LIKE 'innodb_buffer_pool_size'; SHOW VARIABLES LIKE 'innodb_page_size';"
+            echo "MYSQL_PERF_INTERVAL_SEC: $MYSQL_INTERVAL"
         fi
     } > "$OUT_DIR/${prefix}_run.param"
 done

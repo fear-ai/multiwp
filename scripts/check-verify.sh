@@ -1,8 +1,8 @@
 #!/bin/bash
-# check-read.sh - Run syntax checks, unit tests, and read-only server/edge checks.
+# check-verify.sh - Run syntax checks, unit tests, and read-only server/edge checks.
 # For options, environment variables, defaults see usage().
 #
-# Example: check-read.sh syn unit
+# Example: check-verify.sh syn unit
 
 set -euo pipefail
 
@@ -19,6 +19,7 @@ STATE_FILTER=""
 SITE_TYPE_FILTER=""
 DOMAINS_FILE="${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
 AUTH_FILE_OVERRIDE=""
+CHECK_IDS=false
 INCLUDE_IGNORE=false
 USE_API=false
 WORDPRESS_ROOT_LOCAL="$WORDPRESS_ROOT"
@@ -32,12 +33,13 @@ WP_MODE_FROM_CLI=false
 
 usage() {
     cat <<'EOF'
-check-read.sh - Run syntax checks, unit tests, and read-only edge/dns checks.
-Example: check-read.sh syn unit
+check-verify.sh - Run syntax checks, unit tests, and read-only edge/dns checks.
+Example: check-verify.sh syn unit
 
 Commands:
   syn   Run bash -n on scripts
   unit  Run unit tests (test_common, test_cli, test_cf, test_mcp)
+  auth  Compare auth file domains with domains.csv (check-auth.sh)
   edge  Run edge checks (HTTP/DNS) for selected domains
   dns   Run Cloudflare settings/DNS checks for selected domains
   server  Run host, network, MySQL, Redis, and cron checks
@@ -53,6 +55,7 @@ Options:
   --include-ignore  Include status_cf=ignore or status_cf=worker domains when using domains.csv
   --api  Enable Cloudflare API checks for edge (requires zone_id)
   --auth-file PATH [CF_AUTH_FILE]  Auth file to use for API calls
+  --check-ids  Compare zone IDs between auth file, domains.csv, and API (auth command only)
 $(cli_usage_wp_root)
 $(cli_usage_apache_dir)
 $(cli_usage_ssl_dir)
@@ -64,6 +67,7 @@ $(cli_usage_ssl_dir)
 Notes:
   - If explicit domains are provided, status and site_type filters are not applied, but skip site_types still apply.
   - When no commands are supplied, all commands are executed in the order shown above.
+  - The auth command is not part of the default all list.
   - Edge checks are always read-only; DNS checks use the Cloudflare API for settings.
   - Server/Origin/WP checks are read-only and depend on local filesystem access.
   - Empty site_type values are normalized to "none"; site_type values "none", "ignore", and "worker" are skipped.
@@ -101,6 +105,7 @@ while getopts ":-:" opt; do
                     AUTH_FILE_OVERRIDE="${!OPTIND}"
                     OPTIND=$((OPTIND+1))
                     ;;
+                check-ids) CHECK_IDS=true ;;
                 wp-root|wp-root=*)
                     if cli_wp_root_opt "${OPTARG}" WORDPRESS_ROOT_LOCAL "${!OPTIND-}"; then
                         WP_ROOT_FROM_CLI=true
@@ -154,7 +159,7 @@ for arg in "$@"; do
             COMMANDS=("${ALL_COMMANDS[@]}")
             COMMAND_ALL=true
             ;;
-        syn|unit|edge|dns|server|origin|wp)
+        syn|unit|auth|edge|dns|server|origin|wp)
             if [ "$COMMAND_ALL" != true ]; then
                 COMMANDS+=("$arg")
             fi
@@ -300,6 +305,18 @@ run_unit() {
     "$SCRIPTS_DIR/test_mcp.sh"
 }
 
+run_auth() {
+    local args=()
+    if [ -n "$AUTH_FILE_OVERRIDE" ]; then
+        args+=("--auth-file" "$AUTH_FILE_OVERRIDE")
+    fi
+    args+=("--domains-file" "$DOMAINS_FILE")
+    if [ "$CHECK_IDS" = true ]; then
+        args+=("--check-ids")
+    fi
+    "$SCRIPTS_DIR/check-auth.sh" "${args[@]}"
+}
+
 run_server() {
     "$SCRIPTS_DIR/check-server.sh" || true
 }
@@ -424,6 +441,7 @@ for cmd in "${COMMANDS[@]}"; do
     case "$cmd" in
         syn) run_syn || overall_ok=false ;;
         unit) run_unit || overall_ok=false ;;
+        auth) run_auth || overall_ok=false ;;
         edge) run_edge ;;
         dns) run_dns ;;
         server) run_server ;;

@@ -332,9 +332,9 @@ check_domain_multisite() {
     url=$(echo "$site_line" | awk -F, '{print $2}')
     path=$(echo "$site_line" | awk -F, '{print $4}')
 
-    echo "Blog ID: $blog_id"
-    echo "URL: $url"
-    echo "Path: $path"
+    kv "BLOG_ID" "$blog_id"
+    kv "URL" "$url"
+    kv "PATH" "$path"
 
     if [ "$path" != "/" ]; then
         fail "Expected path '/' in wp_blogs, found '$path'"

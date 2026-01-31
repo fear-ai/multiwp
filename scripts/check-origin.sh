@@ -90,17 +90,7 @@ load_dns_redirects || { usage; exit 1; }
 
 cli_require_non_root
 
-require_cmds openssl apache2ctl systemctl stat grep
-
-check_module() {
-    local module="$1"
-    if priv apache2ctl -M | grep -q "${module}_module"; then
-        echo "Apache module enabled: ${module}"
-    else
-        fail "Apache module missing: ${module}"
-        return 1
-    fi
-}
+require_cmds openssl stat grep
 
 check_file_perms() {
     local path="$1"
@@ -115,7 +105,7 @@ check_file_perms() {
         fail "$path permissions are $actual (expected $expected)"
         return 1
     fi
-    echo "Permissions ok: $path ($actual)"
+    kv "PERMISSIONS_OK" "$path ($actual)"
 }
 
 check_domain() {
@@ -139,14 +129,14 @@ check_domain() {
     local key_file="$SSL_KEY_DIR_LOCAL/${safe}.key"
 
     if priv test -r "$cert_file"; then
-        echo "Certificate found: $cert_file"
+        kv "CERT_FILE" "$cert_file"
     else
         fail "Certificate missing or unreadable: $cert_file"
         ok=false
     fi
 
     if priv test -r "$key_file"; then
-        echo "Key found: $key_file"
+        kv "KEY_FILE" "$key_file"
     else
         fail "Key missing or unreadable: $key_file"
         ok=false
@@ -213,40 +203,6 @@ check_domain() {
     return 1
 }
 
-system_ok=true
-section "ORIGIN" "Apache"
-if priv apache2ctl configtest; then
-    echo "Apache configtest passed"
-else
-    fail "Apache configtest failed"
-    system_ok=false
-fi
-
-if systemctl is-active --quiet apache2; then
-    echo "Apache service is active"
-else
-    fail "Apache service is not active"
-    system_ok=false
-fi
-
-section "ORIGIN" "Modules"
-if ! check_module "rewrite"; then
-    system_ok=false
-fi
-if ! check_module "ssl"; then
-    system_ok=false
-fi
-if ! check_module "headers"; then
-    system_ok=false
-fi
-
-section "ORIGIN" "Php"
-if priv apache2ctl -M | grep -Eiq 'php[0-9]*_module'; then
-    echo "Apache module enabled: php"
-else
-    warn "Apache PHP module not detected"
-fi
-
 overall_ok=true
 for domain in "${DOMAINS[@]}"; do
     if ! check_domain "$domain"; then
@@ -254,6 +210,6 @@ for domain in "${DOMAINS[@]}"; do
     fi
 done
 
-if [ "$system_ok" != true ] || [ "$overall_ok" != true ]; then
+if [ "$overall_ok" != true ]; then
     exit 1
 fi
