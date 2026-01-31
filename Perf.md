@@ -157,6 +157,127 @@ mysql -e "SHOW VARIABLES LIKE 'slow_query_log';"
 mysql -e "SHOW VARIABLES LIKE 'long_query_time';"
 ```
 
+#### MySQL sizing, utilization, and state capture
+The MySQL view in this project must cover both disk footprint (total and per database) and memory behavior (InnoDB buffer pool size and hit rate). These checks tell us whether the database layer is likely a bottleneck before we attribute performance issues to Apache or PHP. Record the results for each run so changes can be compared over time.
+
+Disk footprint (total MySQL data directory):
+```bash
+sudo du -sh /var/lib/mysql
+sudo du -sh /var/lib/mysql/*
+```
+
+Confirm whether InnoDB uses file-per-table (affects per‑database disk accounting):
+```bash
+mysql -e "SHOW VARIABLES LIKE 'innodb_file_per_table';"
+```
+
+Per-database size (all engines):
+```bash
+mysql -N -e "
+SELECT table_schema AS db,
+       ROUND(SUM(data_length + index_length) / 1024 / 1024, 1) AS size_mb
+FROM information_schema.tables
+GROUP BY table_schema
+ORDER BY size_mb DESC;
+"
+```
+
+Per-database size (InnoDB only):
+```bash
+mysql -N -e "
+SELECT table_schema AS db,
+       ROUND(SUM(data_length + index_length) / 1024 / 1024, 1) AS innodb_mb
+FROM information_schema.tables
+WHERE engine = 'InnoDB'
+GROUP BY table_schema
+ORDER BY innodb_mb DESC;
+"
+```
+
+InnoDB files on disk:
+```bash
+sudo ls -lh /var/lib/mysql/ibdata1
+sudo ls -lh /var/lib/mysql/ib_logfile*
+```
+
+Total size of per-table InnoDB files (if file-per-table is enabled):
+```bash
+sudo find /var/lib/mysql -name "*.ibd" -printf "%s\n" | awk '{s+=$1} END {printf "%.1f MB\n", s/1024/1024}'
+```
+
+Buffer pool size and usage:
+```bash
+mysql -N -e "
+SHOW VARIABLES LIKE 'innodb_buffer_pool_size';
+SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total';
+SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_free';
+SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_data';
+SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_reads';
+SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read_requests';
+SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_data';
+SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_total';
+"
+```
+
+Per-table size (largest tables for quick outlier review):
+```bash
+mysql -N -e "
+SELECT table_schema, table_name,
+       ROUND((data_length+index_length)/1024/1024, 1) AS mb
+FROM information_schema.tables
+WHERE table_schema NOT IN ('mysql','performance_schema','information_schema','sys')
+ORDER BY mb DESC
+LIMIT 20;
+"
+```
+
+State capture (store the values alongside perf run artifacts):
+```bash
+OUT_DIR=/var/tmp/multiwp/perf_YYYYMMDD_HHMMSS
+mysql -N -e "SHOW VARIABLES LIKE 'innodb_buffer_pool_size'; SHOW VARIABLES LIKE 'innodb_file_per_table'; SHOW VARIABLES LIKE 'slow_query_log'; SHOW VARIABLES LIKE 'long_query_time';" > "${OUT_DIR}/mysql_vars.txt"
+mysql -N -e "SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_free'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_reads'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read_requests'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_total';" > "${OUT_DIR}/mysql_status.txt"
+mysql -N -e "SELECT table_schema AS db, ROUND(SUM(data_length + index_length) / 1024 / 1024, 1) AS size_mb FROM information_schema.tables GROUP BY table_schema ORDER BY size_mb DESC;" > "${OUT_DIR}/mysql_db_sizes.txt"
+```
+
+TODO: decide how we reconcile runtime values (SHOW VARIABLES/STATUS) with the persistent config file values in `/etc/mysql/mysql.conf.d/mysqld.cnf`, and where to report mismatches when they appear.
+
+#### MySQL runtime metrics log
+For performance runs, capture a lightweight, timestamped MySQL metrics log so each perf directory is self-contained. This avoids reliance on external logs or log rotation while still showing how MySQL behaved during the run.
+
+Runtime capture (perf-load):
+- Emit `mysql-perf.log` in the perf run directory when telemetry includes `mysql`.
+- Use UTC timestamps and `key=value` pairs per line.
+- Keep the metrics small and stable: `pool_used_pct`, `hit_rate`, and a query counter delta for the run.
+- Use a slower MySQL sampling interval (default 5 seconds) so the log stays small; override with `--mysql-interval` if needed.
+
+Example line format:
+```
+2026-01-29T08:15:30Z pool_used_pct=36.0 hit_rate=0.9999 queries=123456
+```
+
+This log is intended for short-duration performance runs and does not replace slow query logging. If telemetry is disabled, do not emit this file.
+
+#### MySQL configuration changes: runtime vs debug
+Keep the baseline stable for normal operation, and use temporary, runtime-only changes for debug windows. This keeps the server policy consistent while still allowing investigation when needed.
+
+Runtime baseline (normal operation):
+- Slow query log: OFF
+- `long_query_time`: default value
+- Perf runs use `mysql-perf.log` snapshots only
+
+Debug window (temporary investigation):
+- Enable slow query log at runtime for a limited window:
+  ```bash
+  sudo mysql -e "SET GLOBAL slow_query_log = 'ON'; SET GLOBAL long_query_time = 1;"
+  ```
+- Optional (noisy): `log_queries_not_using_indexes = ON`
+- After the window, return to baseline:
+  ```bash
+  sudo mysql -e "SET GLOBAL slow_query_log = 'OFF';"
+  ```
+
+Persisting these values in `/etc/mysql/mysql.conf.d/mysqld.cnf` should be a separate decision and explicitly documented, since it changes the default operational posture.
+
 ### WordPress
 WordPress should not run a disk page cache while edge HTML caching is enabled. Use a Redis object cache to reduce database reads for dynamic pages and logged-in sessions.
 
@@ -299,10 +420,10 @@ sudo -u www-data wp --path=/var/www/html/zero.directory config set DISALLOW_FILE
 Run read-only validations for the test targets.
 
 ```bash
-./scripts/check-read.sh syn unit
-./scripts/check-read.sh server
-./scripts/check-read.sh --api --domain zero.directory --wp-root /var/www/html/zero.directory edge dns origin wp
-./scripts/check-read.sh --api --wp-root /var/www/html/wordpress --multisite edge dns origin wp \
+./scripts/check-verify.sh syn unit
+./scripts/check-verify.sh server
+./scripts/check-verify.sh --api --domain zero.directory --wp-root /var/www/html/zero.directory edge dns origin wp
+./scripts/check-verify.sh --api --wp-root /var/www/html/wordpress --multisite edge dns origin wp \
   alphaeos.net avtranscript.com recomp.one talkdao.org
 ```
 
@@ -346,6 +467,9 @@ These sanity checks confirm the stack responds as expected before sustained load
 - `out-dir` output directory (defaults to `/var/tmp/multiwp/perf_<run-id>`).
 - `cache-bust` query parameter name (defaults to `cache_bust`).
 - `cache` selects cached, bust, or both runs (default: `both`).
+- `interval` telemetry sampling interval (seconds).
+- `mysql-interval` MySQL perf sampling interval (seconds, default 5).
+- `telemetry` selects telemetry tools (`sar`, `pidstat`, `vmstat`, `iostat`, `cgtop`, `mysql`, `all`, `none`).
 
 Example:
 ```bash
@@ -419,7 +543,8 @@ Use consistent parameters across runs and record them in the results.
 - `out-dir` output directory (defaults to `/var/tmp/multiwp/perf_<run-id>`).
 - `cache-bust` query parameter name (defaults to `cache_bust`).
 - `interval` telemetry sampling interval (seconds).
-- `telemetry` selects telemetry tools (`sar`, `pidstat`, `vmstat`, `iostat`, `all`, `none`), with comma lists allowed.
+- `mysql-interval` MySQL perf sampling interval (seconds, default 5).
+- `telemetry` selects telemetry tools (`sar`, `pidstat`, `vmstat`, `iostat`, `cgtop`, `mysql`, `all`, `none`), with comma lists allowed.
 - `head` write response headers for cached and cache-busted requests.
 - `cache` selects cached, bust, or both runs (default: `both`).
 - `report` emit a summary of key wrk2 metrics after each run.
@@ -495,7 +620,7 @@ Header and load outputs follow a consistent naming pattern inside the run direct
 - `${prefix}_head.txt` and `${prefix}_head_bust.txt` for cached and cache-busted headers.
 - `${prefix}_wrk.txt` and `${prefix}_wrk_bust.txt` for cached and cache-busted load runs.
 - When `--cache` is not `both`, only the applicable file is written.
-- Telemetry logs retain the tool name (for example, `sar.log` and `pidstat.log`) so they remain usable outside the script.
+- Telemetry logs retain the tool name (for example, `sar.log`, `pidstat.log`, and `mysql-perf.log`) so they remain usable outside the script.
 
 The suffix `_bust` is the only cache-specific marker in filenames. All other mode or run context is captured in `run.param`.
 
@@ -521,7 +646,7 @@ This design avoids relying on filesystem timestamps, which can drift when files 
 Telemetry selection is driven by `--telemetry`. The metadata file records:
 
 - The selected telemetry list (for example, `sar,pidstat`).
-- The sample interval.
+- The sample interval for host telemetry and the MySQL sampling interval when `mysql` is enabled.
 - The exact command line for each tool that ran.
 
 The summary report (`${prefix}_report.txt`) is optional and is derived from raw files; it should never replace the raw tool output. The report is intended for quick triage, while the raw logs are the source of truth for deeper analysis.

@@ -7,6 +7,29 @@ This guide defines the Ubuntu host hardening baseline for our WordPress origin s
 ## Scope and ordering
 The steps below follow dependency order. Access controls and SSH come first, then firewall, then updates, then time synchronization and logging. Optional protections follow after the core baseline. Apply these steps during initial provisioning or before any major production changes.
 
+This guide assumes you started in `README.md` and then moved into `Operations.md` for the dependency chain. Operations introduces host services in section 4.1 and then expects you to complete the host baseline here before continuing to origin certificates and vhost wiring. After completing the baseline and running `check-server.sh`, return to `Operations.md` section 4.4 (`Operations.md#44-origin-certs`) and proceed in order.
+
+Validation sequence (matches `check-server.sh` output order):
+1) OS and kernel
+2) Updates (unattended-upgrades)
+3) SSH policy
+4) Network and sysctl (IPv6 and forwarding)
+5) UFW policy and allowlist
+6) Apache baseline (modules, listeners, tuning, PHP runtime)
+7) MySQL instance settings
+8) Redis availability
+9) Cron service state
+
+## OS and kernel baseline
+OS identity and kernel version are reported by `check-server.sh` so the baseline can be audited alongside package and security updates. These values are derived from persistent system files and should not be edited directly except during a full OS upgrade.
+
+Primary files and sources:
+- `/etc/os-release` (canonical OS identity).
+- `/etc/lsb-release` (legacy Ubuntu identity, when present).
+- `/proc/version` and `/boot/` (kernel build and image metadata).
+
+If you need to enforce kernel boot parameters, use `/etc/default/grub` and the files under `/etc/grub.d/`, then regenerate the bootloader config. Keep these changes in a dedicated change record because they affect boot behavior and require a reboot to take effect.
+
 ## Configuration scope and standardization
 This hardening guide focuses on server-wide settings (Ubuntu, Apache, PHP, and MySQL) and assumes zone-specific concerns are handled in Operations.md and per-vhost configuration. This separation is intentional: server-wide controls must be consistent across all hosted domains, while each zone has its own vhost and Cloudflare settings.
 
@@ -49,10 +72,19 @@ sudo apt-get install -y unattended-upgrades ufw needrestart
 ## Automatic security updates
 Security updates reduce exposure to known vulnerabilities and should be enabled early so the host stays current after the initial provisioning. This section describes the minimal configuration that ensures security updates are applied, plus optional policy toggles you can adjust as operations mature.
 
-Install and enable unattended upgrades:
-```bash
-sudo systemctl enable --now unattended-upgrades.service
+Some Ubuntu images ship with unattended upgrades already enabled, while minimal installs may not. Do not assume either state; validate that the persistent settings are in place so security fixes are actually applied.
+
+Validation and configuration live in a few specific places:
+- Service enablement: `/etc/systemd/system/multi-user.target.wants/unattended-upgrades.service` (symlink to `/lib/systemd/system/unattended-upgrades.service`).
+- Periodic policy: `/etc/apt/apt.conf.d/20auto-upgrades` (enables the periodic tasks).
+- Allowed origins and policy toggles: `/etc/apt/apt.conf.d/50unattended-upgrades`.
+- Logs: `/var/log/unattended-upgrades/unattended-upgrades.log`, `/var/log/unattended-upgrades/unattended-upgrades-dpkg.log`, and `/var/log/apt/history.log`.
+
+Enable unattended upgrades persistently by ensuring the systemd enablement symlink exists:
 ```
+/etc/systemd/system/multi-user.target.wants/unattended-upgrades.service -> /lib/systemd/system/unattended-upgrades.service
+```
+If the symlink is missing, use your systemd tooling to create it. This is the persistent state that survives reboots.
 
 Confirm service state and recent activity:
 ```bash
@@ -96,6 +128,32 @@ Check whether a reboot is required after updates:
 ```bash
 test -f /var/run/reboot-required && cat /var/run/reboot-required
 ```
+
+## MySQL baseline configuration
+MySQL is configured through `/etc/mysql/my.cnf`, which includes the server configuration files under `/etc/mysql/mysql.conf.d/*.cnf`. Place host-wide instance settings in `mysqld.cnf` so the baseline is explicit and persistent.
+
+Edit `/etc/mysql/mysql.conf.d/mysqld.cnf` and add or confirm the following keys in the `[mysqld]` section. These settings map to the values reported by `check-server.sh` and provide a consistent baseline for performance and logging:
+```
+[mysqld]
+innodb_buffer_pool_size = 128M
+slow_query_log = OFF
+slow_query_log_file = /var/lib/mysql/<host>-slow.log
+long_query_time = 10
+```
+
+Adjust `innodb_buffer_pool_size` to match available memory when you begin performance tuning, but keep it explicit in the file so the value is predictable across reboots. If you enable the slow query log, ensure the file path is writable by the MySQL service and use a value of `long_query_time` that matches your diagnostics window.
+
+## Cron service and schedules
+Cron provides host-level scheduling that affects WordPress maintenance, backups, and system automation. Keep the configuration file‑based so it is persistent and auditable, and use `check-server.sh` to confirm the cron service is active and enabled.
+
+Persistent configuration locations:
+- `/etc/crontab` for host-wide schedules.
+- `/etc/cron.d/*` for package or service-specific schedules.
+- `/etc/cron.hourly`, `/etc/cron.daily`, `/etc/cron.weekly`, `/etc/cron.monthly` for periodic tasks.
+- `/etc/cron.allow` and `/etc/cron.deny` for access control.
+- `/lib/systemd/system/cron.service` for the base unit definition; use `/etc/systemd/system/cron.service.d/*.conf` for overrides.
+
+Keep all cron changes in `/etc/cron.d/` or `/etc/crontab` so they are explicit and easy to audit. When a schedule is added or changed, record the intent and the owning subsystem so it can be reviewed during maintenance or incident response.
 
 ## User and sudo setup
 Create a dedicated administrative user account and grant it sudo so day-to-day operations do not rely on the root account. This makes audits clearer, limits accidental root usage, and keeps a single accountable identity for administrative actions. Ensure key-based access is in place before disabling password or root SSH.
@@ -227,18 +285,31 @@ For investigation, `auth.log` (or `journalctl -u ssh`) provides the most detail 
 ## Firewall baseline
 UFW is the default Ubuntu firewall and should match the SSH port you selected. Only open what you need.
 
-Set default policy and allow required ports:
-```bash
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow <ssh_port>/tcp
+Set default policy in `/etc/default/ufw` so it persists across reboots:
+```
+DEFAULT_INPUT_POLICY="DROP"
+DEFAULT_OUTPUT_POLICY="ACCEPT"
+DEFAULT_FORWARD_POLICY="DROP"
+DEFAULT_APPLICATION_POLICY="SKIP"
 ```
 
-Enable and confirm:
+Populate `/etc/ufw/user.rules` with the allowlist rules. Use the generated template from `scripts/cloudflare-ips.sh --ufw` or the canonical file under `templates/ufw/user.rules`, then add the SSH port rule. UFW expects tuple comments for manual rules, so keep the format intact:
+```
+### tuple ### allow tcp 80 0.0.0.0/0 any 173.245.48.0/20 in
+-A ufw-user-input -p tcp --dport 80 -s 173.245.48.0/20 -j ACCEPT
+...
+### tuple ### allow tcp <ssh_port> 0.0.0.0/0 any 0.0.0.0/0 in
+-A ufw-user-input -p tcp --dport <ssh_port> -j ACCEPT
+```
+
+Ensure UFW is enabled persistently in `/etc/ufw/ufw.conf`:
+```
+ENABLED=yes
+```
+
+Reload and confirm:
 ```bash
-sudo ufw enable
+sudo ufw reload
 sudo ufw status verbose
 ```
 
@@ -263,7 +334,7 @@ Apply the change:
 sudo netplan apply
 ```
 
-If you need a temporary removal to test impact before editing netplan, you can remove the address directly with `ip addr del`, but that change is not persistent across reboots. When removing addresses, keep a separate SSH session open to prevent lockouts.
+Make all address changes in netplan so they persist across reboots; avoid one-off command-line removals that do not survive a restart. Keep a separate SSH session open when applying netplan changes to prevent lockouts.
 
 ## Disabled IPv6
 If you do not publish AAAA records and do not intend to serve IPv6 directly, disabling IPv6 can reduce the attack surface and simplify firewall policy. The approach is to stop IPv6 address assignment in netplan, disable IPv6 at the kernel level, and (optionally) disable IPv6 handling in UFW so policy remains explicit. Netplan `dhcp6` and `accept-ra` both accept boolean values (`true/false` or `yes/no`) and should be set to `no` or `false` for an IPv4-only stance.
@@ -292,20 +363,30 @@ sudo netplan apply
 ```
 
 ### Kernel settings
-Disable IPv6 at the kernel level by setting sysctl values at runtime and then making them persistent. The runtime change takes effect immediately, while the persistent file ensures the settings survive reboots. This is the foundation for the hardened stance because it prevents IPv6 address assignment at the OS level.
+Disable forwarding and IPv6 at the kernel level by setting persistent sysctl values. The configuration must live in `/etc/sysctl.d/99-disable-ipv6-forward.conf` so it survives reboots and can be audited consistently.
+
+Create or edit the file with the full set of required values:
 ```bash
-sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1
-sudo sysctl -w net.ipv6.conf.default.disable_ipv6=1
-sudo sysctl -w net.ipv6.conf.lo.disable_ipv6=1
+sudo tee /etc/sysctl.d/99-disable-ipv6-forward.conf >/dev/null <<'EOF'
+# No Forwarding
+net.ipv4.ip_forward=0
+net.ipv6.conf.all.forwarding=0
+net.ipv6.conf.default.forwarding=0
+
+# No IPv6
+net.ipv6.conf.all.disable_ipv6=1
+net.ipv6.conf.default.disable_ipv6=1
+net.ipv6.conf.lo.disable_ipv6=1
+
+# No IPv6 Router Advertisement
+net.ipv6.conf.all.accept_ra=0
+net.ipv6.conf.default.accept_ra=0
+net.ipv6.conf.lo.accept_ra=0
+EOF
 ```
 
-Persist the settings across reboots and reload them:
+Apply the sysctl configuration:
 ```bash
-sudo sh -c 'printf "%s\n" \
-  "net.ipv6.conf.all.disable_ipv6 = 1" \
-  "net.ipv6.conf.default.disable_ipv6 = 1" \
-  "net.ipv6.conf.lo.disable_ipv6 = 1" \
-  > /etc/sysctl.d/99-disable-ipv6-forward.conf'
 sudo sysctl --system
 ```
 
@@ -331,10 +412,9 @@ Required line in `/etc/default/ufw`:
 IPV6=no
 ```
 
-Reload UFW:
+Reload UFW after editing `/etc/default/ufw` so the IPv4-only setting is applied:
 ```bash
-sudo ufw disable
-sudo ufw enable
+sudo ufw reload
 sudo ufw status verbose
 ```
 
@@ -446,6 +526,29 @@ After adjusting, validate and reload:
 sudo apache2ctl configtest
 sudo systemctl reload apache2
 ```
+
+### PHP runtime and OPcache
+This host uses Apache `mod_php`, so PHP runs inside Apache worker processes and inherits Apache’s concurrency limits. The PHP runtime configuration is therefore part of the host baseline and must be consistent across all sites.
+
+Key configuration files:
+- `/etc/php/<version>/apache2/php.ini` (Apache SAPI runtime).
+- `/etc/php/<version>/mods-available/opcache.ini` (OPcache settings).
+- `/etc/php/<version>/apache2/conf.d/*opcache*.ini` (OPcache enabled in Apache).
+
+Validate runtime and OPcache visibility:
+```bash
+php -v
+php -m
+php -i | rg -n "memory_limit|max_execution_time|max_input_vars|post_max_size|upload_max_filesize"
+php -i | rg -n "opcache.enable|opcache.memory_consumption|opcache.max_accelerated_files|opcache.revalidate_freq"
+```
+
+Security-oriented baseline (recommended):
+- `expose_php = Off` to avoid advertising PHP version.
+- `display_errors = Off` to avoid leaking details to clients.
+- `log_errors = On` so runtime errors are captured in logs.
+
+OPcache must be enabled for performance. Use `Perf.md` for sizing guidance and tuning workflow; do not tune in isolation from Apache worker limits.
 
 ### Default vhosts for direct IP traffic
 Default vhosts catch traffic that arrives by IP address or with an unknown `Host` header. Keep `DocumentRoot /var/www/html/construction` so a controlled fallback exists, but use `<Location /> Require all denied </Location>` in both default vhosts to reject requests immediately. This avoids serving content to unexpected hostnames while still keeping a controlled landing page ready if you later choose to allow it.

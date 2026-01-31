@@ -14,7 +14,7 @@ This design depends on the following sources, which define the underlying interf
 This document focuses on the recording policy and workflow and avoids duplicating the full interface details already captured in `scripts/Scripts.md`.
 
 ## Read-Only Counterpart
-The repository now includes a clear separation between read-only validation and recording. `check-read.sh` runs the broader validation sweep without writing to `domains.csv`, while `test-record.sh` runs a focused subset of validations and records successful outcomes. This split keeps routine checks safe for daily use while reserving state mutation for deliberate recording runs.
+The repository now includes a clear separation between read-only validation and recording. `check-verify.sh` runs the broader validation sweep without writing to `domains.csv`, while `test-record.sh` runs a focused subset of validations and records successful outcomes. This split keeps routine checks safe for daily use while reserving state mutation for deliberate recording runs.
 
 ## Domain and Zone Data Sources
 Recording depends on consistent interpretation of the inventory fields and the Cloudflare auth file. The goal is to keep “domain name” and “zone id” unambiguous so the recording system does not drift across accounts or zones.
@@ -86,7 +86,7 @@ When a row is found, the update behavior is selective rather than wholesale. Non
 ## Zone ID Resolution and Orchestrator Scope
 Domain-scoped scripts resolve the zone id with an explicit priority order: auth file match (by zone name), then `domains.csv` (`zone_id`), then API lookup. This ensures a domain always maps to the correct zone even when multiple zones exist in the same auth file, while still allowing the CSV to remain the canonical inventory source for recorded values.
 
-The orchestrators (`check-read.sh` and `test-record.sh`) intentionally handle zone ids more narrowly. They read `zone_id` directly from `domains.csv` and pass it through for API checks, and they skip API-based checks when the zone id is missing. This behavior is deliberate for three reasons:
+The orchestrators (`check-verify.sh` and `test-record.sh`) intentionally handle zone ids more narrowly. They read `zone_id` directly from `domains.csv` and pass it through for API checks, and they skip API-based checks when the zone id is missing. This behavior is deliberate for three reasons:
 
 1) **Deterministic scope:** Orchestrators often run across many domains and should not “discover” zones outside the declared inventory. Relying on `domains.csv` keeps the scope explicit and avoids cross-account drift.
 2) **Operational safety:** API lookups during broad orchestration can mask inventory gaps by silently resolving missing zone ids. That makes the inventory look complete when it is not. Skipping the API instead forces the missing zone id to be recorded explicitly.

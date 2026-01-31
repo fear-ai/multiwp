@@ -27,15 +27,17 @@ The dependency chain is explicit: Cloudflare edge behavior depends on correct DN
       5. [3.5.5 API Auth](#355-api-auth)
    6. [3.6 Hybrid Execution](#36-hybrid-execution)
    7. [3.7 Notes](#37-notes)
-      1. [3.7.1 HSTS](#371-hsts)
-      2. [3.7.2 Redirect Config](#372-redirect-config)
+      1. [3.7.1 Redirect Config](#371-redirect-config)
 3. [4. Origin TLS](#4-origin-tls)
    1. [4.1 Host Services](#41-host-services)
    2. [4.2 Ubuntu updates](#42-ubuntu-updates)
    3. [4.3 User Permissions](#43-user-permissions)
    4. [4.4 Origin Certs](#44-origin-certs)
    5. [4.5 Web Vhosts](#45-web-vhosts)
-   6. [4.6 PHP Database](#46-php-database)
+   6. [4.6 PHP Runtime and Database](#46-php-runtime-and-database)
+      1. [4.6.1 PHP Runtime Setup](#461-php-runtime-setup)
+      2. [4.6.2 PHP Tuning Policy](#462-php-tuning-policy)
+      3. [4.6.3 Database Inventory](#463-database-inventory)
    7. [4.7 WordPress Files and Permissions](#47-wordpress-files-and-permissions)
    8. [4.8 .htaccess Structure and Routing](#48-htaccess-structure-and-routing)
    9. [4.9 wp-config.php Settings](#49-wp-configphp-settings)
@@ -93,8 +95,6 @@ Enable HTTPS enforcement and modern TLS at the edge. These are Free-tier options
 - Enable TLS 1.3 (though Apache does not support it as of December 2025).
 - Enable Automatic HTTPS Rewrites.
 
-HSTS is documented in a dedicated section below.
-
 #### 3.4.4 Origin Cert
 Use a separate origin certificate per domain (apex+www pair) to avoid exposing tenant lists and to keep trust scoped. These certificates are used between Cloudflare and the origin and are not publicly trusted.
 
@@ -123,6 +123,9 @@ Use Managed Transforms to add standard response headers at the edge.
   - `X-Frame-Options: SAMEORIGIN`.
   - `Expect-CT: max-age=86400, enforce`.
   - `Referrer-Policy: same-origin`.
+
+HSTS policy and tradeoffs:
+HSTS is enabled as part of the managed security headers baseline, so treat it as a long-term commitment for each domain. Once a browser sees the header it will enforce HTTPS for the duration of `max-age`, and `includeSubDomains` extends that requirement to all subdomains. This hardens against downgrade attacks, but it also means any future HTTP-only hostnames or cert failures can lock out users. Validate that HTTPS is stable (Full strict, origin certs in place, redirects tested) before relying on the baseline for a new domain, and avoid HSTS preload unless you are committed to permanent HTTPS for all subdomains.
 
 ### 3.5 Automation
 Cloudflare UI is authoritative for SSL mode, redirects, and headers. Automation scripts help with DNS, origin certificate placement, and vhost generation when repeatability is needed.
@@ -215,17 +218,7 @@ Interaction model:
 ### 3.7 Notes
 The notes below explain the tradeoffs for security settings that require intentional commitment or operational discipline.
 
-#### 3.7.1 HSTS
-HSTS instructs browsers that the site should only be accessed over HTTPS.
-
-- Pros: enforces HTTPS at the browser; prevents downgrade/mixed-mode requests after first load.
-- Cons: can lock you out if HTTPS breaks; preload is a long-term commitment. At this time we do NOT configure HSTS.
-- If choosing HSTS, validate first: confirm apex and www redirect to HTTPS, no mixed content, certs valid (Full strict), admin/login works over HTTPS.
-- Rollout: start with a short max-age (e.g., 300) if testing; raise to 31536000 with includeSubDomains when confident. Preload only when certain that HTTPS is permanent.
-- Cloudflare configuration: SSL/TLS → Edge Certificates → HTTP Strict Transport Security (HSTS), after Always Use HTTPS.
-- WordPress option: [Headers Security Advanced HSTS WP] https://wordpress.com/plugins/headers-security-advanced-hsts-wp.
-
-#### 3.7.2 Redirect Config
+#### 3.7.1 Redirect Config
 Some zones exist only to redirect to a canonical domain (for example, short or legacy domains that should always land on the primary site). These zones should be configured to redirect at the Cloudflare edge and now follow the same HTTPS and Security baseline as singlesite and multisite domains. The intent is to eliminate drift and ensure aliases are not a weaker security posture, even if that introduces an extra redirect hop.
 
 Recommended approach:
@@ -244,6 +237,8 @@ The origin layer provides the TLS endpoint Cloudflare connects to and the Apache
 
 ### 4.1 Host Services
 Provision Ubuntu 24 with Apache 2.4, PHP 8.x, MySQL 8.x. Check CONF.md for the latest site-specific recommendations (versions, paths, domains).
+
+Operations introduces the host baseline here so operators see the dependency chain in context. The full hardening sequence, with commands and verification steps, is in `HardenUbuntu.md`. Complete that guide (including a run of `check-server.sh`) before moving on to origin certificates and vhost wiring in the subsections below. When the baseline is complete, return to section 4.4 (`Operations.md#44-origin-certs`).
 
 ### 4.2 Ubuntu updates
 Keep the host patched with unattended security updates so origin services are not exposed to known vulnerabilities. This is a foundational dependency for the rest of the stack because Apache, PHP, OpenSSL, and kernel fixes arrive through Ubuntu security updates. Configure this before or alongside initial server provisioning.
@@ -300,6 +295,8 @@ sudo scripts/get-cert.sh --manual <domain>
 sudo scripts/get-cert.sh --api <domain>
 ```
 
+Validation for this step should follow the same sequence: use `check-origin.sh` to confirm origin cert paths and permissions before moving on to vhost generation.
+
 ### 4.5 Web Vhosts
 The web server uses one vhost per domain, driven by templates that reference the origin certificates.
 
@@ -309,6 +306,8 @@ The web server uses one vhost per domain, driven by templates that reference the
 - Script: `sudo scripts/apache-vhost.sh`.
 - Runs: `sudo apache2ctl configtest && sudo systemctl reload apache2`.
 
+After vhost creation, run `check-origin.sh` to confirm vhost wiring and document root alignment for each domain.
+
 Host validation note: Apache’s `Require host` does **not** validate the `Host` header. It performs a reverse DNS lookup on the client IP and compares that name to the listed hostnames. This fails for Cloudflare origins because the client IP is a Cloudflare edge address, not the site’s hostname. If you need to validate the `Host` header explicitly, use an expression instead:
 ```apache
 <Location />
@@ -317,8 +316,36 @@ Host validation note: Apache’s `Require host` does **not** validate the `Host`
 ```
 If you do not require host header validation, omit the `Require host`/`Require expr` blocks entirely and rely on `ServerName`/`ServerAlias` plus the default vhost fallback.
 
-### 4.6 PHP Database
-Database name and user configuration should be tracked alongside the domain inventory so the origin and WordPress layers can be validated consistently.
+### 4.6 PHP Runtime and Database
+PHP is part of the origin runtime and must be configured before WordPress is installed or tuned. This stack uses Apache `mod_php` (not PHP-FPM), so PHP settings are read from the Apache SAPI configuration, and concurrency limits are governed by Apache prefork worker counts. Database inventory belongs here because WordPress configuration and script checks depend on knowing the database name and user.
+
+#### 4.6.1 PHP Runtime Setup
+Use the Ubuntu-packaged PHP 8.x stack and keep the runtime configuration in the Apache SAPI path:
+
+- PHP runtime config: `/etc/php/<version>/apache2/php.ini`.
+- OPcache config: `/etc/php/<version>/mods-available/opcache.ini` (enabled via Apache SAPI `conf.d` symlink).
+- Module validation: `php -v`, `php -m`, and `apache2ctl -M` (confirm `php` module is loaded).
+
+Minimum PHP extension expectations for WordPress in this stack:
+- Core: `curl`, `mbstring`, `xml`, `zip`, `json`, `openssl`.
+- Media: `gd` or `imagick` (one is required for image processing).
+- DB: `mysqli` or `pdo_mysql`.
+- Optional: `redis` if object caching is enabled.
+
+Keep PHP configuration uniform across sites. Per-site PHP configuration is out of scope; all sites share the same runtime on the host.
+
+#### 4.6.2 PHP Tuning Policy
+PHP tuning must be evidence-based and coordinated with Apache worker limits. Each Apache prefork worker is a full PHP process, so PHP memory limits and OPcache sizing directly affect how many concurrent requests the host can tolerate. Keep the tuning loop in `Perf.md` and apply changes only after collecting baseline telemetry.
+
+Tune and validate in this order:
+1) Confirm OPcache is enabled and sized for your plugin/theme footprint.
+2) Review PHP memory and execution limits (`memory_limit`, `max_execution_time`, `max_input_time`, `max_input_vars`, `post_max_size`, `upload_max_filesize`).
+3) Re-run `perf-load.sh` with telemetry to verify CPU and memory behavior.
+
+Use `Perf.md` section “PHP OPcache” (`Perf.md#php-opcache`) for baseline recommendations and measurement commands.
+
+#### 4.6.3 Database Inventory
+Database name and user configuration should be tracked alongside the domain inventory so the origin and WordPress layers can be validated consistently. Record `db_name` and `db_user` in `domains.csv` so `setup-wp.sh` and `check-wp.sh` can validate database alignment without guessing.
 
 ### 4.7 WordPress Files and Permissions
 Keep WordPress readable by the web server while keeping code write-restricted. The goal is to make uploads writable without granting write access to the core, plugins, themes, or configuration files.
@@ -452,7 +479,7 @@ sudo -u www-data wp --path=/var/www/html/wordpress db query \
     WHERE option_name IN ('siteurl', 'home');"
 ```
 
-4) Validate: `wp site list`, `curl -I https://<domain>`, Apache vhost present/enabled, Cloudflare proxy + Full (strict).
+4) Validate: `wp site list`, `curl -I https://<domain>`, Apache vhost present/enabled, Cloudflare proxy + Full (strict). If you need to validate WordPress configuration in isolation after origin and edge checks have passed, run `check-wp.sh` for the domain to confirm routing, wp-config, and template alignment.
 
 Pitfalls and expectations:
 - WP-CLI has no `wp site update` subcommand; direct DB updates above are the supported method.
@@ -476,14 +503,22 @@ Use the checks in this section after provisioning to confirm the stack is health
 Validation coverage is further along than early exploration: the check scripts are exercised and the baseline below is reliable for read-oriented confirmation. Monitoring and alerting remain under development, so treat these checks as the current operational baseline until a broader observability plan is formalized.
 
 ### 6.1 Validation Checks
-The list below covers the standard checks by layer. Use them to confirm configuration state before diagnosing higher-level symptoms.
+The list below covers the standard checks by layer. Use them to confirm configuration state before diagnosing higher-level symptoms. These checks are quick, layered spot checks; they are not a replacement for the scripts listed in section 6.2, but they mirror the same dependency order so you can isolate failures early.
 
+Edge checks (Cloudflare):
+- DNS reachability: `dig A <domain> +short`, `dig AAAA <domain> +short`.
+- Functional edge check: browse domain → confirm HTTPS and admin login; confirm Cloudflare Full (strict) and DNS after each addition.
+
+Origin checks (host and vhost wiring):
+- Host baseline: run `check-server.sh` and review Apache module surface, listeners, and tuning values alongside `HardenUbuntu.md`.
 - Vhosts present/enabled: `sudo ls /etc/apache2/sites-available`, `sudo ls /etc/apache2/sites-enabled`.
 - SSL/TLS cert validation: `sudo openssl x509 -in /etc/ssl/cloudflare-origin/certs/<safe>.crt -noout -subject -issuer -dates -ext subjectAltName`.
-- DNS reachability: `dig A <domain> +short`, `dig AAAA <domain> +short`.
+
+WordPress checks:
 - WordPress state: `sudo -u www-data wp --path=<wp_root> core version`, `wp site list` (example: `/var/www/html/wordpress` on Ubuntu, with `wordpress` as the chosen subdirectory).
 - DB routing tables: `mysql -u <db_user> -p -D <db_name> -e "SELECT blog_id, domain, path FROM wp_blogs;"`.
-- Functional check: browse domain → confirm HTTPS and admin login; create a test site in Network Admin and verify routing; confirm Cloudflare Full (strict) and DNS after each addition.
+
+Provisioning command reminder (edge DNS):
 - Zone/DNS creation: `scripts/cloud-dns.sh <domain> <ip>` (using Cloudflare API when onboarding domains).
 
 ### 6.2 Script Partitioning
@@ -493,8 +528,8 @@ Use the table below as the scope contract for the three core verification script
 
 | Script | Scope | Examples of checks |
 | --- | --- | --- |
-| `check-server.sh` | Ubuntu host, networking, firewall, and shared services | OS/kernel, unattended updates, SSH policy, IPv6 state, UFW allowlist, MySQL and Redis availability, WordPress cron scheduling |
-| `check-origin.sh` | Origin web stack only | Apache config, enabled modules, vhost wiring, origin cert paths, PHP runtime |
+| `check-server.sh` | Ubuntu host, networking, firewall, and shared services | OS/kernel, unattended-upgrades, SSH policy, network/sysctl (IPv6 + forwarding), UFW policy/allowlist, Apache baseline (modules/listeners/tuning), MySQL baseline, Redis availability, cron service state |
+| `check-origin.sh` | Origin web stack only | Apache vhost wiring, origin cert paths and permissions, document root alignment |
 | `check-wp.sh` | WordPress-only configuration | WP roots, multisite routing data, `wp-config.php` settings, template alignment, WordPress-level security posture |
 
 This partitioning keeps Cloudflare checks (`check-cf.sh`, `check-edge.sh`) in the edge layer and reserves origin/WP checks for local filesystem and service validation. It also prevents host-level concerns (for example, cron scheduling or MySQL settings) from being duplicated in WordPress-only scripts.

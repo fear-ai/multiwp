@@ -5,9 +5,14 @@ Date: January 20, 2026
 This project implements a WordPress multisite network in subdirectory mode with apex domain mapping. Each client site uses its own domain while sharing WordPress core, themes, and plugins for operational efficiency. Cloudflare provides DNS, CDN, and edge security. The repository includes the runbooks, scripts, and templates needed to host many domains via Cloudflare and Apache with per-domain origin certificates. Use the Documentation Map below to choose the right document for your role and avoid duplicating guidance.
 
 ## Expected Audience
-This documentation is written for experienced system managers, administrators, and operators and for network and system developers. Each role can enter at the right layer without losing the dependency chain. System administrators responsible for the network, Cloudflare, Ubuntu, Apache should start with `Operations.md` sections 3–6 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`, `Operations.md#6-verification`), consult `HardenUbuntu.md`, and review the verification scripts. WordPress administrators focused on site mapping and content integrity can jump to `Operations.md` section 5 (`Operations.md#5-multisite-ops`). Developers adapting or extending the scripts should begin with `scripts/Shell.md` and `scripts/Scripts.md`, then consult `MULTI.md` sections 2–3 (`MULTI.md#2-architecture--design-decisions`, `MULTI.md#3-network--domain-model`) for architectural context.
+This documentation is written for experienced system managers, administrators, and operators, as well as network and system developers. Each role can enter at the right layer without losing the dependency chain.
 
-This documentation sequence keeps operational dependencies clear: Cloudflare edge behavior must align before origin TLS and vhost wiring can be trusted, and WordPress routing depends on both layers being correct.
+Recommended entry points by role:
+- System administrators responsible for the network, Cloudflare, Ubuntu, and Apache should start with `Operations.md` section 1 (`Operations.md#1-introduction`) and then proceed to sections 3–6 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`, `Operations.md#6-verification`). Operations introduces the host baseline and then points you to `HardenUbuntu.md` for the full Ubuntu/Apache/PHP/MySQL hardening sequence; after completing that baseline, return to Operations at section 4.4 (`Operations.md#44-origin-certs`) and continue through origin TLS, vhosts, and multisite.
+- WordPress administrators focused on site mapping and content integrity can jump to `Operations.md` section 5 (`Operations.md#5-multisite-ops`).
+- Developers adapting or extending the scripts should begin with `scripts/Shell.md` and `scripts/Scripts.md`, then consult `MULTI.md` sections 2–3 (`MULTI.md#2-architecture--design-decisions`, `MULTI.md#3-network--domain-model`) for architectural context.
+
+This sequence keeps operational dependencies clear: Cloudflare edge behavior must align before origin TLS and vhost wiring can be trusted, and WordPress routing depends on both layers being correct.
 
 ## Key Concepts
 The architectural model, dependencies, and tradeoffs are defined in `MULTI.md` sections 2–5 (`MULTI.md#2-architecture--design-decisions`, `MULTI.md#3-network--domain-model`, `MULTI.md#4-infrastructure-layers`, `MULTI.md#5-operational-tradeoffs`). The operational steps, commands, and validation checks are defined in `Operations.md` sections 3–6 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`, `Operations.md#6-verification`). This README only summarizes how to navigate the documentation and scripts.
@@ -23,7 +28,7 @@ The architectural model, dependencies, and tradeoffs are defined in `MULTI.md` s
 
 ## Quick Start: Administrator
 
-Scripts use commands: `curl`, `dig`, `jq`, `wp`, `apache2ctl`, `openssl`. Make sure these are installed and the system administrator can run them. For the canonical onboarding and troubleshooting steps, use `Operations.md` sections 3–6 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`, `Operations.md#6-verification`).
+Scripts use commands: `curl`, `dig`, `jq`, `wp`, `apache2ctl`, `openssl`. Make sure these are installed and the system administrator can run them. For the canonical onboarding and troubleshooting steps, start with `Operations.md` section 1 (`Operations.md#1-introduction`) and proceed through sections 3–6 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`, `Operations.md#6-verification`). Operations will call out when to pause and complete the host baseline in `HardenUbuntu.md` before continuing with origin TLS and multisite configuration.
 
 ### Add Site to the Network
 
@@ -96,34 +101,47 @@ multiwp/
 
 ### Scripts
 
-Program scripts (alphabetical):
+Scripts are grouped by role so entrypoints, orchestration runners, and shared libraries stay clear. Status is a best-effort indicator of whether a script has been exercised in this repo; update it as scripts are run.
+
+Program scripts (entrypoints, alphabetical):
 | Script | Purpose | Status |
 |--------|---------|--------|
 | `apache-vhost.sh` | Create Apache HTTP + SSL vhosts for domain | Exercised |
+| `back-wp.sh` | Freeze and back up a WordPress site | Not exercised |
 | `check-auth.sh` | Compare CF_DOMAINS in auth files to domains.csv | Not exercised |
 | `check-cf.sh` | Inspect Cloudflare zone settings via API | Exercised |
 | `check-edge.sh` | Validate Cloudflare edge behavior and headers | Exercised |
 | `check-origin.sh` | Validate origin certs, vhosts, and Apache health | Exercised |
 | `check-server.sh` | Validate Ubuntu/Apache/PHP/MySQL baseline settings | Not exercised |
-| `check-read.sh` | Run syntax/unit tests and read-only edge/DNS/origin/WP checks | Exercised |
 | `check-wp.sh` | Validate multisite mappings and site URLs | Exercised |
 | `cloud-dns.sh` | Create/update DNS records in an existing Cloudflare zone | Exercised |
 | `cloud-redirect.sh` | Ensure Cloudflare Redirect Rules for redirect-only domains | Exercised |
+| `cloud-settings.sh` | Apply Cloudflare HTTPS/security settings | Not exercised |
+| `cloudflare-ips.sh` | Generate Cloudflare allowlist rules for UFW | Not exercised |
 | `get-cert.sh` | Issue or install Cloudflare Origin cert/key (API or manual) | Not exercised |
 | `install-site.sh` | Add site to WordPress multisite, map to apex domain | Exercised |
 | `mcp-cf.sh` | Validate Cloudflare MCP portal access | Exercised |
 | `onboard-zone.sh` | Create or ensure Cloudflare zone + DNS and update domains.csv | Not exercised |
+| `perf-load.sh` | Run load tests and capture telemetry for a WordPress site | Exercised |
+| `rules-cf.sh` | Export or apply Cloudflare firewall rules | Exercised |
 | `setup-wp.sh` | Bootstrap WordPress multisite base configuration | Not exercised |
-| `test-record.sh` | Run validation checks and record status updates in domains.csv | Not exercised |
+| `slice-logs.sh` | Extract log slices for review and correlation | Not exercised |
 | `verify-cf-auth.sh` | Validate Cloudflare credentials (token/key) | Exercised |
-| `check-domain.sh` | End-to-end validation (edge, origin, WP) | Exercised |
 
-Helper scripts:
+Orchestration scripts (entrypoints):
+| Script | Purpose | Status |
+|--------|---------|--------|
+| `check-verify.sh` | Run syntax/unit tests and read-only edge/DNS/origin/WP checks | Exercised |
+| `check-domain.sh` | End-to-end validation (edge, origin, WP) | Exercised |
+| `test-record.sh` | Run validation checks and record status updates in domains.csv | Not exercised |
+
+Helper and library scripts:
 | Script | Purpose | Status |
 |--------|---------|--------|
 | `common.sh` | Shared library functions (sourced by other scripts) | Library |
 | `auth.sh` | Cloudflare auth helpers and API request utilities | Library |
 | `cli.sh` | Shared option parsing helpers | Library |
+| `orch.sh` | Orchestration helper functions for check runners | Library |
 | `mcp.sh` | MCP helper functions | Library |
 
 Unit test scripts:

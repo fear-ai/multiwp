@@ -55,5 +55,6 @@ When applying these examples:
 The UFW posture is workable, but a few implementation choices should be settled so updates are repeatable. A clear decision on the refresh workflow reduces the risk of UFW rewriting the rules in an unexpected order.
 
 - Decide whether Cloudflare allowlist refreshes should be applied by regenerating `templates/ufw/user.rules` and copying it into place, or by translating the allowlist into `ufw allow` commands. The former is file-driven; the latter is command-driven and preserves UFW-managed ordering.
+- TODO: reconcile the UFW template inventory and configuration guidance (including whether command-driven artifacts like `ufw_allow.sh` should exist at all) so the file set and the documented workflow stay consistent.
 - Document the routine for refreshing Cloudflare IPv4 ranges (for example, monthly or on-demand after a Cloudflare update) and the verification steps (`ufw status verbose`, targeted HTTP/S request checks).
 - Confirm the preferred logging level once the new allowlist is stable so that recurring noise from blocked traffic is manageable without losing forensic value.
