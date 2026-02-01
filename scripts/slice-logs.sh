@@ -11,6 +11,7 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 RUN_PARAM=""
 OUT_DIR=""
 PAD_OVERRIDE=""
+REPORT_MODE="true"
 
 usage() {
     cat <<'EOF'
@@ -23,11 +24,15 @@ Options:
   --run-param PATH  Path to run.param file (required)
   --out-dir DIR  Output directory for sliced logs (default: run.param directory)
   --pad SEC  Override LOG_PAD_SEC from run.param
+  --report  Write a log summary file (default)
+  --no-report  Disable log summary output
   --help  Show this help
 
 Notes:
   - This script does not alter any source logs.
   - Log slices are written with the same prefix as run.param.
+  - When report output is enabled, the summary log is written to ${prefix}_logs.txt
+    and a compatibility copy is written to ${prefix}_slice.log.
   - Apache log selection is best-effort and may warn if a matching file is not found.
   - When a PERF report and Apache access slice exist, this script appends summary
     rows to perf_runs.csv and perf_segments.csv in the output directory.
@@ -36,7 +41,11 @@ EOF
 
 log_msg() {
     local msg="$1"
-    echo "$msg" | tee -a "$SLICE_LOG"
+    if [ "$REPORT_MODE" = "true" ]; then
+        echo "$msg" | tee -a "$SLICE_LOG" "$SLICE_LOG_COMPAT"
+    else
+        echo "$msg"
+    fi
 }
 
 param_var() {
@@ -69,6 +78,8 @@ while getopts ":-:" opt; do
                 pad)
                     [ -n "${!OPTIND-}" ] || err "--pad requires a value"
                     PAD_OVERRIDE="${!OPTIND}"; OPTIND=$((OPTIND + 1)) ;;
+                report) REPORT_MODE="true" ;;
+                no-report) REPORT_MODE="false" ;;
                 *) err "Unknown option --${OPTARG}" ;;
             esac
             ;;
@@ -85,8 +96,14 @@ mkdir -p "$OUT_DIR"
 PREFIX="$(basename "$RUN_PARAM")"
 PREFIX="${PREFIX%_run.param}"
 
-SLICE_LOG="$OUT_DIR/${PREFIX}_slice.log"
-: > "$SLICE_LOG"
+SLICE_LOG=""
+SLICE_LOG_COMPAT=""
+if [ "$REPORT_MODE" = "true" ]; then
+    SLICE_LOG="$OUT_DIR/${PREFIX}_logs.txt"
+    SLICE_LOG_COMPAT="$OUT_DIR/${PREFIX}_slice.log"
+    : > "$SLICE_LOG"
+    : > "$SLICE_LOG_COMPAT"
+fi
 
 DOMAIN="$(param_var "$RUN_PARAM" "DOMAIN" || true)"
 UTC_START="$(param_var "$RUN_PARAM" "UTC_START" || true)"

@@ -39,7 +39,8 @@ SET_CONNECTIONS=false
 SET_RATE=false
 SET_MYSQL_INTERVAL=false
 HEAD_MODE="false"
-REPORT_MODE="false"
+REPORT_MODE="true"
+ERR_MODE="false"
 ALLOW_ROOT=false
 
 usage() {
@@ -63,7 +64,9 @@ Options:
   --mysql-interval N  MySQL perf sampling interval in seconds (default: 5)
   --telemetry LIST  Telemetry tools (default: sar; values: sar,pidstat,vmstat,iostat,cgtop,mysql,all,none)
   --head  Write response headers for cached and cache-busted requests
-  --report  Emit summary metrics after each wrk run
+  --report  Emit summary metrics after each wrk run (default)
+  --no-report  Disable summary metrics output
+  --err  Write stderr for wrk, curl, and telemetry tools to .err files
   --help  Show this help
 
 Notes:
@@ -181,6 +184,8 @@ while getopts ":-:" opt; do
                     ;;
                 head) HEAD_MODE="true" ;;
                 report) REPORT_MODE="true" ;;
+                no-report) REPORT_MODE="false" ;;
+                err) ERR_MODE="true" ;;
                 no-telemetry|telemetry-full|pidstat)
                     err "--${OPTARG} removed; use --telemetry=none or --telemetry=all"
                     ;;
@@ -340,6 +345,7 @@ kv "MYSQL_INTERVAL" "$MYSQL_INTERVAL"
 kv "TELEMETRY" "$TELEMETRY_LIST"
 kv "HEAD" "$HEAD_MODE"
 kv "REPORT" "$REPORT_MODE"
+kv "ERR" "$ERR_MODE"
 
 HOSTNAME_VAL=$(hostname 2>/dev/null || echo "unknown")
 ORIGIN_IPV4_VAL=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
@@ -358,6 +364,7 @@ check_expected_file() {
 
 mysql_perf_sample() {
     local file="$1"
+    local err_file="${2-}"
     local output
     local pool_data
     local pool_total
@@ -372,7 +379,11 @@ mysql_perf_sample() {
     local hit_rate="na"
     local now
 
-    output=$(priv mysql -N -e "SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_reads'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read_requests'; SHOW GLOBAL STATUS LIKE 'Questions'; SHOW VARIABLES LIKE 'innodb_buffer_pool_size'; SHOW VARIABLES LIKE 'innodb_page_size';" 2>/dev/null || true)
+    if [ -n "$err_file" ]; then
+        output=$(priv mysql -N -e "SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_reads'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read_requests'; SHOW GLOBAL STATUS LIKE 'Questions'; SHOW VARIABLES LIKE 'innodb_buffer_pool_size'; SHOW VARIABLES LIKE 'innodb_page_size';" 2>>"$err_file" || true)
+    else
+        output=$(priv mysql -N -e "SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_reads'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read_requests'; SHOW GLOBAL STATUS LIKE 'Questions'; SHOW VARIABLES LIKE 'innodb_buffer_pool_size'; SHOW VARIABLES LIKE 'innodb_page_size';" 2>/dev/null || true)
+    fi
     if [ -z "$output" ]; then
         return 1
     fi
@@ -411,11 +422,12 @@ mysql_perf_sample() {
 
 start_mysql_perf() {
     local file="$1"
+    local err_file="${2-}"
     MYSQL_PERF_PID=""
     if ! $USE_MYSQL_PERF; then
         return 0
     fi
-    if ! mysql_perf_sample "$file"; then
+    if ! mysql_perf_sample "$file" "$err_file"; then
         warn "Unable to collect MySQL perf sample; skipping mysql-perf log"
         USE_MYSQL_PERF=false
         return 0
@@ -423,7 +435,7 @@ start_mysql_perf() {
     (
         while true; do
             sleep "$MYSQL_INTERVAL"
-            mysql_perf_sample "$file" || break
+            mysql_perf_sample "$file" "$err_file" || break
         done
     ) &
     MYSQL_PERF_PID=$!
@@ -916,23 +928,43 @@ start_telemetry() {
     MYSQL_PERF_PID=""
 
     if $USE_VMSTAT; then
-        vmstat "$INTERVAL" > "$OUT_DIR/${prefix}_vmstat.log" &
+        if $ERR_MODE; then
+            vmstat "$INTERVAL" > "$OUT_DIR/${prefix}_vmstat.log" 2> "$OUT_DIR/${prefix}_vmstat.err" &
+        else
+            vmstat "$INTERVAL" > "$OUT_DIR/${prefix}_vmstat.log" &
+        fi
         VMSTAT_PID=$!
     fi
     if $USE_PIDSTAT; then
-        pidstat -ru -C 'apache2|mysqld|wrk' "$INTERVAL" > "$OUT_DIR/${prefix}_pidstat.log" &
+        if $ERR_MODE; then
+            pidstat -ru -C 'apache2|mysqld|wrk' "$INTERVAL" > "$OUT_DIR/${prefix}_pidstat.log" 2> "$OUT_DIR/${prefix}_pidstat.err" &
+        else
+            pidstat -ru -C 'apache2|mysqld|wrk' "$INTERVAL" > "$OUT_DIR/${prefix}_pidstat.log" &
+        fi
         PIDSTAT_PID=$!
     fi
     if $USE_IOSTAT; then
-        iostat -xz "$INTERVAL" > "$OUT_DIR/${prefix}_iostat.log" &
+        if $ERR_MODE; then
+            iostat -xz "$INTERVAL" > "$OUT_DIR/${prefix}_iostat.log" 2> "$OUT_DIR/${prefix}_iostat.err" &
+        else
+            iostat -xz "$INTERVAL" > "$OUT_DIR/${prefix}_iostat.log" &
+        fi
         IOSTAT_PID=$!
     fi
     if $USE_SAR; then
-        sar -u -r -n DEV -q "$INTERVAL" > "$OUT_DIR/${prefix}_sar.log" &
+        if $ERR_MODE; then
+            sar -u -r -n DEV -q "$INTERVAL" > "$OUT_DIR/${prefix}_sar.log" 2> "$OUT_DIR/${prefix}_sar.err" &
+        else
+            sar -u -r -n DEV -q "$INTERVAL" > "$OUT_DIR/${prefix}_sar.log" &
+        fi
         SAR_PID=$!
     fi
     if $USE_CGTOP; then
-        /usr/bin/systemd-cgtop -b -d "$INTERVAL" > "$OUT_DIR/${prefix}_cgtop.log" &
+        if $ERR_MODE; then
+            /usr/bin/systemd-cgtop -b -d "$INTERVAL" > "$OUT_DIR/${prefix}_cgtop.log" 2> "$OUT_DIR/${prefix}_cgtop.err" &
+        else
+            /usr/bin/systemd-cgtop -b -d "$INTERVAL" > "$OUT_DIR/${prefix}_cgtop.log" &
+        fi
         CGTOP_PID=$!
     fi
 }
@@ -973,6 +1005,7 @@ for domain in "${DOMAINS[@]}"; do
     CGTOP_CMD=""
     TELEMETRY_SCOPE="domain"
     MYSQL_PERF_LOG=""
+    MYSQL_PERF_ERR=""
     if $USE_VMSTAT; then
         VMSTAT_CMD="vmstat ${INTERVAL}"
     fi
@@ -992,7 +1025,10 @@ for domain in "${DOMAINS[@]}"; do
         start_telemetry "$prefix"
         if $USE_MYSQL_PERF; then
             MYSQL_PERF_LOG="$OUT_DIR/${prefix}_mysql-perf.log"
-            start_mysql_perf "$MYSQL_PERF_LOG"
+            if $ERR_MODE; then
+                MYSQL_PERF_ERR="$OUT_DIR/${prefix}_mysql-perf.err"
+            fi
+            start_mysql_perf "$MYSQL_PERF_LOG" "${MYSQL_PERF_ERR-}"
         fi
     fi
 
@@ -1003,7 +1039,11 @@ for domain in "${DOMAINS[@]}"; do
         if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "cached" ]; then
             HEAD_CMD="curl -I \"$base_url\""
             set +e
-            curl -I "$base_url" > "$OUT_DIR/${prefix}_head.txt"
+            if $ERR_MODE; then
+                curl -I "$base_url" > "$OUT_DIR/${prefix}_head.txt" 2> "$OUT_DIR/${prefix}_head.err"
+            else
+                curl -I "$base_url" > "$OUT_DIR/${prefix}_head.txt"
+            fi
             head_status=$?
             set -e
             if [ -z "$HEAD_EXIT" ] || [ "$HEAD_EXIT" -eq 0 ] 2>/dev/null; then
@@ -1014,7 +1054,11 @@ for domain in "${DOMAINS[@]}"; do
         if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "bust" ]; then
             HEAD_BUST_CMD="curl -I \"$bust_url\""
             set +e
-            curl -I "$bust_url" > "$OUT_DIR/${prefix}_head_bust.txt"
+            if $ERR_MODE; then
+                curl -I "$bust_url" > "$OUT_DIR/${prefix}_head_bust.txt" 2> "$OUT_DIR/${prefix}_head_bust.err"
+            else
+                curl -I "$bust_url" > "$OUT_DIR/${prefix}_head_bust.txt"
+            fi
             head_status=$?
             set -e
             if [ -z "$HEAD_EXIT" ] || [ "$HEAD_EXIT" -eq 0 ] 2>/dev/null; then
@@ -1030,7 +1074,11 @@ for domain in "${DOMAINS[@]}"; do
     if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "cached" ]; then
         LOAD_CMD="${wrk_cmd_cached[*]} \"$base_url\""
         set +e
-        "${wrk_cmd_cached[@]}" "$base_url" > "$OUT_DIR/${prefix}_wrk.txt"
+        if $ERR_MODE; then
+            "${wrk_cmd_cached[@]}" "$base_url" > "$OUT_DIR/${prefix}_wrk.txt" 2> "$OUT_DIR/${prefix}_wrk.err"
+        else
+            "${wrk_cmd_cached[@]}" "$base_url" > "$OUT_DIR/${prefix}_wrk.txt"
+        fi
         wrk_status=$?
         set -e
         if [ -z "$LOAD_EXIT" ] || [ "$LOAD_EXIT" -eq 0 ] 2>/dev/null; then
@@ -1050,7 +1098,11 @@ for domain in "${DOMAINS[@]}"; do
     if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "bust" ]; then
         LOAD_BUST_CMD="${wrk_cmd_bust[*]} \"$bust_url\""
         set +e
-        "${wrk_cmd_bust[@]}" "$bust_url" > "$OUT_DIR/${prefix}_wrk_bust.txt"
+        if $ERR_MODE; then
+            "${wrk_cmd_bust[@]}" "$bust_url" > "$OUT_DIR/${prefix}_wrk_bust.txt" 2> "$OUT_DIR/${prefix}_wrk_bust.err"
+        else
+            "${wrk_cmd_bust[@]}" "$bust_url" > "$OUT_DIR/${prefix}_wrk_bust.txt"
+        fi
         wrk_status=$?
         set -e
         if [ -z "$LOAD_EXIT" ] || [ "$LOAD_EXIT" -eq 0 ] 2>/dev/null; then
@@ -1094,6 +1146,8 @@ for domain in "${DOMAINS[@]}"; do
         echo "LOCAL_START: $DOMAIN_START_LOCAL"
         echo "LOCAL_END: $DOMAIN_END_LOCAL"
         echo "LOG_PAD_SEC: $LOG_PAD_SEC"
+        echo "REPORT_MODE: $REPORT_MODE"
+        echo "ERR_MODE: $ERR_MODE"
         echo "SCRIPT_EXIT: 0"
         if [ -n "$HEAD_EXIT" ]; then
             echo "HEAD_EXIT: $HEAD_EXIT"
@@ -1140,6 +1194,9 @@ for domain in "${DOMAINS[@]}"; do
         fi
         if $USE_MYSQL_PERF; then
             echo "MYSQL_PERF_LOG: $MYSQL_PERF_LOG"
+            if [ -n "$MYSQL_PERF_ERR" ]; then
+                echo "MYSQL_PERF_ERR: $MYSQL_PERF_ERR"
+            fi
             echo "MYSQL_PERF_CMD: mysql -N -e SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_reads'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read_requests'; SHOW GLOBAL STATUS LIKE 'Questions'; SHOW VARIABLES LIKE 'innodb_buffer_pool_size'; SHOW VARIABLES LIKE 'innodb_page_size';"
             echo "MYSQL_PERF_INTERVAL_SEC: $MYSQL_INTERVAL"
         fi

@@ -1044,6 +1044,8 @@ Options (script-specific):
  - `--telemetry LIST`
  - `--head`
  - `--report`
+ - `--no-report`
+ - `--err`
 
 Common arguments: --help.
 
@@ -1062,7 +1064,8 @@ Notes:
 - `wrk2` is always used and always receives `-R <rate>`, either from `--rate` or from mode defaults.
 - When running `perf-load.sh` through an external command runner, use a timeout of at least 60 seconds.
 - Telemetry writes logs alongside `wrk` or `wrk2` output in the run directory. Command dependencies vary by telemetry scope.
-- `--report` emits a per-run summary of `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, and `NOT_200_PCT`.
+- `--report` (default) emits a per-run summary of `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, and `NOT_200_PCT`. Use `--no-report` to suppress it.
+- `--err` writes stderr for `wrk2`, `curl`, and telemetry tools to per-run `.err` files alongside the `.txt` and `.log` outputs.
 - When telemetry includes `sar`, `--report` emits `CPU_TOTAL_PCT_MAX`, `CPU_BUSY_CORES_MAX`, and `LOAD_1_MAX`. If telemetry includes `sar` plus any other tool, it also emits `MEM_AVAIL_MB_MIN`, `MEM_AVAIL_MB_AVG`, `MEM_USED_PCT_MAX`, `MEM_USED_PCT_AVG`, `CPU_USER_PCT_MAX`, `CPU_SYSTEM_PCT_MAX`, `CPU_IOWAIT_PCT_MAX`, `CPU_STEAL_PCT_MAX`, `CPU_TOTAL_BIN5_AVG`, `CPU_TOTAL_TREND`, and `LOAD_1_AVG`. When telemetry includes `pidstat`, `--report` emits `APACHE_CPU_SUM_AVG`, `APACHE_CPU_SUM_MAX`, `APACHE_CPU_SAMPLES`, `APACHE_CPU_SUM_BIN5_AVG`, and `APACHE_CPU_SUM_TREND`.
 - When telemetry includes `mysql`, the run also writes `${prefix}_mysql-perf.log` using the MySQL sampling interval (default 5 seconds, override with `--mysql-interval`).
 
@@ -1078,6 +1081,8 @@ Options (script-specific):
  - `--run-param PATH`
  - `--out-dir DIR`
  - `--pad SEC`
+ - `--report`
+ - `--no-report`
 
 Common arguments: --help.
 
@@ -1088,6 +1093,7 @@ Notes:
 - Reads `run.param` in `KEY: value` format and writes sliced logs using the same prefix.
 - Apache log selection is best-effort and warns if a matching file is not found.
 - Uses `sudo` for log reads if the file is not readable by the current user.
+- When report output is enabled (default), the summary log is written to `${prefix}_logs.txt` and a compatibility copy to `${prefix}_slice.log`. Use `--no-report` to suppress these.
 - When a `${prefix}_report.txt` and Apache access slice exist, the script appends
   summary rows to `perf_runs.csv` and `perf_segments.csv` in the output directory.
 
@@ -1122,6 +1128,7 @@ This cross-reference lists options alphabetically and the scripts that implement
 - --date,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 - --dns-provider,onboard-zone.sh
 - --domain,back-wp.sh;apache-vhost.sh;check-edge.sh;check-origin.sh;check-verify.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;onboard-zone.sh;rules-cf.sh;perf-load.sh;test-record.sh;check-domain.sh
+- --err,perf-load.sh
 - --domains-file,check-auth.sh;check-verify.sh;cloud-redirect.sh;cloud-settings.sh;onboard-zone.sh;test-record.sh
 - --downgrade,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 - --dry-run,cloud-redirect.sh;cloud-settings.sh
@@ -1147,6 +1154,7 @@ This cross-reference lists options alphabetically and the scripts that implement
 - --multisite,check-verify.sh;check-wp.sh;test-record.sh
 - --multisite-domain,onboard-zone.sh
 - --mysql-interval,perf-load.sh
+- --no-report,perf-load.sh;slice-logs.sh
 - --no-sudo,back-wp.sh;check-origin.sh;check-server.sh;check-wp.sh;cloudflare-ips.sh;test-record.sh;check-domain.sh
 - --norecord,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 - --out-dir,perf-load.sh;slice-logs.sh
@@ -1154,10 +1162,10 @@ This cross-reference lists options alphabetically and the scripts that implement
 - --portal-url,mcp-cf.sh
 - --raw,check-cf.sh
 - --pad,slice-logs.sh
+- --report,perf-load.sh;slice-logs.sh
 - --rate,perf-load.sh
 - --redirect-url,cloud-redirect.sh;onboard-zone.sh
 - --registrar,onboard-zone.sh
-- --report,perf-load.sh
 - --run-id,back-wp.sh;perf-load.sh
 - --run-param,slice-logs.sh
 - --singlesite,check-verify.sh;check-wp.sh;test-record.sh

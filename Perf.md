@@ -51,6 +51,40 @@ Before changing caching or running performance tests, confirm:
 ## Performance metrics
 We care about both origin resource pressure and external experience. For each test, record latency percentiles (p50/p95/p99), throughput (requests/sec), and error rate alongside CPU, memory, and IO. That combination tells us whether a change improves actual user experience or simply shifts load around.
 
+### Memory utilization and interpretation
+Memory use on this host is a mix of application RSS, shared libraries, and kernel cache. The default “used” value in `free` is not the same as “unavailable.” For performance work, we treat `MemAvailable` as the primary pressure indicator and only treat memory as a bottleneck when `MemAvailable` collapses or swap activity appears.
+
+Key points to keep straight:
+- **File cache is reclaimed**: A large `Cached` or `SReclaimable` value is normal and does not imply pressure. Kernel cache should fall when workloads need memory.
+- **Apache prefork double-counts in RSS**: Summing per-process RSS overstates memory due to shared text and shared libraries. Use PSS to estimate unique memory.
+- **MySQL buffer pool is deliberate**: MySQL will hold memory for InnoDB; this is “reserved” by design and must be interpreted against `MemAvailable`.
+- **OPcache is shared memory**: If enabled, it reserves shared memory, lowering `MemAvailable` but often reducing per-process PHP allocations.
+- **Redis adds shared memory pressure**: If enabled, Redis competes with MySQL and Apache; memory allocation must be sized to preserve `MemAvailable`.
+
+Baseline checks (system-wide):
+```bash
+free -m
+grep -E "MemTotal|MemFree|MemAvailable|Buffers|Cached|SReclaimable|Slab|SwapTotal|SwapFree|SwapCached" /proc/meminfo
+```
+
+Per-process memory that avoids RSS double-counting:
+```bash
+sudo smem -tk | head -n 30
+sudo smem -r -p $(pgrep -n apache2)
+sudo smem -r -p $(pgrep -n mysqld)
+```
+
+Per-process RSS snapshots (useful but approximate):
+```bash
+sudo ps -o pid,rss,cmd -C apache2 --sort=-rss | head
+sudo ps -o pid,rss,cmd -C mysqld --sort=-rss
+```
+
+Telemetry alignment for tests:
+- Record `MEM_AVAIL_MB_MIN` for the run (this is already reported by `perf-load.sh`).
+- If `MemAvailable` stays flat and swap is idle, memory is not the bottleneck.
+- If `MemAvailable` steadily declines or swap activity appears, re‑check Apache worker counts, MySQL buffer size, and OPcache sizing before tuning application code.
+
 ## Caching strategy
 We use a layered strategy that avoids overlapping page caches and keeps invalidation paths clear. The primary cache is Cloudflare edge caching for anonymous traffic, with Redis object cache for dynamic requests. Apache is used for headers and PHP dispatch, not page caching. This keeps cache responsibility simple and reduces purge complexity.
 
@@ -99,21 +133,26 @@ Option 2: separate Redis DB indices per site, with distinct prefixes.
 This document adopts Option 2 going forward: one Redis instance, distinct DB indices per site, and distinct prefixes as a second layer of protection. This keeps separation explicit while preserving a single Redis service footprint.
 
 ### Edge: Cloudflare caching
-Cloudflare edge caching is the highest leverage layer for anonymous traffic. We cache HTML for GET/HEAD requests and bypass all authenticated or admin paths.
+Cloudflare edge caching is the highest leverage layer for anonymous traffic. We cache HTML for GET/HEAD requests and bypass all authenticated or admin paths. The Cache Rules UI path is **Caching → Cache Rules** (not Rules → Cache Rules). Rule order is significant: the first matching rule applies its action.
 
 Baseline approach:
 - Cache eligible: anonymous GET/HEAD.
-- Bypass: `/wp-admin/*`, `/wp-login.php`, and authenticated cookies (`wordpress_logged_in_*`, `wp-settings-*`).
+- Bypass: `/wp-admin/*`, `/wp-login.php`, `/wp-cron.php` (blocked elsewhere), non-GET/HEAD, authenticated cookies, and cache-bust test parameters.
 - Purge: single URL or host-level when content is published; avoid full purges.
 
-Example Cache Rule (Cloudflare UI, Rules -> Cache Rules):
+Cache Rules field note:
+Cache Rules do not expose `http.request.cookies.names` in all plans. Use `http.cookie contains` for cookie-prefix matching. When editing in the UI, prefer the Expression Editor for consistent behavior.
+
+Example Cache Rule (Cloudflare UI, Caching -> Cache Rules) for anonymous HTML, to be used after bypass rules:
 ```
 Expression:
 (http.request.method in {"GET" "HEAD"})
 and (http.request.uri.path ne "/wp-login.php")
 and not starts_with(http.request.uri.path, "/wp-admin/")
-and not any(http.request.cookies.names[*] matches "(?i)wordpress_logged_in_.*")
-and not any(http.request.cookies.names[*] matches "(?i)wp-settings-.*")
+and not (http.cookie contains "wordpress_logged_in_")
+and not (http.cookie contains "wp-settings-")
+and not (http.cookie contains "wp-postpass_")
+and not (http.cookie contains "comment_author_")
 
 Action:
 Cache eligibility: Eligible
@@ -121,7 +160,65 @@ Edge Cache TTL: <set to your tested value>
 Origin Cache Control: Bypass
 ```
 
-Keep this rule to anonymous traffic only; authenticated sessions should bypass edge cache to avoid serving private content. Use one cache layer for HTML—if edge caching is on, do not enable a disk page cache plugin on WordPress. POST is not cached by Cloudflare and should not be made cache-eligible.
+Keep cache rules to anonymous traffic only; authenticated sessions must bypass edge cache to avoid serving private content. Use one cache layer for HTML—if edge caching is on, do not enable a disk page cache plugin on WordPress. POST is not cached by Cloudflare and should not be made cache-eligible.
+
+Recommended ordered rule sequence for WordPress:
+1) Bypass admin/login/cron paths.
+   - Expression:
+     ```
+     (http.request.uri.path eq "/wp-login.php")
+     or (http.request.uri.path eq "/wp-admin")
+     or (starts_with(http.request.uri.path, "/wp-admin/"))
+     or (http.request.uri.path eq "/wp-cron.php")
+     ```
+   - Action: cache=false; browser_ttl=bypass
+   - Note: Cache Rules cannot block `/wp-cron.php`. Use a Firewall/Ruleset rule to block it if cron is scheduled elsewhere.
+2) Bypass non-GET/HEAD.
+   - Expression:
+     ```
+     not (http.request.method in {"GET" "HEAD"})
+     ```
+   - Action: cache=false; browser_ttl=bypass
+3) Bypass authenticated/session cookies.
+   - Expression:
+     ```
+     (http.cookie contains "wordpress_logged_in_")
+     or (http.cookie contains "wp-settings-")
+     or (http.cookie contains "wp-postpass_")
+     or (http.cookie contains "comment_author_")
+     ```
+   - Action: cache=false; browser_ttl=bypass
+4) Bypass cache-bust tests.
+   - Expression:
+     ```
+     http.request.uri.query contains "cache_bust"
+     ```
+   - Action: cache=false; browser_ttl=bypass
+5) Cache remaining anonymous GET/HEAD.
+   - Expression:
+     ```
+     http.request.method in {"GET" "HEAD"}
+     ```
+   - Action: cache=true; edge_ttl override_origin with a tested default; origin_cache_control bypass; browser_ttl respect_origin (or bypass if the edge should be the only cache).
+
+The table below maps each rule to the Cloudflare UI fields and operators. Use the Expression Editor for cookie-prefix matching, because the Cache Rules field set does not expose `http.request.cookies.names` and the visual builder does not support prefix matching for cookie names reliably across plans.
+
+| Rule | UI Field(s) and Operator(s) | UI Value(s) / Notes | Expression Editor |
+| --- | --- | --- | --- |
+| 1. Bypass admin/login/cron | Request URI Path **equals** /wp-login.php **OR** **equals** /wp-admin **OR** **starts with** /wp-admin/ **OR** **equals** /wp-cron.php | Use OR between each condition. | `(http.request.uri.path eq "/wp-login.php") or (http.request.uri.path eq "/wp-admin") or (starts_with(http.request.uri.path, "/wp-admin/")) or (http.request.uri.path eq "/wp-cron.php")` |
+| 2. Bypass non‑GET/HEAD | Request Method **does not equal** GET **AND** Request Method **does not equal** HEAD | Use AND between the two method checks. | `not (http.request.method in {"GET" "HEAD"})` |
+| 3. Bypass cookies | Use Expression Editor (Cookie header contains) | Visual builder is unreliable for cookie prefixes on Cache Rules. | `(http.cookie contains "wordpress_logged_in_") or (http.cookie contains "wp-settings-") or (http.cookie contains "wp-postpass_") or (http.cookie contains "comment_author_")` |
+| 4. Bypass cache‑bust | Query String **contains** cache_bust | Match the parameter name, not a specific value. | `http.request.uri.query contains "cache_bust"` |
+| 5. Cache remaining GET/HEAD | Request Method **equals** GET **OR** Request Method **equals** HEAD | Use OR between the two method checks. | `http.request.method in {"GET" "HEAD"}` |
+
+Edge TTL and browser TTL guidance:
+Use shorter TTLs (5–60 minutes) for frequently updated content and longer TTLs (6–24 hours) for stable sites. A typical starting point for HTML is 3600s or 21600s; assets can be longer. `browser_ttl=respect_origin` keeps client behavior stable; `browser_ttl=bypass` makes the edge the only cache and is useful when you want a single caching authority.
+
+Cache-bust behavior:
+Cloudflare uses the query string as part of the cache key by default. Without an explicit bypass, `?cache_bust=...` creates a separate cache entry and can pollute the cache. The bypass rule above ensures cache-bust tests always hit the origin.
+
+Long asset TTLs and deploys:
+If you set long TTLs for static assets, only do so with versioned or hashed filenames (or with WordPress enqueue version strings). This ensures content updates change the URL, and you do not need a full purge. Use targeted URL purges when a non-versioned asset must be updated.
 
 Cache analytics and paid options:
 Cloudflare Cache Analytics is not available on the Free tier. On Free, rely on response headers (`cf-cache-status`, `age`, `cf-ray`) and origin-side metrics to validate cache effectiveness. On paid plans (Pro/Business), Cache Analytics provides hit ratio and cache-served bytes and is useful for trend validation. APO (Automatic Platform Optimization) is also a paid option and can replace custom HTML caching rules if you decide to use it.
@@ -649,7 +746,7 @@ Telemetry selection is driven by `--telemetry`. The metadata file records:
 - The sample interval for host telemetry and the MySQL sampling interval when `mysql` is enabled.
 - The exact command line for each tool that ran.
 
-The summary report (`${prefix}_report.txt`) is optional and is derived from raw files; it should never replace the raw tool output. The report is intended for quick triage, while the raw logs are the source of truth for deeper analysis.
+The summary report (`${prefix}_report.txt`) is enabled by default and is derived from raw files; it should never replace the raw tool output. Use `--no-report` to suppress it. The report is intended for quick triage, while the raw logs are the source of truth for deeper analysis.
 
 #### Cache handling and run modes
 When `--cache=both` is selected, the script performs two runs and writes two files (`*_bust.txt` and the cached base name). For single-cache modes, only one file is written, and the cache mode is recorded in `run.param`.
@@ -704,9 +801,11 @@ Sliced logs are written into the same run directory with a consistent naming con
 - `${prefix}_auth.log`
 - `${prefix}_kern.log`
 - `${prefix}_ufw.log`
-- `${prefix}_log_summary.txt`
+- `${prefix}_logs.txt` (summary of slice window and warnings; written by default)
+- `${prefix}_slice.log` (compatibility copy of the summary log)
+When `perf-load.sh --err` is enabled, per-tool stderr output is written alongside each `.txt` and `.log` file using the same prefix and a `.err` suffix.
 
-Each file preserves the original log order and includes only entries inside the window. No reformatting is performed. The summary file is derived from the slices and is optional.
+Each file preserves the original log order and includes only entries inside the window. No reformatting is performed. The summary log records the window, assumptions, and missing file warnings; use `--no-report` to suppress it.
 
 ##### Parsing rules
 Apache and system logs use different timestamp formats. The slicer should parse each log with a format-specific matcher:
@@ -718,6 +817,9 @@ For syslog-style entries, the current year and local timezone are assumed; the s
 
 ##### Summary content
 The summary should be concise and focused on diagnosis:
+
+Current implementation note:
+- `slice-logs.sh` writes `${prefix}_logs.txt` with window, assumptions, and warnings. When a perf report and Apache access slice exist, it appends rows to `perf_runs.csv` and `perf_segments.csv`. The richer summary items below are the target design and may be implemented incrementally.
 
 Apache access:
 - Request count by status (2xx, 3xx, 4xx, 5xx)

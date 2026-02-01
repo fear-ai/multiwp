@@ -19,6 +19,7 @@ The dependency chain is explicit: Cloudflare edge behavior depends on correct DN
       4. [3.4.4 Origin Cert](#344-origin-cert)
       5. [3.4.5 Security Settings](#345-security-settings)
       6. [3.4.6 Security Headers](#346-security-headers)
+      7. [3.4.7 Cache Rules](#347-cache-rules)
    5. [3.5 Automation](#35-automation)
       1. [3.5.1 HTTPS and Security Baseline](#351-https-and-security-baseline)
       2. [3.5.2 Zone DNS](#352-zone-dns)
@@ -126,6 +127,9 @@ Use Managed Transforms to add standard response headers at the edge.
 
 HSTS policy and tradeoffs:
 HSTS is enabled as part of the managed security headers baseline, so treat it as a long-term commitment for each domain. Once a browser sees the header it will enforce HTTPS for the duration of `max-age`, and `includeSubDomains` extends that requirement to all subdomains. This hardens against downgrade attacks, but it also means any future HTTP-only hostnames or cert failures can lock out users. Validate that HTTPS is stable (Full strict, origin certs in place, redirects tested) before relying on the baseline for a new domain, and avoid HSTS preload unless you are committed to permanent HTTPS for all subdomains.
+
+#### 3.4.7 Cache Rules
+Cache Rules are configured in the Cloudflare UI under `Caching` → `Cache Rules` (not `Rules`). Use `Perf.md` as the canonical source for cache rule expressions, ordering, and validation. Cache Rules have a restricted field set; for cookie-based bypass logic, use `http.cookie contains` and the Expression Editor to avoid unsupported identifiers. Cache-bust query parameters are not special in Cloudflare; by default they become part of the cache key, so use an explicit bypass rule for `cache_bust` when testing.
 
 ### 3.5 Automation
 Cloudflare UI is authoritative for SSL mode, redirects, and headers. Automation scripts help with DNS, origin certificate placement, and vhost generation when repeatability is needed.
