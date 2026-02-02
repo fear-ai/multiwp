@@ -123,7 +123,7 @@ Program scripts (entrypoints, alphabetical):
 | `mcp-cf.sh` | Validate Cloudflare MCP portal access | Exercised |
 | `onboard-zone.sh` | Create or ensure Cloudflare zone + DNS and update domains.csv | Not exercised |
 | `perf-load.sh` | Run load tests and capture telemetry for a WordPress site | Exercised |
-| `rules-cf.sh` | Export or apply Cloudflare firewall rules | Exercised |
+| `rules-cf.sh` | Get, put, or copy Cloudflare rulesets (firewall, cache, rate) | Exercised |
 | `setup-wp.sh` | Bootstrap WordPress multisite base configuration | Not exercised |
 | `slice-logs.sh` | Extract log slices for review and correlation | Not exercised |
 | `verify-cf-auth.sh` | Validate Cloudflare credentials (token/key) | Exercised |

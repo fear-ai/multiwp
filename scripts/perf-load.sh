@@ -10,6 +10,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/common.sh"
 . "$SCRIPTS_DIR/cli.sh"
+. "$SCRIPTS_DIR/cmd.sh"
 
 DOMAINS=()
 RUN_ID=""
@@ -24,7 +25,45 @@ INTERVAL=1
 MYSQL_INTERVAL="${MYSQL_INTERVAL:-5}"
 LOG_PAD_SEC="${LOG_PAD_SEC:-5}"
 MODE="init"
-TELEMETRY_LIST="sar"
+TELEMETRY_DEFAULT="sar"
+TELEMETRY_LIST="$TELEMETRY_DEFAULT"
+TELEMETRY_SELECTED=()
+TELEMETRY_ORDER=(sar pidstat vmstat iostat cgtop mysql)
+declare -A TELEMETRY_KIND=(
+    [sar]=cmd
+    [pidstat]=cmd
+    [vmstat]=cmd
+    [iostat]=cmd
+    [cgtop]=cmd
+    [mysql]=mysql
+)
+declare -A TELEMETRY_CMD_MAP=(
+    [sar]=TELEMETRY_CMD_SAR
+    [pidstat]=TELEMETRY_CMD_PIDSTAT
+    [vmstat]=TELEMETRY_CMD_VMSTAT
+    [iostat]=TELEMETRY_CMD_IOSTAT
+    [cgtop]=TELEMETRY_CMD_CGTOP
+)
+declare -A TELEMETRY_REQ=(
+    [sar]=sar
+    [pidstat]=pidstat
+    [vmstat]=vmstat
+    [iostat]=iostat
+    [cgtop]=/usr/bin/systemd-cgtop
+    [mysql]=mysql
+)
+declare -A TELEMETRY_SUFFIX=(
+    [sar]=sar
+    [pidstat]=pidstat
+    [vmstat]=vmstat
+    [iostat]=iostat
+    [cgtop]=cgtop
+)
+TELEMETRY_CMD_SAR=(sar -u -r -n DEV -q)
+TELEMETRY_CMD_PIDSTAT=(pidstat -ru -C 'apache2|mysqld|wrk')
+TELEMETRY_CMD_VMSTAT=(vmstat)
+TELEMETRY_CMD_IOSTAT=(iostat -xz)
+TELEMETRY_CMD_CGTOP=(/usr/bin/systemd-cgtop -b -d)
 USE_SAR=false
 USE_PIDSTAT=false
 USE_VMSTAT=false
@@ -236,12 +275,54 @@ if [ -z "$WRK_BIN" ]; then
     fi
 fi
 
-parse_telemetry_list() {
-    local list="$1"
-    local expanded=""
+telemetry_has() {
+    local needle="$1"
     local item
+    for item in "${TELEMETRY_SELECTED[@]}"; do
+        if [ "$item" = "$needle" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+telemetry_selected_string() {
+    local out=""
+    local item
+    for item in "${TELEMETRY_SELECTED[@]}"; do
+        out+="${item},"
+    done
+    echo "${out%,}"
+}
+
+telemetry_cmd_for() {
+    local tool="$1"
+    local -n out="$2"
+    local name="${TELEMETRY_CMD_MAP[$tool]-}"
+    [ -n "$name" ] || return 1
+    local -n base="$name"
+    out=("${base[@]}" "$INTERVAL")
+}
+
+telemetry_cmd_string() {
+    local tool="$1"
+    local -a cmd=()
+    telemetry_cmd_for "$tool" cmd || return 1
+    cmd_join "${cmd[@]}"
+}
+
+parse_telemetry_list() {
+    local list="${1-}"
     local items=()
     local use_all=false
+    local item
+    declare -A seen=()
+
+    TELEMETRY_SELECTED=()
+
+    if [ -z "$list" ]; then
+        list="$TELEMETRY_DEFAULT"
+    fi
 
     case "$list" in
         none)
@@ -252,9 +333,42 @@ parse_telemetry_list() {
             USE_CGTOP=false
             USE_MYSQL_PERF=false
             TELEMETRY_DETAIL=false
+            TELEMETRY_LIST="none"
             return
             ;;
     esac
+
+    parse_comma_list "$list" items "telemetry"
+
+    for item in "${items[@]}"; do
+        case "$item" in
+            all)
+                use_all=true
+                ;;
+            none)
+                err "--telemetry=none cannot be combined with other values"
+                ;;
+            *)
+                if [ -z "${TELEMETRY_KIND[$item]-}" ]; then
+                    err "--telemetry invalid value: $item"
+                fi
+                ;;
+        esac
+    done
+
+    if $use_all; then
+        TELEMETRY_SELECTED=("${TELEMETRY_ORDER[@]}")
+    else
+        for item in "${items[@]}"; do
+            if [ "$item" = "all" ]; then
+                continue
+            fi
+            if [ -z "${seen[$item]-}" ]; then
+                TELEMETRY_SELECTED+=("$item")
+                seen[$item]=1
+            fi
+        done
+    fi
 
     USE_SAR=false
     USE_PIDSTAT=false
@@ -262,56 +376,34 @@ parse_telemetry_list() {
     USE_IOSTAT=false
     USE_CGTOP=false
     USE_MYSQL_PERF=false
-
-    IFS=',' read -r -a items <<<"$list"
-    for item in "${items[@]}"; do
+    for item in "${TELEMETRY_SELECTED[@]}"; do
         case "$item" in
-            all) use_all=true ;;
             sar) USE_SAR=true ;;
             pidstat) USE_PIDSTAT=true ;;
             vmstat) USE_VMSTAT=true ;;
             iostat) USE_IOSTAT=true ;;
             cgtop) USE_CGTOP=true ;;
             mysql) USE_MYSQL_PERF=true ;;
-            none) err "--telemetry=none cannot be combined with other values" ;;
-            *) err "--telemetry invalid value: $item" ;;
         esac
     done
-    if $use_all; then
-        USE_SAR=true
-        USE_PIDSTAT=true
-        USE_VMSTAT=true
-        USE_IOSTAT=true
-        USE_CGTOP=true
-        USE_MYSQL_PERF=true
-    fi
+
     TELEMETRY_DETAIL=false
     if $USE_SAR && { $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP; }; then
         TELEMETRY_DETAIL=true
     fi
+
+    TELEMETRY_LIST="$(telemetry_selected_string)"
 }
 
 parse_telemetry_list "$TELEMETRY_LIST"
 
 require_cmds "$WRK_BIN"
-if $USE_SAR; then
-    require_cmds sar
-fi
-if $USE_PIDSTAT; then
-    require_cmds pidstat
-fi
-if $USE_VMSTAT; then
-    require_cmds vmstat
-fi
-if $USE_IOSTAT; then
-    require_cmds iostat
-fi
-if $USE_CGTOP; then
-    require_cmds /usr/bin/systemd-cgtop
-fi
-if $USE_MYSQL_PERF; then
-    require_cmds mysql
-fi
+for item in "${TELEMETRY_SELECTED[@]}"; do
+    req="${TELEMETRY_REQ[$item]-}"
+    if [ -n "$req" ]; then
+        require_cmds "$req"
+    fi
+done
 if [ "$REPORT_MODE" = "true" ] && { $USE_SAR || $USE_PIDSTAT; }; then
     require_cmds python3
 fi
@@ -919,59 +1011,31 @@ report_kv() {
 
 start_telemetry() {
     local prefix="$1"
-
-    VMSTAT_PID=""
-    PIDSTAT_PID=""
-    IOSTAT_PID=""
-    SAR_PID=""
-    CGTOP_PID=""
-    MYSQL_PERF_PID=""
-
-    if $USE_VMSTAT; then
-        if $ERR_MODE; then
-            vmstat "$INTERVAL" > "$OUT_DIR/${prefix}_vmstat.log" 2> "$OUT_DIR/${prefix}_vmstat.err" &
-        else
-            vmstat "$INTERVAL" > "$OUT_DIR/${prefix}_vmstat.log" &
-        fi
-        VMSTAT_PID=$!
-    fi
-    if $USE_PIDSTAT; then
-        if $ERR_MODE; then
-            pidstat -ru -C 'apache2|mysqld|wrk' "$INTERVAL" > "$OUT_DIR/${prefix}_pidstat.log" 2> "$OUT_DIR/${prefix}_pidstat.err" &
-        else
-            pidstat -ru -C 'apache2|mysqld|wrk' "$INTERVAL" > "$OUT_DIR/${prefix}_pidstat.log" &
-        fi
-        PIDSTAT_PID=$!
-    fi
-    if $USE_IOSTAT; then
-        if $ERR_MODE; then
-            iostat -xz "$INTERVAL" > "$OUT_DIR/${prefix}_iostat.log" 2> "$OUT_DIR/${prefix}_iostat.err" &
-        else
-            iostat -xz "$INTERVAL" > "$OUT_DIR/${prefix}_iostat.log" &
-        fi
-        IOSTAT_PID=$!
-    fi
-    if $USE_SAR; then
-        if $ERR_MODE; then
-            sar -u -r -n DEV -q "$INTERVAL" > "$OUT_DIR/${prefix}_sar.log" 2> "$OUT_DIR/${prefix}_sar.err" &
-        else
-            sar -u -r -n DEV -q "$INTERVAL" > "$OUT_DIR/${prefix}_sar.log" &
-        fi
-        SAR_PID=$!
-    fi
-    if $USE_CGTOP; then
-        if $ERR_MODE; then
-            /usr/bin/systemd-cgtop -b -d "$INTERVAL" > "$OUT_DIR/${prefix}_cgtop.log" 2> "$OUT_DIR/${prefix}_cgtop.err" &
-        else
-            /usr/bin/systemd-cgtop -b -d "$INTERVAL" > "$OUT_DIR/${prefix}_cgtop.log" &
-        fi
-        CGTOP_PID=$!
-    fi
+    TELEMETRY_PIDS=()
+    local tool
+    for tool in "${TELEMETRY_SELECTED[@]}"; do
+        case "${TELEMETRY_KIND[$tool]-}" in
+            cmd)
+                local -a cmd=()
+                local suffix="${TELEMETRY_SUFFIX[$tool]}"
+                local out_file="$OUT_DIR/${prefix}_${suffix}.log"
+                local err_file="$OUT_DIR/${prefix}_${suffix}.err"
+                local pid
+                telemetry_cmd_for "$tool" cmd
+                if [ "$ERR_MODE" = "true" ]; then
+                    pid=$(start_cmd "telemetry:${tool}" "both" "$out_file" "$err_file" -- "${cmd[@]}")
+                else
+                    pid=$(start_cmd "telemetry:${tool}" "out" "$out_file" -- "${cmd[@]}")
+                fi
+                TELEMETRY_PIDS+=("$pid")
+                ;;
+        esac
+    done
 }
 
 stop_telemetry() {
     local pid
-    for pid in "${VMSTAT_PID-}" "${PIDSTAT_PID-}" "${IOSTAT_PID-}" "${SAR_PID-}" "${CGTOP_PID-}"; do
+    for pid in "${TELEMETRY_PIDS[@]-}"; do
         if [ -n "${pid-}" ]; then
             kill "$pid" >/dev/null 2>&1 || true
         fi
@@ -1006,30 +1070,30 @@ for domain in "${DOMAINS[@]}"; do
     TELEMETRY_SCOPE="domain"
     MYSQL_PERF_LOG=""
     MYSQL_PERF_ERR=""
-    if $USE_VMSTAT; then
-        VMSTAT_CMD="vmstat ${INTERVAL}"
+    if $USE_SAR; then
+        SAR_CMD="$(telemetry_cmd_string sar)"
     fi
     if $USE_PIDSTAT; then
-        PIDSTAT_CMD="pidstat -ru -C 'apache2|mysqld|wrk' ${INTERVAL}"
+        PIDSTAT_CMD="$(telemetry_cmd_string pidstat)"
+    fi
+    if $USE_VMSTAT; then
+        VMSTAT_CMD="$(telemetry_cmd_string vmstat)"
     fi
     if $USE_IOSTAT; then
-        IOSTAT_CMD="iostat -xz ${INTERVAL}"
-    fi
-    if $USE_SAR; then
-        SAR_CMD="sar -u -r -n DEV -q ${INTERVAL}"
+        IOSTAT_CMD="$(telemetry_cmd_string iostat)"
     fi
     if $USE_CGTOP; then
-        CGTOP_CMD="/usr/bin/systemd-cgtop -b -d ${INTERVAL}"
+        CGTOP_CMD="$(telemetry_cmd_string cgtop)"
     fi
-    if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP; then
+    if [ "${#TELEMETRY_SELECTED[@]}" -gt 0 ]; then
         start_telemetry "$prefix"
-        if $USE_MYSQL_PERF; then
-            MYSQL_PERF_LOG="$OUT_DIR/${prefix}_mysql-perf.log"
-            if $ERR_MODE; then
-                MYSQL_PERF_ERR="$OUT_DIR/${prefix}_mysql-perf.err"
-            fi
-            start_mysql_perf "$MYSQL_PERF_LOG" "${MYSQL_PERF_ERR-}"
+    fi
+    if $USE_MYSQL_PERF; then
+        MYSQL_PERF_LOG="$OUT_DIR/${prefix}_mysql-perf.log"
+        if $ERR_MODE; then
+            MYSQL_PERF_ERR="$OUT_DIR/${prefix}_mysql-perf.err"
         fi
+        start_mysql_perf "$MYSQL_PERF_LOG" "${MYSQL_PERF_ERR-}"
     fi
 
     base_url="https://${domain}/"
@@ -1037,12 +1101,12 @@ for domain in "${DOMAINS[@]}"; do
 
     if [ "$HEAD_MODE" = "true" ]; then
         if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "cached" ]; then
-            HEAD_CMD="curl -I \"$base_url\""
+            HEAD_CMD="$(cmd_join curl -I "$base_url")"
             set +e
             if $ERR_MODE; then
-                curl -I "$base_url" > "$OUT_DIR/${prefix}_head.txt" 2> "$OUT_DIR/${prefix}_head.err"
+                run_cmd "head:cached" "both" "$OUT_DIR/${prefix}_head.txt" "$OUT_DIR/${prefix}_head.err" -- curl -I "$base_url"
             else
-                curl -I "$base_url" > "$OUT_DIR/${prefix}_head.txt"
+                run_cmd "head:cached" "out" "$OUT_DIR/${prefix}_head.txt" -- curl -I "$base_url"
             fi
             head_status=$?
             set -e
@@ -1052,12 +1116,12 @@ for domain in "${DOMAINS[@]}"; do
             check_expected_file "$OUT_DIR/${prefix}_head.txt" "head headers (cached)"
         fi
         if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "bust" ]; then
-            HEAD_BUST_CMD="curl -I \"$bust_url\""
+            HEAD_BUST_CMD="$(cmd_join curl -I "$bust_url")"
             set +e
             if $ERR_MODE; then
-                curl -I "$bust_url" > "$OUT_DIR/${prefix}_head_bust.txt" 2> "$OUT_DIR/${prefix}_head_bust.err"
+                run_cmd "head:bust" "both" "$OUT_DIR/${prefix}_head_bust.txt" "$OUT_DIR/${prefix}_head_bust.err" -- curl -I "$bust_url"
             else
-                curl -I "$bust_url" > "$OUT_DIR/${prefix}_head_bust.txt"
+                run_cmd "head:bust" "out" "$OUT_DIR/${prefix}_head_bust.txt" -- curl -I "$bust_url"
             fi
             head_status=$?
             set -e
@@ -1072,12 +1136,12 @@ for domain in "${DOMAINS[@]}"; do
     wrk_cmd_bust=("$WRK_BIN" -t"$THREADS" -c"$CONNECTIONS" -d"$DURATION" -R"$RATE")
 
     if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "cached" ]; then
-        LOAD_CMD="${wrk_cmd_cached[*]} \"$base_url\""
+        LOAD_CMD="$(cmd_join "${wrk_cmd_cached[@]}" "$base_url")"
         set +e
         if $ERR_MODE; then
-            "${wrk_cmd_cached[@]}" "$base_url" > "$OUT_DIR/${prefix}_wrk.txt" 2> "$OUT_DIR/${prefix}_wrk.err"
+            run_cmd "wrk:cached" "both" "$OUT_DIR/${prefix}_wrk.txt" "$OUT_DIR/${prefix}_wrk.err" -- "${wrk_cmd_cached[@]}" "$base_url"
         else
-            "${wrk_cmd_cached[@]}" "$base_url" > "$OUT_DIR/${prefix}_wrk.txt"
+            run_cmd "wrk:cached" "out" "$OUT_DIR/${prefix}_wrk.txt" -- "${wrk_cmd_cached[@]}" "$base_url"
         fi
         wrk_status=$?
         set -e
@@ -1096,12 +1160,12 @@ for domain in "${DOMAINS[@]}"; do
         fi
     fi
     if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "bust" ]; then
-        LOAD_BUST_CMD="${wrk_cmd_bust[*]} \"$bust_url\""
+        LOAD_BUST_CMD="$(cmd_join "${wrk_cmd_bust[@]}" "$bust_url")"
         set +e
         if $ERR_MODE; then
-            "${wrk_cmd_bust[@]}" "$bust_url" > "$OUT_DIR/${prefix}_wrk_bust.txt" 2> "$OUT_DIR/${prefix}_wrk_bust.err"
+            run_cmd "wrk:bust" "both" "$OUT_DIR/${prefix}_wrk_bust.txt" "$OUT_DIR/${prefix}_wrk_bust.err" -- "${wrk_cmd_bust[@]}" "$bust_url"
         else
-            "${wrk_cmd_bust[@]}" "$bust_url" > "$OUT_DIR/${prefix}_wrk_bust.txt"
+            run_cmd "wrk:bust" "out" "$OUT_DIR/${prefix}_wrk_bust.txt" -- "${wrk_cmd_bust[@]}" "$bust_url"
         fi
         wrk_status=$?
         set -e
@@ -1172,7 +1236,7 @@ for domain in "${DOMAINS[@]}"; do
         if [ -n "$HEAD_BUST_CMD" ]; then
             echo "HEAD_BUST_CMD: $HEAD_BUST_CMD"
         fi
-        if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP; then
+        if [ "${#TELEMETRY_SELECTED[@]}" -gt 0 ]; then
             echo "TELEMETRY: $TELEMETRY_LIST"
             echo "TELEMETRY_SCOPE: $TELEMETRY_SCOPE"
             echo "TELEMETRY_INTERVAL_SEC: $INTERVAL"

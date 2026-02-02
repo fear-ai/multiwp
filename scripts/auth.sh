@@ -3,6 +3,10 @@
 
 set -euo pipefail
 
+: "${COMMON_LOADED:?${BASH_SOURCE[0]##*/} requires common.sh to be sourced first.}"
+
+AUTH_LOADED=1
+
 CF_API_BASE="${CF_API_BASE:-https://api.cloudflare.com/client/v4}"
 
 cf_log_once() {

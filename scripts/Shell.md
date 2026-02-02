@@ -33,6 +33,8 @@ Program scripts follow a consistent structure so shared helpers remain predictab
 - Source `common.sh` first, then `cli.sh` or `auth.sh` as needed, using `SCRIPTS_DIR` to avoid path ambiguity.
 - Use `require_cmd` for external dependencies before running logic.
 
+Each helper sets a `*_LOADED` flag and enforces inclusion order with a one-line guard that fails fast if it is sourced before `common.sh`. This keeps dependency errors visible and prevents helpers from running without required base functions.
+
 ## Logging, Status, and Error Conventions
 
 The shared helpers establish the baseline logging and error behavior that all scripts should follow. The intent is to keep critical failures obvious and to make it safe for scripts to continue collecting results after a non-fatal failure.
@@ -96,6 +98,7 @@ Key helpers:
 - `priv()` in `common.sh` centralizes privilege escalation via `sudo`.
 - `safe_name()` in `common.sh` creates safe filenames from domains.
 - `normalize_domain`, `validate_domain`, `finalize_domains`, and `validate_ip` in `common.sh` keep domain and IP inputs consistent and safe.
+- `run_cmd()` and `start_cmd()` in `cmd.sh` standardize stdout/stderr capture and background process handling for telemetry and load tooling.
 - `cli_usage_*`, `cli_*_opt`, and `cli_cf_auth_opt` in `cli.sh` standardize argument parsing and help output.
 - `auth.sh` centralizes Cloudflare auth handling and API request helpers.
 

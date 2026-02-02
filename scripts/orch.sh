@@ -2,6 +2,10 @@
 # orch.sh - Shared orchestration helpers for check runners.
 # Requires common.sh and caller-provided script paths/args.
 
+: "${COMMON_LOADED:?${BASH_SOURCE[0]##*/} requires common.sh to be sourced first.}"
+
+ORCH_LOADED=1
+
 run_domain_checks() {
     local domain="$1"
     local ok=true

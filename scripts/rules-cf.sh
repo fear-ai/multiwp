@@ -1,8 +1,8 @@
 #!/bin/bash
-# rules-cf.sh - Export or apply Cloudflare firewall rules (Rulesets API).
+# rules-cf.sh - Get, put, or copy Cloudflare rulesets (Rulesets API).
 # For options, environment variables, defaults see usage().
 #
-# Example: rules-cf.sh --export --source example.com
+# Example: rules-cf.sh --get --type firewall --src example.com
 
 set -euo pipefail
 
@@ -12,27 +12,30 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/auth.sh"
 . "$SCRIPTS_DIR/cli.sh"
 
-MODE="export"
-SOURCE=""
-OUTPUT=""
-INPUT=""
+MODE="get"
+MODE_SET=false
+TYPE="cache"
+PHASE=""
+SRC=""
+FILE=""
 ALL=false
-DOMAINS=()
+DESTS=()
 CF_AUTH_CLI=""
 ALLOW_REDIRECTS=false
 
 usage() {
     cat <<'EOF'
-rules-cf.sh - Export or apply Cloudflare firewall rules (Rulesets API).
-Example: rules-cf.sh --export --source example.com
+rules-cf.sh - Get, put, or copy Cloudflare rulesets (Rulesets API).
+Example: rules-cf.sh --get --type firewall --src example.com
 
 Options:
-  --export  Export rules from a source zone (default)
-  --apply  Apply rules from a JSON file to target zones
-  --source DOMAIN  Source zone apex for export
-  --output PATH  Export output path (default: rules.<domain>.json)
-  --input PATH  Input file for apply (default: rules.<domain>.json)
-  --domain DOMAIN  Target zone apex for apply (repeatable)
+  --get  Fetch rules from a source zone (default)
+  --put  Apply rules from a JSON file to target zones
+  --copy  Fetch rules from a source zone, then apply to target zones
+  --type TYPE  Rule type: firewall|cache|rate (default: cache)
+  --src DOMAIN  Source zone apex for get/copy (required for get/copy)
+  --dest DOMAIN  Target zone apex for put/copy (repeatable)
+  --file PATH  Ruleset file path (default: <src>_<phase>.json; phase derived from --type)
   --all  Include disabled rules in export
   --allow-redirects  Allow apply operations for redirect-only domains
 
@@ -53,32 +56,55 @@ while getopts ":-:" opt; do
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
-                export) MODE="export" ;;
-                apply) MODE="apply" ;;
-                source=*) SOURCE="${OPTARG#*=}" ;;
-                source)
-                    [ -n "${!OPTIND-}" ] || err "--source requires a value"
-                    SOURCE="${!OPTIND}"
+                get)
+                    if $MODE_SET && [ "$MODE" != "get" ]; then
+                        err "--get, --put, and --copy are mutually exclusive"
+                    fi
+                    MODE="get"
+                    MODE_SET=true
+                    ;;
+                put)
+                    if $MODE_SET && [ "$MODE" != "put" ]; then
+                        err "--get, --put, and --copy are mutually exclusive"
+                    fi
+                    MODE="put"
+                    MODE_SET=true
+                    ;;
+                copy)
+                    if $MODE_SET && [ "$MODE" != "copy" ]; then
+                        err "--get, --put, and --copy are mutually exclusive"
+                    fi
+                    MODE="copy"
+                    MODE_SET=true
+                    ;;
+                type=*) TYPE="${OPTARG#*=}" ;;
+                type)
+                    [ -n "${!OPTIND-}" ] || err "--type requires a value"
+                    TYPE="${!OPTIND}"
                     OPTIND=$((OPTIND+1))
                     ;;
-                output=*) OUTPUT="${OPTARG#*=}" ;;
-                output)
-                    [ -n "${!OPTIND-}" ] || err "--output requires a value"
-                    OUTPUT="${!OPTIND}"
+                src=*) SRC="${OPTARG#*=}" ;;
+                src)
+                    [ -n "${!OPTIND-}" ] || err "--src requires a value"
+                    SRC="${!OPTIND}"
                     OPTIND=$((OPTIND+1))
                     ;;
-                input=*) INPUT="${OPTARG#*=}" ;;
-                input)
-                    [ -n "${!OPTIND-}" ] || err "--input requires a value"
-                    INPUT="${!OPTIND}"
+                dest=*) DESTS+=("${OPTARG#*=}") ;;
+                dest)
+                    [ -n "${!OPTIND-}" ] || err "--dest requires a value"
+                    DESTS+=("${!OPTIND}")
+                    OPTIND=$((OPTIND+1))
+                    ;;
+                file=*) FILE="${OPTARG#*=}" ;;
+                file)
+                    [ -n "${!OPTIND-}" ] || err "--file requires a value"
+                    FILE="${!OPTIND}"
                     OPTIND=$((OPTIND+1))
                     ;;
                 all) ALL=true ;;
                 allow-redirects) ALLOW_REDIRECTS=true ;;
                 *)
-                    if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
-                        :
-                    elif cli_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
+                    if cli_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
                         :
                     else
                         usage
@@ -92,12 +118,6 @@ while getopts ":-:" opt; do
 done
 shift $((OPTIND-1))
 
-if [ "$MODE" = "export" ] && [ "${#DOMAINS[@]}" -gt 0 ]; then
-    err "--domain is only valid with --apply"
-fi
-if [ "$MODE" = "apply" ] && [ -n "$SOURCE" ]; then
-    err "--source is only valid with --export"
-fi
 if [ $# -gt 0 ]; then
     err "Unexpected arguments: $*"
 fi
@@ -128,7 +148,18 @@ normalize_source() {
 
 default_rules_path() {
     local domain="$1"
-    echo "rules.${domain}.json"
+    echo "${domain}_${PHASE}.json"
+}
+
+resolve_phase() {
+    local raw="${1-}"
+    raw=$(printf "%s" "$raw" | tr '[:upper:]' '[:lower:]' | xargs)
+    case "$raw" in
+        firewall) PHASE="http_request_firewall_custom" ;;
+        cache) PHASE="http_request_cache_settings" ;;
+        rate) PHASE="http_ratelimit" ;;
+        *) err "--type must be one of: firewall, cache, rate" ;;
+    esac
 }
 
 export_rules() {
@@ -145,9 +176,26 @@ export_rules() {
         zone_id="$CF_ZONE_ID"
     fi
     local resp
-    resp=$(cf_api_request GET "/zones/${zone_id}/rulesets/phases/http_request_firewall_custom/entrypoint")
+    resp=$(cf_api_request GET "/zones/${zone_id}/rulesets/phases/${PHASE}/entrypoint")
     if [ "$(cf_api_success "$resp")" != "true" ]; then
-        err "Failed to query firewall ruleset for $source: $(cf_api_error_messages "$resp")"
+        local msg
+        msg="$(cf_api_error_messages "$resp")"
+        if echo "$msg" | grep -qi "could not find entrypoint ruleset"; then
+            err "No entrypoint ruleset for ${PHASE} in ${source}; create one before exporting"
+        fi
+        err "Failed to query ${PHASE} ruleset for $source: $msg"
+    fi
+    local total_rules enabled_rules
+    total_rules=$(echo "$resp" | jq -r '(.result.rules // []) | length')
+    enabled_rules=$(echo "$resp" | jq -r '(.result.rules // []) | map(select(.enabled != false)) | length')
+    if [ "$include_disabled" = true ]; then
+        if [ "$total_rules" -eq 0 ]; then
+            err "No rules found for ${PHASE} in ${source}; export aborted"
+        fi
+    else
+        if [ "$enabled_rules" -eq 0 ]; then
+            err "No enabled rules to export for ${source} in ${PHASE}; use --all to include disabled rules"
+        fi
     fi
     local filter
     filter='
@@ -175,7 +223,7 @@ export_rules() {
     if ! echo "$resp" | jq --argjson include_disabled "$include_disabled" "$filter" > "$output_path"; then
         err "Failed to write export file: $output_path"
     fi
-    log "Exported firewall rules from $source to $output_path"
+    log "Exported ${PHASE} rules from $source to $output_path"
 }
 
 apply_rules() {
@@ -191,7 +239,7 @@ apply_rules() {
     local phase
     phase=$(jq -r '.phase // empty' "$input_path")
     if [ -z "$phase" ]; then
-        phase="http_request_firewall_custom"
+        phase="$PHASE"
     fi
     local name
     name=$(jq -r '.name // "default"' "$input_path")
@@ -221,43 +269,55 @@ apply_rules() {
         if [ -n "$ruleset_id" ]; then
             update_resp=$(cf_api_request PUT "/zones/${zone_id}/rulesets/${ruleset_id}" "$payload")
             if [ "$(cf_api_success "$update_resp")" != "true" ]; then
-                err "Failed to update ruleset for ${domain}: $(cf_api_error_messages "$update_resp")"
+                err "Failed to update ${phase} ruleset for ${domain}: $(cf_api_error_messages "$update_resp")"
             fi
-            log "Updated firewall rules for ${domain} (ruleset ${ruleset_id})"
+            log "Updated ${phase} rules for ${domain} (ruleset ${ruleset_id})"
         else
             create_resp=$(cf_api_request POST "/zones/${zone_id}/rulesets" "$payload")
             if [ "$(cf_api_success "$create_resp")" != "true" ]; then
-                err "Failed to create ruleset for ${domain}: $(cf_api_error_messages "$create_resp")"
+                err "Failed to create ${phase} ruleset for ${domain}: $(cf_api_error_messages "$create_resp")"
             fi
-            log "Created firewall ruleset for ${domain}"
+            log "Created ${phase} ruleset for ${domain}"
         fi
     done
 }
 
-if [ "$MODE" = "export" ]; then
-    [ -n "$SOURCE" ] || err "--source is required for export"
-    SOURCE="$(normalize_source "$SOURCE")"
-    if [ -z "$OUTPUT" ]; then
-        OUTPUT="$(default_rules_path "$SOURCE")"
+resolve_phase "$TYPE"
+
+if [ -n "$SRC" ]; then
+    SRC="$(normalize_source "$SRC")"
+fi
+if [ ${#DESTS[@]} -gt 0 ]; then
+    finalize_domains DESTS || { usage; exit 1; }
+fi
+
+if [ "$MODE" = "get" ]; then
+    [ -n "$SRC" ] || err "--src is required for --get"
+    if [ -z "$FILE" ]; then
+        FILE="$(default_rules_path "$SRC")"
     fi
-    section "RULES" "Export"
-    kv "SOURCE" "$SOURCE"
-    export_rules "$SOURCE" "$ALL" "$OUTPUT"
+    section "RULES" "Get"
+    kv "TYPE" "$TYPE"
+    kv "PHASE" "$PHASE"
+    kv "SRC" "$SRC"
+    kv "FILE" "$FILE"
+    export_rules "$SRC" "$ALL" "$FILE"
     exit 0
 fi
 
-if [ "$MODE" = "apply" ]; then
-    if [ ${#DOMAINS[@]} -eq 0 ]; then
-        err "--domain is required for apply"
+if [ "$MODE" = "put" ]; then
+    if [ ${#DESTS[@]} -eq 0 ]; then
+        err "--dest is required for --put"
     fi
-    finalize_domains DOMAINS || { usage; exit 1; }
-    if [ -z "$INPUT" ]; then
-        INPUT="$(default_rules_path "${DOMAINS[0]}")"
+    if [ -z "$FILE" ]; then
+        [ -n "$SRC" ] || err "--src is required when --file is not provided"
+        FILE="$(default_rules_path "$SRC")"
     fi
+    DNS_REDIRECT_LIST=()
     load_dns_redirects || { usage; exit 1; }
-    if [ ${#DNS_REDIRECT_LIST[@]:-0} -gt 0 ]; then
+    if [ ${#DNS_REDIRECT_LIST[@]} -gt 0 ]; then
         redirect_targets=()
-        for domain in "${DOMAINS[@]}"; do
+        for domain in "${DESTS[@]}"; do
             if is_redirect_domain "$domain"; then
                 redirect_targets+=("$domain")
             fi
@@ -266,13 +326,50 @@ if [ "$MODE" = "apply" ]; then
             if [ "$ALLOW_REDIRECTS" != true ]; then
                 err "Refusing to apply rules to redirect-only domains without --allow-redirects: ${redirect_targets[*]}"
             fi
-            warn "Applying firewall rules to redirect-only domains: ${redirect_targets[*]}"
+            warn "Applying rules to redirect-only domains: ${redirect_targets[*]}"
         fi
     fi
-    section "RULES" "Apply"
-    kv "INPUT" "$INPUT"
-    kv "DOMAINS" "${DOMAINS[*]}"
-    apply_rules "$INPUT" "${DOMAINS[@]}"
+    section "RULES" "Put"
+    kv "TYPE" "$TYPE"
+    kv "PHASE" "$PHASE"
+    kv "FILE" "$FILE"
+    kv "DESTS" "${DESTS[*]}"
+    apply_rules "$FILE" "${DESTS[@]}"
+    exit 0
+fi
+
+if [ "$MODE" = "copy" ]; then
+    [ -n "$SRC" ] || err "--src is required for --copy"
+    if [ ${#DESTS[@]} -eq 0 ]; then
+        err "--dest is required for --copy"
+    fi
+    if [ -z "$FILE" ]; then
+        FILE="$(default_rules_path "$SRC")"
+    fi
+    section "RULES" "Copy"
+    kv "TYPE" "$TYPE"
+    kv "PHASE" "$PHASE"
+    kv "SRC" "$SRC"
+    kv "FILE" "$FILE"
+    kv "DESTS" "${DESTS[*]}"
+    export_rules "$SRC" "$ALL" "$FILE"
+    DNS_REDIRECT_LIST=()
+    load_dns_redirects || { usage; exit 1; }
+    if [ ${#DNS_REDIRECT_LIST[@]} -gt 0 ]; then
+        redirect_targets=()
+        for domain in "${DESTS[@]}"; do
+            if is_redirect_domain "$domain"; then
+                redirect_targets+=("$domain")
+            fi
+        done
+        if [ ${#redirect_targets[@]} -gt 0 ]; then
+            if [ "$ALLOW_REDIRECTS" != true ]; then
+                err "Refusing to apply rules to redirect-only domains without --allow-redirects: ${redirect_targets[*]}"
+            fi
+            warn "Applying rules to redirect-only domains: ${redirect_targets[*]}"
+        fi
+    fi
+    apply_rules "$FILE" "${DESTS[@]}"
     exit 0
 fi
 

@@ -273,28 +273,45 @@ PYCODE
 domain_nodot="${DOMAIN//./}"
 domain_label="${DOMAIN%%.*}"
 
-apache_candidates=(
-    "/var/log/apache2/${DOMAIN}_ssl_access.log"
-    "/var/log/apache2/${domain_nodot}_ssl_access.log"
-    "/var/log/apache2/${domain_label}_ssl_access.log"
+LOG_IDS=(
+    apache_ssl_access
+    apache_ssl_error
+    apache_access
+    apache_error
+    syslog
+    auth
+    kern
+    ufw
 )
-apache_error_candidates=(
-    "/var/log/apache2/${DOMAIN}_ssl_error.log"
-    "/var/log/apache2/${domain_nodot}_ssl_error.log"
-    "/var/log/apache2/${domain_label}_ssl_error.log"
+declare -A LOG_TYPE=(
+    [apache_ssl_access]=apache
+    [apache_ssl_error]=apache
+    [apache_access]=apache
+    [apache_error]=apache
+    [syslog]=syslog
+    [auth]=syslog
+    [kern]=syslog
+    [ufw]=syslog
 )
-apache_access_candidates=(
-    "/var/log/apache2/${DOMAIN}-access.log"
-    "/var/log/apache2/${DOMAIN}_access.log"
-    "/var/log/apache2/${domain_nodot}_access.log"
-    "/var/log/apache2/${domain_label}_access.log"
-    "/var/log/apache2/${DOMAIN}-access.log"
+declare -A LOG_DEST=(
+    [apache_ssl_access]="${PREFIX}_apache_ssl_access.log"
+    [apache_ssl_error]="${PREFIX}_apache_ssl_error.log"
+    [apache_access]="${PREFIX}_apache_access.log"
+    [apache_error]="${PREFIX}_apache_error.log"
+    [syslog]="${PREFIX}_syslog.log"
+    [auth]="${PREFIX}_auth.log"
+    [kern]="${PREFIX}_kern.log"
+    [ufw]="${PREFIX}_ufw.log"
 )
-apache_error_plain_candidates=(
-    "/var/log/apache2/${DOMAIN}-error.log"
-    "/var/log/apache2/${DOMAIN}_error.log"
-    "/var/log/apache2/${domain_nodot}_error.log"
-    "/var/log/apache2/${domain_label}_error.log"
+declare -A LOG_SOURCES=(
+    [apache_ssl_access]="/var/log/apache2/${DOMAIN}_ssl_access.log|/var/log/apache2/${domain_nodot}_ssl_access.log|/var/log/apache2/${domain_label}_ssl_access.log"
+    [apache_ssl_error]="/var/log/apache2/${DOMAIN}_ssl_error.log|/var/log/apache2/${domain_nodot}_ssl_error.log|/var/log/apache2/${domain_label}_ssl_error.log"
+    [apache_access]="/var/log/apache2/${DOMAIN}-access.log|/var/log/apache2/${DOMAIN}_access.log|/var/log/apache2/${domain_nodot}_access.log|/var/log/apache2/${domain_label}_access.log"
+    [apache_error]="/var/log/apache2/${DOMAIN}-error.log|/var/log/apache2/${DOMAIN}_error.log|/var/log/apache2/${domain_nodot}_error.log|/var/log/apache2/${domain_label}_error.log"
+    [syslog]="/var/log/syslog"
+    [auth]="/var/log/auth.log"
+    [kern]="/var/log/kern.log"
+    [ufw]="/var/log/ufw.log"
 )
 
 pick_first() {
@@ -308,39 +325,34 @@ pick_first() {
     return 1
 }
 
-ssl_access_src="$(pick_first "${apache_candidates[@]}" || true)"
-ssl_error_src="$(pick_first "${apache_error_candidates[@]}" || true)"
-access_src="$(pick_first "${apache_access_candidates[@]}" || true)"
-error_src="$(pick_first "${apache_error_plain_candidates[@]}" || true)"
+resolve_log_source() {
+    local log_id="$1"
+    local raw="${LOG_SOURCES[$log_id]-}"
+    [ -n "$raw" ] || return 1
+    local -a list=()
+    IFS='|' read -r -a list <<<"$raw"
+    pick_first "${list[@]}"
+}
 
-if [ -n "$ssl_access_src" ]; then
-    slice_apache "$ssl_access_src" "$OUT_DIR/${PREFIX}_apache_ssl_access.log"
-else
-    log_msg "WARN no matching ssl access log for domain"
-fi
+slice_registered_log() {
+    local log_id="$1"
+    local src
+    src="$(resolve_log_source "$log_id" || true)"
+    if [ -z "$src" ]; then
+        log_msg "WARN no matching ${log_id} log"
+        return 0
+    fi
+    local dest="$OUT_DIR/${LOG_DEST[$log_id]}"
+    case "${LOG_TYPE[$log_id]-}" in
+        apache) slice_apache "$src" "$dest" ;;
+        syslog) slice_syslog "$src" "$dest" ;;
+        *) log_msg "WARN unknown log type for ${log_id}" ;;
+    esac
+}
 
-if [ -n "$ssl_error_src" ]; then
-    slice_apache "$ssl_error_src" "$OUT_DIR/${PREFIX}_apache_ssl_error.log"
-else
-    log_msg "WARN no matching ssl error log for domain"
-fi
-
-if [ -n "$access_src" ]; then
-    slice_apache "$access_src" "$OUT_DIR/${PREFIX}_apache_access.log"
-else
-    log_msg "WARN no matching access log for domain"
-fi
-
-if [ -n "$error_src" ]; then
-    slice_apache "$error_src" "$OUT_DIR/${PREFIX}_apache_error.log"
-else
-    log_msg "WARN no matching error log for domain"
-fi
-
-slice_syslog "/var/log/syslog" "$OUT_DIR/${PREFIX}_syslog.log"
-slice_syslog "/var/log/auth.log" "$OUT_DIR/${PREFIX}_auth.log"
-slice_syslog "/var/log/kern.log" "$OUT_DIR/${PREFIX}_kern.log"
-slice_syslog "/var/log/ufw.log" "$OUT_DIR/${PREFIX}_ufw.log"
+for log_id in "${LOG_IDS[@]}"; do
+    slice_registered_log "$log_id"
+done
 
 generate_csv() {
     local report="$OUT_DIR/${PREFIX}_report.txt"

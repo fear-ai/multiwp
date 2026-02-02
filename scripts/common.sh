@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SCRIPTS_DIR="${SCRIPTS_DIR:-$ROOT_DIR/scripts}"
 
+COMMON_LOADED=1
+
 SSL_DIR="${SSL_DIR:-/etc/ssl/cloudflare-origin}"
 SSL_CERT_DIR="${SSL_CERT_DIR:-$SSL_DIR/certs}"
 SSL_KEY_DIR="${SSL_KEY_DIR:-$SSL_DIR/keys}"

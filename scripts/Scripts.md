@@ -21,7 +21,7 @@ Operators start with Part A and Settings to see what to run and what to expect. 
 
 Scripts are grouped into four roles so operators and maintainers can reason about entrypoints and shared behavior:
 
-- **Helper/library scripts** (`common.sh`, `cli.sh`, `auth.sh`, `orch.sh`, `mcp.sh`) are sourced by other scripts and are not intended to be executed directly.
+- **Helper/library scripts** (`common.sh`, `cli.sh`, `cmd.sh`, `auth.sh`, `orch.sh`, `mcp.sh`) are sourced by other scripts and are not intended to be executed directly.
 - **Program scripts** are user-facing entrypoints with `usage()` output and option parsing. They perform a single operation such as provisioning, validation, or performance measurement.
 - **Orchestration scripts** are program scripts that call other program scripts in a defined order to provide multi-step workflows without duplicating logic.
 - **Test scripts** run standalone unit checks for helper behavior and parsing logic.
@@ -46,6 +46,47 @@ Inputs and outputs live in a few focused places so updates stay consistent:
 - **Domain inventory (`domains.csv`)**: The header row in `domains.csv` is the schema, and `Record.md` is the authoritative policy for values and status transitions. `Plan.md` captures the design rationale for the schema and any planned expansions.
 - **Cloudflare auth files (`.auth`)**: `scripts/example.auth` is the reference format; `scripts/Scripts.md` documents expected variables, defaults, and precedence rules.
 - **Script output formats**: `scripts/Scripts.md` documents the unified output conventions for new and updated scripts. `scripts/Shell.md` documents the underlying log/error helpers.
+
+### CSV cross-references and option registry (postponed)
+
+This repository uses two CSV cross-references—`Helpers.csv` and `Options.csv`—to describe helper inclusion and option ownership. These files are useful for audits and quick interface scans, but they are also the most prone to drift because the data they summarize is spread across scripts.
+
+The core problem is that helper inclusion is easy to parse, while options are not. Helpers can be detected by scanning `source` statements. Options, however, are parsed through a mix of shared helpers, custom parsing logic, mode-dependent branches, and `usage()` output that is intentionally human-readable rather than machine-structured. As a result, any automated generation of `Options.csv` needs either a strict usage format or a structured option registry. Until that is decided, `Options.csv` remains a manual artifact.
+
+#### Standardizing options to support CSV generation
+
+Two changes support reliable `Options.csv` generation without changing script semantics:
+
+1) **Standardize option presentation.** Split `usage()` into clear **Arguments** (positional) and **Options** sections, keep one option per line, and use a consistent ordering (script-specific, auth, paths, common privilege flags, `--help` last). This improves operator clarity today and makes future parsing straightforward.
+
+2) **Avoid duplicated option parsing.** Shared options (for example `--domain`, `--wp-root`, `--ssl-dir`, `--date`, `--hsts`) should be parsed through `cli.sh` helpers instead of custom per-script parsing. This centralizes validation and keeps usage text aligned with real behavior. The same applies to Cloudflare auth options via `cli_cf_auth_opt`.
+
+These changes are beneficial even if CSV generation remains manual, but they are also prerequisites for reliable automation. Decisions and implementation are postponed until we choose between strict usage parsing and a registry approach.
+
+#### Option registry and shared schema (postponed)
+
+A registry makes option ownership explicit and removes ambiguity in `Options.csv`. A minimal pattern would define an `OPTIONS=()` array in each script and derive both `usage()` output and CSV entries from that array. Shared options can live in `cli.sh` as `CLI_OPTIONS=()` and be merged by scripts that use them.
+
+This approach would:
+- Make option ownership unambiguous.
+- Allow `Options.csv` to be generated accurately.
+- Reduce help-text drift by deriving usage from a single source.
+
+The tradeoff is modest refactoring in each script. The decision and implementation are postponed so we can weigh the maintenance impact against the value of automated CSV generation.
+
+#### Generating the CSVs (postponed)
+
+`Helpers.csv` can be generated reliably today by scanning `source` statements. `Options.csv` can only be generated reliably after we standardize option presentation or adopt an option registry. Until that decision is made, both CSVs remain manually curated, with `Options.csv` being the higher-risk source of drift.
+
+### Auth helper partitioning (postponed)
+
+`auth.sh` currently mixes three concerns: CSV lookups, auth variable initialization, and zone/account resolution via API. For clarity and maintainability, the preferred partitioning keeps `auth.sh` as the Cloudflare-specific hub but separates logic into small, purpose-driven helpers:
+
+- **CSV row resolution**: a single helper that reads and returns the full CSV row for a domain, so `cf_auth_from_csv`, zone ID lookup, and account ID lookup share the same parsing logic.
+- **Zone ID resolution**: a helper that returns a `zone_id` plus the source (auth file, CSV, or API) and a consistent status code or warning when the ID is missing.
+- **Auth initialization**: a helper that encapsulates `cf_reset_auth_vars`, `cf_auth_from_csv`, and `cf_init_auth`, so scripts do not duplicate the same three-step setup.
+
+This partitioning keeps the API request helpers and credential validation in `auth.sh` while reducing duplication and making resolution paths explicit. Decisions and implementation are postponed until we align on the option registry approach and the extent of refactoring we want to take on.
 
 ### Output format (planned for structured scripts)
 
@@ -88,7 +129,7 @@ Tables below list the **complete** set of `SECTION` values and expected `Topic` 
 | `DNS` | `cloud-dns.sh` | `Zone`, `Records`, `Proxy`, `Create` |
 | `EDGE` | `check-edge.sh`, `cloud-redirect.sh` | `Dns`, `Https`, `RedirectRule`, `Headers` |
 | `SETTINGS` | `cloud-settings.sh` | `ZoneSettings`, `Baseline` |
-| `RULES` | `rules-cf.sh` | `Ruleset`, `Rule`, `Apply`, `Export` |
+| `RULES` | `rules-cf.sh` | `Get`, `Put`, `Copy` |
 | `ZONE` | `onboard-zone.sh` | `Create`, `Dns`, `Record` |
 | `CERT` | `get-cert.sh` | `OriginCa`, `Install`, `Verify` |
 | `FIREWALL` | `cloudflare-ips.sh` | `IpList`, `UfwRules` |
@@ -99,7 +140,7 @@ Tables below list the **complete** set of `SECTION` values and expected `Topic` 
 | `MCP` | `mcp.sh`, `mcp-cf.sh` | `Server`, `Request`, `Response` |
 | `INIT` | `perf-load.sh` | `Run`, `Domain` |
 | `LOAD` | `perf-load.sh` | `Run`, `Domain` |
-| `TEST` | `test_common.sh`, `test_cli.sh`, `test_cf.sh`, `test_mcp.sh` | `Setup`, `Cases`, `Results` |
+| `TEST` | `test_common.sh`, `test_cli.sh`, `test_cmd.sh`, `test_cf.sh`, `test_mcp.sh` | `Setup`, `Cases`, `Results` |
 
 #### Script-to-section mapping
 
@@ -115,7 +156,7 @@ Use this mapping when implementing or refactoring output so every script emits t
 | `check-edge.sh` | `EDGE` | `Dns`, `Https`, `RedirectRule`, `Headers` |
 | `cloud-redirect.sh` | `EDGE` | `RedirectRule` |
 | `cloud-settings.sh` | `SETTINGS` | `ZoneSettings`, `Baseline` |
-| `rules-cf.sh` | `RULES` | `Ruleset`, `Rule`, `Apply`, `Export` |
+| `rules-cf.sh` | `RULES` | `Get`, `Put`, `Copy` |
 | `onboard-zone.sh` | `ZONE` | `Create`, `Dns`, `Record` |
 | `get-cert.sh` | `CERT` | `OriginCa`, `Install`, `Verify` |
 | `cloudflare-ips.sh` | `FIREWALL` | `IpList`, `UfwRules` |
@@ -133,6 +174,7 @@ Use this mapping when implementing or refactoring output so every script emits t
 | `perf-load.sh` | `INIT`, `LOAD` | `Run`, `Domain` |
 | `test_common.sh` | `TEST` | `Setup`, `Cases`, `Results` |
 | `test_cli.sh` | `TEST` | `Setup`, `Cases`, `Results` |
+| `test_cmd.sh` | `TEST` | `Setup`, `Cases`, `Results` |
 | `test_cf.sh` | `TEST` | `Setup`, `Cases`, `Results` |
 | `test_mcp.sh` | `TEST` | `Setup`, `Cases`, `Results` |
 
@@ -233,8 +275,8 @@ Implementation plan:
 
 Test scripts and helper libraries are intentionally minimal. They do not parse options and run directly from the `scripts/` directory.
 
-- `test_common.sh`, `test_cli.sh`, `test_cf.sh` run unit checks for shared helpers.
-- `common.sh`, `cli.sh`, `auth.sh`, `orch.sh`, `mcp.sh` provide shared logic and should not be executed directly.
+- `test_common.sh`, `test_cli.sh`, `test_cmd.sh`, `test_cf.sh` run unit checks for shared helpers.
+- `common.sh`, `cli.sh`, `cmd.sh`, `auth.sh`, `orch.sh`, `mcp.sh` provide shared logic and should not be executed directly.
 
 ## Settings
 
@@ -519,7 +561,7 @@ Practical guidance:
 
 ### Read-Only Scripts and Safe Options
 
-The following scripts are read-only by design and do not modify DNS, certificates, Apache configuration, or WordPress data. Read-only scripts: `check-edge.sh`, `check-cf.sh`, `verify-cf-auth.sh`, `check-auth.sh`, `check-server.sh`, `check-origin.sh`, `check-wp.sh`, `perf-load.sh`, `check-domain.sh`. Unit tests: `test_common.sh`, `test_cli.sh`, `test_cf.sh`.
+The following scripts are read-only by design and do not modify DNS, certificates, Apache configuration, or WordPress data. Read-only scripts: `check-edge.sh`, `check-cf.sh`, `verify-cf-auth.sh`, `check-auth.sh`, `check-server.sh`, `check-origin.sh`, `check-wp.sh`, `perf-load.sh`, `check-domain.sh`. Unit tests: `test_common.sh`, `test_cli.sh`, `test_cmd.sh`, `test_cf.sh`.
 
 Safe options for read-only scripts:
 - `--api` (enables Cloudflare API reads; no writes)
@@ -633,20 +675,21 @@ Notes:
 #### rules-cf.sh (production/installation)
 
 Purpose:
-- Exports Cloudflare firewall rules from a single zone into a portable JSON file, or applies a rules file to explicitly selected zones.
+- Gets, puts, or copies Cloudflare rulesets (firewall, cache, rate) between zones using a portable JSON file.
 
 Arguments:
-- None. Domains are supplied via `--source` (export) or `--domain` (apply).
+- None. Domains are supplied via `--src` (get/copy) and `--dest` (put/copy).
 
 Options (script-specific):
- - `--export` selects export mode (default).
- - `--apply` applies rules from a JSON file to target zones.
- - `--source NAME` sets the export source zone apex.
- - `--output PATH` sets the export output path (default: `rules.<domain>.json`).
- - `--input PATH` sets the rules file to apply (default: `rules.<domain>.json`, using the first target domain).
- - `--domain NAME` adds a target zone (repeatable; apply mode).
+ - `--get` selects get mode (default).
+ - `--put` applies rules from a JSON file to target zones.
+ - `--copy` gets rules from `--src` then puts them to `--dest`.
+ - `--type TYPE` selects rule type: `firewall`, `cache`, or `rate` (default: `cache`).
+ - `--src NAME` sets the source zone apex for get/copy.
+ - `--dest NAME` adds a target zone (repeatable; put/copy).
+ - `--file PATH` sets the rules file path (default: `<src>_<phase>.json`, phase derived from `--type`).
  - `--all` includes disabled rules in the export.
- - `--allow-redirects` allows apply operations for redirect-only domains.
+ - `--allow-redirects` allows put operations for redirect-only domains.
 
 Common arguments: --auth, --auth-file, --token, --key, --email, --help.
 
@@ -654,9 +697,10 @@ Environment variables:
 Cloudflare auth variables listed in `auth.sh`.
 
 Notes:
-- Export strips rule IDs and zone-specific metadata so files remain portable.
-- Apply replaces the entire ruleset for the target zone; there is no merge behavior.
-- The rules file may retain a `phase` value; if missing, the script uses `http_request_firewall_custom`.
+- Get strips rule IDs and zone-specific metadata so files remain portable.
+- Get exits with a clear error if the phase has no rules, or if only disabled rules exist and `--all` is not set.
+- Put replaces the entire ruleset for the target zone; there is no merge behavior.
+- The rules file may retain a `phase` value; if missing, the script uses the phase implied by `--type`.
 - Applying rules to redirect-only domains requires `--allow-redirects` so the intent is explicit.
 - Zone IDs are resolved in priority order: auth file match (by zone name), then `domains.csv` (`zone_id`), then API lookup.
 
@@ -1111,7 +1155,7 @@ This cross-reference lists options alphabetically and the scripts that implement
 - --always-use-https,cloud-settings.sh
 - --apache-dir,apache-vhost.sh;check-origin.sh;check-verify.sh;test-record.sh;check-domain.sh
 - --api,check-edge.sh;check-verify.sh;get-cert.sh;test-record.sh;check-domain.sh
-- --apply,mcp-cf.sh;rules-cf.sh
+- --apply,mcp-cf.sh
 - --auth,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
 - --auth-file,check-auth.sh;check-cf.sh;check-edge.sh;check-verify.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
 - --auto,get-cert.sh
@@ -1124,18 +1168,21 @@ This cross-reference lists options alphabetically and the scripts that implement
 - --catalog,mcp-cf.sh
 - --check-ids,check-auth.sh;check-verify.sh
 - --connections,perf-load.sh
+- --copy,rules-cf.sh
 - --create,cloud-dns.sh
 - --date,cloud-redirect.sh;onboard-zone.sh;test-record.sh
+- --dest,rules-cf.sh
 - --dns-provider,onboard-zone.sh
-- --domain,back-wp.sh;apache-vhost.sh;check-edge.sh;check-origin.sh;check-verify.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;onboard-zone.sh;rules-cf.sh;perf-load.sh;test-record.sh;check-domain.sh
-- --err,perf-load.sh
+- --domain,back-wp.sh;apache-vhost.sh;check-edge.sh;check-origin.sh;check-verify.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;onboard-zone.sh;perf-load.sh;test-record.sh;check-domain.sh
 - --domains-file,check-auth.sh;check-verify.sh;cloud-redirect.sh;cloud-settings.sh;onboard-zone.sh;test-record.sh
 - --downgrade,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 - --dry-run,cloud-redirect.sh;cloud-settings.sh
 - --duration,perf-load.sh
 - --email,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
-- --export,rules-cf.sh
+- --err,perf-load.sh
+- --file,rules-cf.sh
 - --force,get-cert.sh
+- --get,rules-cf.sh
 - --head,perf-load.sh
 - --help,back-wp.sh;apache-vhost.sh;check-auth.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-verify.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;perf-load.sh;test-record.sh;verify-cf-auth.sh;check-domain.sh
 - --hsts,check-edge.sh;test-record.sh;check-domain.sh
@@ -1143,7 +1190,6 @@ This cross-reference lists options alphabetically and the scripts that implement
 - --http-timeout,check-edge.sh;test-record.sh;check-domain.sh
 - --include-ignore,check-verify.sh;test-record.sh
 - --init,perf-load.sh
-- --input,rules-cf.sh
 - --interval,perf-load.sh
 - --ip,onboard-zone.sh
 - --key,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
@@ -1158,30 +1204,32 @@ This cross-reference lists options alphabetically and the scripts that implement
 - --no-sudo,back-wp.sh;check-origin.sh;check-server.sh;check-wp.sh;cloudflare-ips.sh;test-record.sh;check-domain.sh
 - --norecord,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 - --out-dir,perf-load.sh;slice-logs.sh
-- --output,cloudflare-ips.sh;rules-cf.sh
-- --portal-url,mcp-cf.sh
-- --raw,check-cf.sh
+- --output,cloudflare-ips.sh
 - --pad,slice-logs.sh
-- --report,perf-load.sh;slice-logs.sh
+- --portal-url,mcp-cf.sh
+- --put,rules-cf.sh
 - --rate,perf-load.sh
+- --raw,check-cf.sh
 - --redirect-url,cloud-redirect.sh;onboard-zone.sh
 - --registrar,onboard-zone.sh
+- --report,perf-load.sh;slice-logs.sh
 - --run-id,back-wp.sh;perf-load.sh
 - --run-param,slice-logs.sh
 - --singlesite,check-verify.sh;check-wp.sh;test-record.sh
 - --site-type,check-verify.sh;onboard-zone.sh;test-record.sh
 - --site-types,cloud-settings.sh
-- --source,rules-cf.sh
+- --src,rules-cf.sh
 - --ssl,apache-vhost.sh;cloud-settings.sh
 - --ssl-dir,apache-vhost.sh;check-origin.sh;check-verify.sh;get-cert.sh;test-record.sh;check-domain.sh
 - --stage,check-wp.sh
 - --state,check-verify.sh;test-record.sh
+- --telemetry,perf-load.sh
 - --template,apache-vhost.sh
 - --template-check,check-wp.sh
 - --template-dir,check-wp.sh
-- --telemetry,perf-load.sh
 - --threads,perf-load.sh
 - --token,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
+- --type,rules-cf.sh
 - --ufw,cloudflare-ips.sh
 - --update,cloud-dns.sh
 - --wp-root,apache-vhost.sh;check-origin.sh;check-verify.sh;check-wp.sh;install-site.sh;test-record.sh;check-domain.sh
@@ -1193,11 +1241,61 @@ This cross-reference lists options alphabetically and the scripts that implement
 
 This cross-reference lists helper scripts and the program or test scripts that source them. CSV files are exports for future processing; this list is the human-readable view.
 
-- common.sh: back-wp.sh;apache-vhost.sh;check-auth.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-verify.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;setup-wp.sh;perf-load.sh;test-record.sh;test_cf.sh;test_cli.sh;test_common.sh;verify-cf-auth.sh;check-domain.sh
+- common.sh: back-wp.sh;apache-vhost.sh;check-auth.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-verify.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;setup-wp.sh;perf-load.sh;test-record.sh;test_cf.sh;test_cli.sh;test_cmd.sh;test_common.sh;verify-cf-auth.sh;check-domain.sh
 - cli.sh: back-wp.sh;apache-vhost.sh;check-auth.sh;check-cf.sh;check-edge.sh;check-origin.sh;check-verify.sh;check-server.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;cloudflare-ips.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;perf-load.sh;test-record.sh;test_cli.sh;verify-cf-auth.sh;check-domain.sh
+- cmd.sh: perf-load.sh;test_cmd.sh
 - auth.sh: check-auth.sh;check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;test_cf.sh;test_cli.sh;verify-cf-auth.sh
 - orch.sh: check-domain.sh
 - mcp.sh: mcp-cf.sh;test_mcp.sh
+
+## Development Prompts
+
+This section captures practical lessons from recent refactors and clarifies how prompt specificity improves both design quality and implementation speed. The intent is not to add overhead, but to ensure that small requests do not unintentionally become behavioral changes or structural redesigns.
+
+### Guidance for prompt specificity
+
+When a prompt touches shared helpers or cross-cutting behavior, include a short, explicit policy statement and a clear boundary for what should not change. This avoids implicit decisions about error handling, output formats, or dependency structure.
+
+Useful patterns:
+- State the intended behavior directly, using positive language. For example: “Fail fast when `common.sh` is missing” or “Keep output format unchanged.”
+- Add a negative constraint to prevent scope creep. For example: “Do not add new helper files” or “Do not change auth precedence.”
+- If the request is analysis-only, say so explicitly: “Provide analysis only; do not implement.”
+
+### Examples that keep scope tight
+
+These examples are derived from recent work and show how to avoid ambiguous requirements:
+
+- “Add include guards to helper scripts that fail fast using the single-line `:?` form; do not add new helper files; update `scripts/Shell.md` to reflect the behavior.”
+- “Analyze whether `Options.csv` can be generated from existing scripts; do not change code; propose approaches and tradeoffs only.”
+- “Refactor duplicated `--domain` parsing to use `cli_domain_opt` everywhere; keep usage text and behavior unchanged.”
+
+### Avoiding silent behavioral changes
+
+Some refactors appear structural but still require policy decisions. Include those decisions up front so the implementation does not invent behavior:
+
+- Dependency guards imply a policy: warn-only vs. fail-fast. Explicitly state which is expected.
+- Changes to option handling can affect precedence or default values; call out “no behavior change” if that is the requirement.
+- CSV generation or parsing can imply a canonical source of truth. If the decision is deferred, say “analysis only” and postpone implementation.
+
+### Clarifying analysis versus implementation
+
+Use a simple scope statement to distinguish a design analysis from a re-architecture:
+
+- Analysis-only: define the problem, list options, and explain tradeoffs. No code changes.
+- Implementation: pick a design, specify constraints, and name the files that should change.
+
+This distinction matters most for changes like option registries or CSV automation, which require structural decisions and documentation updates.
+
+### Prompt specificity checklist
+
+A short checklist keeps prompts direct without adding ceremony:
+
+- Intended behavior: what should happen on success and on failure.
+- Constraints: what must not change.
+- Scope: analysis-only or implement.
+- Outputs: which documents or files should be updated.
+
+This keeps refactors bounded, improves reviewability, and makes it easier to reason about cross-cutting changes.
 
 ## TODO (Revisit)
 
