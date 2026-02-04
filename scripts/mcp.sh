@@ -3,6 +3,8 @@
 
 set -euo pipefail
 
+: "${COMMON_LOADED:?${BASH_SOURCE[0]##*/} requires common.sh to be sourced first.}"
+
 mcp_normalize_portal_url() {
     local raw="${1-}"
     raw=$(printf "%s" "$raw" | xargs)

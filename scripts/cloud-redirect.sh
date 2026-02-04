@@ -51,29 +51,6 @@ Notes:
 EOF
 }
 
-csv_get_meta() {
-    local domain="$1"
-    python3 - "$DOMAINS_FILE" "$domain" <<'PY'
-import csv
-import sys
-
-path = sys.argv[1]
-needle = sys.argv[2].strip().lower()
-with open(path, newline="") as fh:
-    reader = csv.DictReader(fh)
-    for row in reader:
-        if (row.get("domain") or "").strip().lower() == needle:
-            zone_id = (row.get("zone_id") or "").strip()
-            auth_file = (row.get("auth_file") or "").strip()
-            redirect_url = (row.get("redirect_url") or "").strip()
-            site_type = (row.get("site_type") or "").strip()
-            status_cf = (row.get("status_cf") or "").strip()
-            print("\t".join([zone_id, auth_file, redirect_url, site_type, status_cf]))
-            sys.exit(0)
-print("")
-PY
-}
-
 load_redirect_domains() {
     DOMAINS=()
     load_dns_redirects
@@ -244,6 +221,8 @@ for domain in "$@"; do
     DOMAINS+=("$domain")
 done
 
+AUTH_FILE_OVERRIDE="${CF_AUTH_FILE-}"
+
 if [ ${#DOMAINS[@]} -eq 0 ]; then
     load_redirect_domains
 fi
@@ -256,15 +235,14 @@ for domain in "${DOMAINS[@]}"; do
     domain=$(normalize_domain "$domain")
     log "Configuring redirect for: $domain"
 
-    meta=$(csv_get_meta "$domain")
-    zone_id=""
+    meta=$(csv_get_domain_fields "$domain" auth_file redirect_url site_type status_cf || true)
     auth_file=""
     redirect_csv=""
     site_type=""
     status_cf=""
 
     if [ -n "$meta" ]; then
-        IFS=$'\t' read -r zone_id auth_file redirect_csv site_type status_cf <<<"$meta"
+        IFS=$'\t' read -r auth_file redirect_csv site_type status_cf <<<"$meta"
     fi
 
     site_type_norm=$(normalize_site_type "$site_type")
@@ -279,15 +257,22 @@ for domain in "${DOMAINS[@]}"; do
     fi
     [ -n "$target_url" ] || err "redirect_url required for $domain (use --redirect-url or domains.csv)"
 
-    if [ -n "$auth_file" ]; then
-        CF_AUTH_FILE="$auth_file"
+    section "EDGE" "RedirectRule"
+    kv "DOMAIN" "$domain"
+    kv "REDIRECT_URL" "$target_url"
+
+    if [ -n "$AUTH_FILE_OVERRIDE" ]; then
+        CF_AUTH_FILE="$AUTH_FILE_OVERRIDE"
+    else
+        cf_reset_auth_vars
+        CF_AUTH_FILE=""
+        if [ -n "$auth_file" ]; then
+            CF_AUTH_FILE="$auth_file"
+        fi
     fi
 
     CF_ZONE_ID=""
     CF_ZONE="$domain"
-    if [ -n "$zone_id" ]; then
-        CF_ZONE_ID="$zone_id"
-    fi
 
     cf_init_auth "${CF_AUTH_FILE-}"
     cf_require_auth
@@ -311,7 +296,7 @@ for domain in "${DOMAINS[@]}"; do
         [ -n "$update_site_type" ] && updates+=("site_type=$update_site_type")
         [ -n "$update_status_cf" ] && updates+=("status_cf=$update_status_cf")
         if [ ${#updates[@]} -gt 0 ]; then
-            record_update_csv "$DOMAINS_FILE" "$domain" "$RECORD_DOWNGRADE" "${updates[@]}"
+            csv_put_fields "$DOMAINS_FILE" "$domain" "$RECORD_DOWNGRADE" "${updates[@]}"
         fi
     fi
 done

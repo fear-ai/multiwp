@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SCRIPTS_DIR="${SCRIPTS_DIR:-$ROOT_DIR/scripts}"
 
+COMMON_LOADED=1
+
 SSL_DIR="${SSL_DIR:-/etc/ssl/cloudflare-origin}"
 SSL_CERT_DIR="${SSL_CERT_DIR:-$SSL_DIR/certs}"
 SSL_KEY_DIR="${SSL_KEY_DIR:-$SSL_DIR/keys}"
@@ -12,9 +14,25 @@ WORDPRESS_ROOT="${WORDPRESS_ROOT:-/var/www/html/wordpress}"
 TEMPLATE_DIR="${TEMPLATE_DIR:-$ROOT_DIR/templates}"
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
-err() { echo "[$(date +%H:%M:%S)] ERROR: $*" >&2; exit 1; }
+err() { echo "[$(date +%H:%M:%S)] ERROR: $*" >&2; status_error "$*"; exit 1; }
 warn() { echo "[$(date +%H:%M:%S)] Warning: $*" >&2; }
-fail() { echo "[$(date +%H:%M:%S)] FAIL: $*" >&2; }
+fail() { echo "[$(date +%H:%M:%S)] FAIL: $*" >&2; status_error "$*"; }
+
+section() {
+    local section="$1"
+    local topic="$2"
+    echo "== ${section}:${topic}"
+}
+
+kv() {
+    local key="$1"
+    local value="${2-}"
+    echo "${key}=${value}"
+}
+
+status_pass() { echo "PASS $*"; }
+status_info() { echo "INFO $*"; }
+status_error() { echo "ERROR $*"; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || err "Missing command: $1"; }
 require_cmds() { for cmd in "$@"; do require_cmd "$cmd"; done; }
 
@@ -91,6 +109,48 @@ parse_bool() {
     esac
 }
 
+domains_csv_path() {
+    echo "${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
+}
+
+csv_get_domain_fields() {
+    local domain="$1"
+    shift || true
+    [ -n "$domain" ] || err "Domain required for CSV lookup"
+    [ "$#" -gt 0 ] || err "At least one CSV field is required"
+
+    local csv
+    csv=$(domains_csv_path)
+    [ -f "$csv" ] || return 1
+    require_cmd python3
+
+    python3 - "$csv" "$domain" "$@" <<'EOF'
+import csv
+import sys
+
+path = sys.argv[1]
+needle = sys.argv[2].strip().lower()
+fields = sys.argv[3:]
+
+with open(path, newline="") as fh:
+    reader = csv.DictReader(fh)
+    for row in reader:
+        if (row.get("domain") or "").strip().lower() == needle:
+            values = [(row.get(field) or "").strip() for field in fields]
+            print("\t".join(values))
+            sys.exit(0)
+
+sys.exit(1)
+EOF
+}
+
+csv_get_domain_field() {
+    local domain="$1"
+    local field="$2"
+    [ -n "$field" ] || err "CSV field required"
+    csv_get_domain_fields "$domain" "$field"
+}
+
 DATASTORE_BACKUP_DONE="${DATASTORE_BACKUP_DONE:-false}"
 DATASTORE_BACKUP_PATH="${DATASTORE_BACKUP_PATH:-}"
 
@@ -129,7 +189,7 @@ record_backup_datastore() {
     echo "$backup"
 }
 
-record_update_csv() {
+csv_put_fields() {
     local dest_path="$1"
     local domain="$2"
     local allow_downgrade="${3:-false}"
@@ -146,7 +206,7 @@ record_update_csv() {
     record_backup_datastore "$dest_path"
     local source_path="${DATASTORE_BACKUP_PATH:-$dest_path}"
 
-    python3 - "$source_path" "$dest_path" "$domain" "$allow_downgrade" "${updates[@]}" <<'PY'
+    python3 - "$source_path" "$dest_path" "$domain" "$allow_downgrade" "${updates[@]}" <<'EOF'
 import csv
 import sys
 
@@ -239,10 +299,11 @@ with open(dest_path, "w", newline="") as fh:
     writer = csv.DictWriter(fh, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerows(rows)
-PY
+EOF
 }
 
-auth_file_var() {
+
+kv_file_var() {
     local path="$1"
     local key="$2"
     [ -n "$path" ] && [ -n "$key" ] || return 1
@@ -256,6 +317,25 @@ auth_file_var() {
         }' "$path"
 }
 
+kv_file_values() {
+    local path="$1"
+    local key="$2"
+    [ -n "$path" ] && [ -n "$key" ] || return 1
+    [ -f "$path" ] || return 1
+    awk -F= -v k="$key" '
+        $0 ~ "^[[:space:]]*"k"[[:space:]]*=" {
+            sub("^[[:space:]]*"k"[[:space:]]*=", "", $0);
+            gsub(/["'\''"]/, "", $0);
+            if ($0 != "") {
+                print $0;
+            }
+        }' "$path"
+}
+
+auth_file_var() {
+    kv_file_var "$@"
+}
+
 load_dns_redirects() {
     DNS_REDIRECT_LIST=()
     declare -gA DNS_REDIRECT_TARGETS=()
@@ -263,7 +343,7 @@ load_dns_redirects() {
     [ -f "$csv" ] || return 0
     local redirect_list=""
     if command -v python3 >/dev/null 2>&1; then
-        redirect_list=$(python3 - "$csv" <<'PY'
+        redirect_list=$(python3 - "$csv" <<'EOF'
 import csv
 import sys
 
@@ -277,7 +357,7 @@ with open(path, newline="") as fh:
             target = (row.get("redirect_url") or "").strip()
             if domain:
                 print(f"{domain}\t{target}")
-PY
+EOF
 )
     else
         warn "python3 not available; parsing redirects from $csv with awk"
@@ -319,6 +399,40 @@ redirect_target() {
     local domain
     domain=$(normalize_domain "$1")
     echo "${DNS_REDIRECT_TARGETS[$domain]-}"
+}
+
+wp_template_list() {
+    local kind="$1"
+    local site_type="$2"
+    local stage="${3-}"
+    local template_dir="${4:-$TEMPLATE_DIR}"
+    [ -n "$kind" ] || err "template kind is required"
+    [ -n "$site_type" ] || err "site_type is required for template selection"
+    local ext=""
+    if [ "$kind" = "wp-config" ]; then
+        ext=".php"
+    fi
+    local stage_norm
+    stage_norm="$(tolower "${stage:-}")"
+    local stage_suffix=""
+    case "$stage_norm" in
+        ""|current|live) stage_suffix="" ;;
+        *) stage_suffix="-$stage_norm" ;;
+    esac
+    local base="${kind}-${site_type}"
+    local candidate="${template_dir}/${base}${stage_suffix}${ext}"
+    local fallback="${template_dir}/${base}${ext}"
+    local selected="$candidate"
+    if [ ! -f "$selected" ] && [ -f "$fallback" ]; then
+        selected="$fallback"
+    fi
+    local amend_stage="${template_dir}/${base}${stage_suffix}.amend${ext}"
+    local amend_base="${template_dir}/${base}.amend${ext}"
+    echo "selected:${selected}"
+    echo "candidate:${candidate}"
+    echo "fallback:${fallback}"
+    echo "amend_stage:${amend_stage}"
+    echo "amend_base:${amend_base}"
 }
 
 normalize_domain() {

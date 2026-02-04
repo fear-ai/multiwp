@@ -1,8 +1,8 @@
 #!/bin/bash
-# verify-domain.sh - Run edge, origin, and WordPress checks for domains.
+# check-domain.sh - Run edge, origin, and WordPress checks for domains.
 # For options, environment variables, defaults see usage().
 #
-# Example: verify-domain.sh [OPTIONS] domain1 [domain2...]
+# Example: check-domain.sh [OPTIONS] domain1 [domain2...]
 
 set -euo pipefail
 
@@ -10,6 +10,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/common.sh"
 . "$SCRIPTS_DIR/cli.sh"
+. "$SCRIPTS_DIR/orch.sh"
 
 EDGE_ARGS=()
 ORIGIN_ARGS=()
@@ -19,8 +20,8 @@ DOMAINS=()
 
 usage() {
     cat <<EOF
-verify-domain.sh - Run edge, origin, and WordPress checks for domains.
-Example: verify-domain.sh [OPTIONS] domain1 [domain2...]
+check-domain.sh - Run edge, origin, and WordPress checks for domains.
+Example: check-domain.sh [OPTIONS] domain1 [domain2...]
 
 Options:
   --api  Enable Cloudflare API checks in check-edge.sh
@@ -99,6 +100,9 @@ done
 finalize_domains DOMAINS || { usage; exit 1; }
 [ ${#DOMAINS[@]} -ge 1 ] || { usage; exit 1; }
 
+section "ORCH" "Selection"
+kv "DOMAINS" "${DOMAINS[*]}"
+
 if [ "$ALLOW_ROOT" = true ]; then
     ORIGIN_ARGS+=("--allow-root")
     WP_ARGS+=("--allow-root")
@@ -120,23 +124,18 @@ for domain in "${DOMAINS[@]}"; do
     log "=============================="
     log "Verifying domain: $domain"
     log "=============================="
+    section "ORCH" "Run"
+    kv "DOMAIN" "$domain"
 
-    if ! "$ORIGIN_SCRIPT" "${ORIGIN_ARGS[@]}" "$domain"; then
-        overall_ok=false
-    fi
-
-    if ! "$WP_SCRIPT" "${WP_ARGS[@]}" "$domain"; then
-        overall_ok=false
-    fi
-
-    if ! "$EDGE_SCRIPT" "${EDGE_ARGS[@]}" "$domain"; then
+    if ! run_domain_checks "$domain"; then
         overall_ok=false
     fi
 
 done
 
 if [ "$overall_ok" = true ]; then
-    log "All domain checks completed successfully"
+    section "ORCH" "Results"
+    status_pass "run=ok"
     exit 0
 fi
 

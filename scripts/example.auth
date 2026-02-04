@@ -9,6 +9,9 @@ CF_API_BASE=""
 CF_ACCOUNT_ID=""
 CF_ACCOUNT=""
 
+# Account domain list (comma-separated)
+CF_DOMAINS=""
+
 # Authentication
 # CF_API_TOKEN: account API token
 # CF_API_KEY + CF_API_EMAIL: global API key (user-level)

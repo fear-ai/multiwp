@@ -15,8 +15,12 @@
 .claude/
 docs/
 python/
+conf/
+Old/
 *.auth
 *.csv
+*.json
+CONF.md
 
 # ============================================================================
 # Version Control

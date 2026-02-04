@@ -100,6 +100,10 @@ log "  Slug: $SLUG"
 log "  Title: $TITLE"
 log "  Email: $EMAIL"
 log "  WordPress root: $WORDPRESS_ROOT_LOCAL"
+section "WP" "Site"
+kv "DOMAIN" "$DOMAIN"
+kv "SLUG" "$SLUG"
+kv "WP_ROOT" "$WORDPRESS_ROOT_LOCAL"
 
 # Verify WordPress multisite is installed
 if ! priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" core is-installed --network 2>/dev/null; then
@@ -128,6 +132,7 @@ log "  Created site with blog_id: $BLOG_ID"
 
 # Step 2: Update domain mapping in wp_blogs table
 # This maps the site from alphaeos.net/<slug>/ to <domain>/
+section "WP" "Mapping"
 log "Step 2: Mapping site to apex domain in wp_blogs"
 priv -u www-data wp --path="$WORDPRESS_ROOT_LOCAL" db query \
     "UPDATE wp_blogs SET domain='$DOMAIN', path='/' WHERE blog_id=$BLOG_ID;" \

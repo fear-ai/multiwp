@@ -21,7 +21,7 @@ MCP_BEARER_TOKEN="${MCP_BEARER_TOKEN-}"
 CF_AUTH_CLI=""
 
 usage() {
-    cat <<'USAGE'
+    cat <<'EOF'
 mcp-cf.sh - Verify Cloudflare MCP readiness and portal reachability.
 Example: mcp-cf.sh [OPTIONS]
 
@@ -41,11 +41,11 @@ Options:
 Notes:
   - Uses POST with streamable HTTP headers; 401/403 indicates auth is required.
   - Write operations are not implemented and will fail even if --apply is provided.
-USAGE
+EOF
 }
 
 print_catalog() {
-    cat <<'CATALOG'
+    cat <<'EOF'
 Managed MCP servers (reference list):
 - Documentation
 - Workers bindings
@@ -62,23 +62,29 @@ Managed MCP servers (reference list):
 - DEX
 - CASB
 - GraphQL
-CATALOG
+EOF
 }
 
 manual_steps() {
-    cat <<'MANUAL'
+    cat <<'EOF'
 Manual action required:
 - Zero Trust → Access → Applications → AI controls
 - Verify MCP Servers and MCP Portals are visible
 - Create a test portal and verify it is reachable at https://<subdomain>.<domain>/mcp
 - Apply an Access policy and confirm OAuth-based access works as expected
-MANUAL
+EOF
 }
 
 mcp_emit() {
     local level="$1"
     shift
-    echo "${level}: $*"
+    case "$level" in
+        PASS) status_pass "$*" ;;
+        WARN) status_info "$*" ;;
+        INFO) status_info "$*" ;;
+        FAIL) status_error "$*" ;;
+        *) echo "${level}: $*" ;;
+    esac
 }
 
 while getopts ":-:" opt; do
@@ -120,12 +126,15 @@ if [ -n "${MCP_PORTAL_URL-}" ] && [ -z "$PORTAL_URL" ]; then
 fi
 
 cf_init_auth "${CF_AUTH_FILE-}"
+section "MCP" "Server"
+kv "PORTAL_URL" "${PORTAL_URL-}"
 
 if [ "$APPLY" = true ]; then
     err "Write operations are not implemented yet"
 fi
 
 if [ "$CATALOG" = true ]; then
+    section "MCP" "Server"
     print_catalog
 fi
 
@@ -137,6 +146,8 @@ if [ -n "$PORTAL_URL" ]; then
         err "Invalid portal URL"
     fi
 
+    section "MCP" "Request"
+    kv "PORTAL_URL" "$PORTAL_URL"
     payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"mcp-cf","version":"0"},"protocolVersion":"2024-11-05","capabilities":{}}}'
     auth_header=()
     if [ -n "$MCP_BEARER_TOKEN" ]; then
@@ -163,6 +174,9 @@ if [ -n "$PORTAL_URL" ]; then
     if [ "$curl_status" -eq 28 ] && [ "$status" = "200" ]; then
         message="Portal reachable (stream open)"
     fi
+    section "MCP" "Response"
+    kv "STATUS" "$status"
+    kv "CLASS" "$class"
     case "$class" in
         pass) mcp_emit "PASS" "$message" ;;
         warn) mcp_emit "WARN" "$message" ;;

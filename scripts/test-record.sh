@@ -9,6 +9,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/common.sh"
+. "$SCRIPTS_DIR/auth.sh"
 . "$SCRIPTS_DIR/cli.sh"
 
 DOMAINS=()
@@ -59,6 +60,11 @@ $(cli_usage_date)
   --downgrade  Allow status downgrades in domains.csv (overrides default)
   --api  Enable Cloudflare API checks for edge (requires zone_id)
   --auth-file PATH [CF_AUTH_FILE]  Auth file to use for API calls
+  --auth token|key|auto [CF_AUTH]  Select which credential to use (default: auto)
+  --token TOKEN [CF_API_TOKEN]  Set CF_API_TOKEN (account API token)
+  --key KEY [CF_API_KEY]  Set CF_API_KEY (global API key)
+  --email EMAIL [CF_API_EMAIL]  Set CF_API_EMAIL (global API key email)
+  --ca-key KEY [CF_CA_KEY]  Set CF_CA_KEY (Origin CA User Service Key)
 $(cli_usage_http_timeout)
 $(cli_usage_hsts)
 $(cli_usage_wp_root)
@@ -175,6 +181,8 @@ while getopts ":-:" opt; do
                 *)
                     if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
                         :
+                    elif cli_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
+                        :
                     else
                         usage; exit 1
                     fi
@@ -209,9 +217,25 @@ if [ ${#COMMANDS[@]} -eq 0 ]; then
     COMMANDS=("${ALL_COMMANDS[@]}")
 fi
 
+section "ORCH" "Selection"
+kv "COMMANDS" "${COMMANDS[*]}"
+if [ ${#DOMAINS[@]} -gt 0 ]; then
+    kv "DOMAINS" "${DOMAINS[*]}"
+fi
+kv "DOMAINS_FILE" "$DOMAINS_FILE"
+
 require_cmds python3
 
 export DOMAINS_FILE
+
+EDGE_AUTH_ARGS=()
+[ -n "${CF_AUTH_CLI-}" ] && EDGE_AUTH_ARGS+=("--auth" "$CF_AUTH_CLI")
+[ -n "${CF_API_TOKEN_CLI-}" ] && EDGE_AUTH_ARGS+=("--token" "$CF_API_TOKEN_CLI")
+[ -n "${CF_API_KEY_CLI-}" ] && EDGE_AUTH_ARGS+=("--key" "$CF_API_KEY_CLI")
+[ -n "${CF_API_EMAIL_CLI-}" ] && EDGE_AUTH_ARGS+=("--email" "$CF_API_EMAIL_CLI")
+[ -n "${CF_CA_KEY_CLI-}" ] && EDGE_AUTH_ARGS+=("--ca-key" "$CF_CA_KEY_CLI")
+[ -n "${CF_ACCOUNT_ID_CLI-}" ] && EDGE_AUTH_ARGS+=("--account" "$CF_ACCOUNT_ID_CLI")
+[ -n "${CF_ACCOUNT_NAME_CLI-}" ] && EDGE_AUTH_ARGS+=("--account-name" "$CF_ACCOUNT_NAME_CLI")
 
 declare -A DOMAIN_STATUS=()
 declare -A DOMAIN_SITE_TYPE=()
@@ -225,7 +249,7 @@ load_domain_meta() {
     [ -f "$DOMAINS_FILE" ] || return 0
     local rows
     if command -v python3 >/dev/null 2>&1; then
-        rows=$(python3 - "$DOMAINS_FILE" <<'PY'
+        rows=$(python3 - "$DOMAINS_FILE" <<'EOF'
 import csv
 import sys
 
@@ -242,7 +266,7 @@ with open(path, newline="") as fh:
         redirect_url = (row.get("redirect_url") or "").strip()
         if domain:
             print(f"{domain}\t{status}\t{site_type}\t{auth_file}\t{zone_id}\t{wp_root}\t{redirect_url}")
-PY
+EOF
 )
     else
         warn "python3 not available; reading $DOMAINS_FILE with awk"
@@ -388,7 +412,7 @@ run_edge() {
         key=$(normalize_domain "$domain")
         auth_file="${AUTH_FILE_OVERRIDE:-${DOMAIN_AUTH_FILE[$key]-}}"
         zone_id="${DOMAIN_ZONE_ID[$key]-}"
-        local edge_args=()
+        local edge_args=("${EDGE_AUTH_ARGS[@]}")
         [ -n "$HTTP_TIMEOUT_LOCAL" ] && edge_args+=("--http-timeout" "$HTTP_TIMEOUT_LOCAL")
         [ -n "$HSTS_REQUIRED" ] && edge_args+=("--hsts=$HSTS_REQUIRED")
 
@@ -396,6 +420,10 @@ run_edge() {
         if [ "$USE_API" = true ] && [ -n "$zone_id" ]; then
             if [ -n "$auth_file" ]; then
                 if ! CF_ZONE_ID="$zone_id" "$SCRIPTS_DIR/check-edge.sh" --api --auth-file "$auth_file" "${edge_args[@]}" "$domain"; then
+                    ok=false
+                fi
+            elif [ ${#EDGE_AUTH_ARGS[@]} -gt 0 ]; then
+                if ! CF_ZONE_ID="$zone_id" "$SCRIPTS_DIR/check-edge.sh" --api "${edge_args[@]}" "$domain"; then
                     ok=false
                 fi
             else
@@ -412,9 +440,9 @@ run_edge() {
 
         if [ "$ok" = true ] && [ "$RECORD_UPDATES" = true ]; then
             if is_redirect_intent "$domain"; then
-                record_update_csv "$DOMAINS_FILE" "$domain" "$RECORD_DOWNGRADE" "status_cf=redirect"
+                csv_put_fields "$DOMAINS_FILE" "$domain" "$RECORD_DOWNGRADE" "status_cf=redirect"
             else
-                record_update_csv "$DOMAINS_FILE" "$domain" "$RECORD_DOWNGRADE" "status_cf=https"
+                csv_put_fields "$DOMAINS_FILE" "$domain" "$RECORD_DOWNGRADE" "status_cf=https"
             fi
         fi
         if [ "$ok" != true ]; then
@@ -443,7 +471,7 @@ run_origin() {
             ok=false
         fi
         if [ "$ok" = true ] && [ "$RECORD_UPDATES" = true ]; then
-            record_update_csv "$DOMAINS_FILE" "$domain" "$RECORD_DOWNGRADE" "status_origin=apache"
+            csv_put_fields "$DOMAINS_FILE" "$domain" "$RECORD_DOWNGRADE" "status_origin=apache"
         fi
         if [ "$ok" != true ]; then
             overall_ok=false
@@ -472,7 +500,7 @@ run_wp() {
             ok=false
         fi
         if [ "$ok" = true ] && [ "$RECORD_UPDATES" = true ]; then
-            record_update_csv "$DOMAINS_FILE" "$domain" "$RECORD_DOWNGRADE" "status_wp=config"
+            csv_put_fields "$DOMAINS_FILE" "$domain" "$RECORD_DOWNGRADE" "status_wp=config"
         fi
         if [ "$ok" != true ]; then
             overall_ok=false
@@ -482,6 +510,8 @@ run_wp() {
 
 overall_ok=true
 for cmd in "${COMMANDS[@]}"; do
+    section "ORCH" "Run"
+    kv "COMMAND" "$cmd"
     case "$cmd" in
         edge) run_edge ;;
         origin) run_origin ;;
@@ -493,3 +523,5 @@ done
 if [ "$overall_ok" != true ]; then
     exit 1
 fi
+section "ORCH" "Results"
+status_pass "run=ok"

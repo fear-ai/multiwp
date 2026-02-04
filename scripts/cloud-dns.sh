@@ -96,8 +96,13 @@ DOMAIN="${DOMAINS[0]}"
 IP="$1"
 validate_ip "$IP" || exit 1
 
-load_cloudflare_auth
-cf_init_auth
+AUTH_FILE_OVERRIDE="${CF_AUTH_FILE-}"
+if [ -n "$AUTH_FILE_OVERRIDE" ]; then
+  CF_AUTH_FILE="$AUTH_FILE_OVERRIDE"
+else
+  cf_auth_from_csv "$DOMAIN" || true
+fi
+cf_init_auth "${CF_AUTH_FILE-}"
 
 cf_require_account_id "for zone creation"
 cf_require_auth
@@ -109,6 +114,7 @@ if [ "$(cf_api_success "$zone_resp")" != "true" ]; then
   err "Failed to query zones: $(cf_api_error_messages "$zone_resp")"
 fi
 zone_id=$(echo "$zone_resp" | jq -r '.result[0].id // empty')
+zone_created=false
 
 if [ -z "$zone_id" ]; then
   log "Creating zone $DOMAIN"
@@ -117,10 +123,19 @@ if [ -z "$zone_id" ]; then
     err "Zone creation failed: $(cf_api_error_messages "$create_resp")"
   fi
   zone_id=$(echo "$create_resp" | jq -r '.result.id')
+  zone_created=true
   log "Zone created: $zone_id"
 else
   log "Zone exists: $zone_id"
 fi
+
+section "DNS" "Zone"
+kv "DOMAIN" "$DOMAIN"
+kv "ZONE_ID" "$zone_id"
+section "DNS" "Create"
+kv "ZONE_CREATED" "$zone_created"
+section "DNS" "Proxy"
+kv "PROXIED" "true"
 
 add_dns() {
   local type="$1"
@@ -171,6 +186,7 @@ add_dns() {
   fi
 }
 
+section "DNS" "Records"
 add_dns "A" "$DOMAIN" "$IP"
 add_dns "CNAME" "www.${DOMAIN}" "$DOMAIN"
 add_dns "CNAME" "*.${DOMAIN}" "$DOMAIN"

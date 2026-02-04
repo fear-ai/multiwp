@@ -3,7 +3,18 @@ Date: January 8, 2026
 
 This document defines Bash development conventions for the scripts in this repository. It focuses on technique and structure for the shared script infrastructure, and it points to other documents for the full catalog of script arguments and environment variables.
 
-This document is authoritative for Bash conventions and shared helper usage. `scripts/Scripts.md` is authoritative for option and environment variable definitions, including current interface conventions and validations. `scripts/Prompt.md` encodes the standard Codex prompt format for applying header and `usage()` updates without altering behavior.
+This document is authoritative for Bash conventions and shared helper usage. `scripts/Scripts.md` is authoritative for option and environment variable definitions, including current interface conventions and validations.
+
+## Script Roles
+
+This repository uses four script roles to keep expectations clear:
+
+- **Helper/library scripts** are sourced by other scripts and should never be executed directly. They provide shared helpers and keep behavior consistent across entrypoints.
+- **Program scripts** are user-facing entrypoints. They implement `usage()`, parse options, and perform a single operation such as provisioning, validation, or performance measurement.
+- **Orchestration scripts** are program scripts that call other program scripts in a controlled sequence. They provide multi-step workflows without duplicating logic.
+- **Test scripts** run standalone unit checks for helpers and shared parsing logic.
+
+Program scripts include orchestration scripts, so all program scripts must follow the same Bash conventions and helper usage described below.
 
 ## Baseline Bash Practices
 
@@ -22,11 +33,46 @@ Program scripts follow a consistent structure so shared helpers remain predictab
 - Source `common.sh` first, then `cli.sh` or `auth.sh` as needed, using `SCRIPTS_DIR` to avoid path ambiguity.
 - Use `require_cmd` for external dependencies before running logic.
 
+Each helper sets a `*_LOADED` flag and enforces inclusion order with a one-line guard that fails fast if it is sourced before `common.sh`. This keeps dependency errors visible and prevents helpers from running without required base functions.
+
+## Logging, Status, and Error Conventions
+
+The shared helpers establish the baseline logging and error behavior that all scripts should follow. The intent is to keep critical failures obvious and to make it safe for scripts to continue collecting results after a non-fatal failure.
+
+The functions below are defined in `scripts/common.sh` and are the canonical entry points for logging and error signaling. Scripts that implement structured output can still emit their own `PASS/INFO/ERROR` lines, but the helpers remain the default for human-readable logs and for fatal exit behavior.
+
+| Helper | Prefix | Stream | Exit behavior | Intended use |
+| --- | --- | --- | --- | --- |
+| `log` | `[HH:MM:SS]` | stdout | continue | Normal progress and informational output |
+| `warn` | `[HH:MM:SS] Warning:` | stderr | continue | Non-fatal anomalies that should be noticed |
+| `fail` | `[HH:MM:SS] FAIL:` | stderr | continue | A check failed but the script should continue collecting results |
+| `err` | `[HH:MM:SS] ERROR:` | stderr | exit 1 | Fatal error; stop immediately |
+
+For the planned unified output format (see `scripts/Scripts.md`), non-fatal failures should still use `fail()` internally but emit an `ERROR` status line in the structured output. This keeps the external output consistent while preserving the fatal/non-fatal distinction in script control flow.
+
 ## Options and Usage Formatting
 
 Option parsing is a contract with operators, so `usage()` must be accurate and stable. For canonical option lists and script-specific details, refer to `scripts/Scripts.md`. The `scripts/Options.csv` cross-reference lists which scripts implement each option.
 
-The repository standard is a single heredoc for `usage()` and a short title plus single-line example at the top of usage. Ordering must be consistent: script-specific options first, then auth, then root/ssl paths, then common privilege options, and `--help` last. The exact format and rules are captured in `scripts/Prompt.md`.
+The repository standard is a single heredoc for `usage()` and a short title plus single-line example at the top of usage. Ordering must be consistent: script-specific options first, then auth, then root/ssl paths, then common privilege options, and `--help` last. The exact format and rules are captured in `scripts/Scripts.md`.
+
+## Heredoc Conventions and File Emission
+
+Heredocs are used throughout the scripts for `usage()` blocks and for inline Python or stub files in tests. To avoid delimiter collisions and to keep behavior consistent, use the following conventions:
+
+- Use `<<'EOF'` for literal heredocs (no variable expansion). This is the default for `usage()` output, embedded Python blocks, and test fixtures.
+- Use `<<EOF` only when you explicitly need variable expansion inside the heredoc body.
+- When emitting a script that itself contains a heredoc, use `SCRIPT_EOF` for the outer delimiter (`<<'SCRIPT_EOF'`). This prevents the outer heredoc from terminating early when the inner script contains `EOF`.
+
+Why this matters:
+- A heredoc terminator is matched by line content, not by quoting. If the body contains a line with just `EOF`, the outer heredoc ends early, which truncates the file and produces syntax errors.
+- Standardizing on `EOF` for inner heredocs and `SCRIPT_EOF` for outer generation avoids accidental collisions and makes the patterns predictable.
+
+Preferred file emission method:
+- Use `apply_patch` to add or update scripts when possible. It does not parse heredoc markers and therefore cannot be confused by nested heredocs. It also produces smaller, safer diffs for review.
+
+Future transition:
+- As scripts evolve, prefer migrating any file-generation steps away from shell heredocs and toward `apply_patch` or dedicated templates. This keeps complex scripts maintainable and reduces the risk of accidental truncation.
 
 ## Configuration Processing
 
@@ -52,6 +98,7 @@ Key helpers:
 - `priv()` in `common.sh` centralizes privilege escalation via `sudo`.
 - `safe_name()` in `common.sh` creates safe filenames from domains.
 - `normalize_domain`, `validate_domain`, `finalize_domains`, and `validate_ip` in `common.sh` keep domain and IP inputs consistent and safe.
+- `run_cmd()` and `start_cmd()` in `cmd.sh` standardize stdout/stderr capture and background process handling for telemetry and load tooling.
 - `cli_usage_*`, `cli_*_opt`, and `cli_cf_auth_opt` in `cli.sh` standardize argument parsing and help output.
 - `auth.sh` centralizes Cloudflare auth handling and API request helpers.
 

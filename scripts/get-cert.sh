@@ -84,20 +84,8 @@ finalize_domains DOMAINS || { usage; exit 1; }
 
 require_cmds openssl
 
-cf_init_auth
-
-if [ "$MODE" = "auto" ]; then
-    if cf_has_ca_key; then
-        MODE="api"
-    else
-        MODE="manual"
-    fi
-fi
-
-if [ "$MODE" = "api" ]; then
-    cf_require_ca_key
-    require_cmds curl jq
-fi
+MODE_REQUESTED="$MODE"
+AUTH_FILE_OVERRIDE="${CF_AUTH_FILE-}"
 
 priv mkdir -p "$SSL_CERT_DIR" "$SSL_KEY_DIR"
 priv chmod 755 "$SSL_CERT_DIR" || true
@@ -202,8 +190,30 @@ for domain in "${DOMAINS[@]}"; do
     safe=$(safe_name "$domain")
     cert_file="$SSL_CERT_DIR/${safe}.crt"
     key_file="$SSL_KEY_DIR/${safe}.key"
+    mode="$MODE_REQUESTED"
+
+    if [ "$mode" != "manual" ]; then
+        if [ -n "$AUTH_FILE_OVERRIDE" ]; then
+            CF_AUTH_FILE="$AUTH_FILE_OVERRIDE"
+        else
+            cf_reset_auth_vars
+            CF_AUTH_FILE=""
+            cf_auth_from_csv "$domain" || true
+        fi
+        cf_init_auth "${CF_AUTH_FILE-}"
+    fi
+
+    if [ "$mode" = "auto" ]; then
+        if cf_has_ca_key; then
+            mode="api"
+        else
+            mode="manual"
+        fi
+    fi
 
     log "== $domain =="
+    section "CERT" "Verify"
+    kv "DOMAIN" "$domain"
     if [ -f "$cert_file" ] && [ -f "$key_file" ] && [ "$FORCE" = false ]; then
         log "Found existing origin cert/key:"
         ls -l "$cert_file" "$key_file"
@@ -211,7 +221,10 @@ for domain in "${DOMAINS[@]}"; do
         continue
     fi
 
-    if [ "$MODE" = "api" ]; then
+    if [ "$mode" = "api" ]; then
+        section "CERT" "OriginCa"
+        cf_require_ca_key
+        require_cmds curl jq
         if [ -f "$cert_file" ] || [ -f "$key_file" ]; then
             if [ "$FORCE" = true ]; then
                 log "Overwriting existing files for $domain (--force)"
@@ -221,6 +234,7 @@ for domain in "${DOMAINS[@]}"; do
         fi
         issue_cert "$domain"
     else
+        section "CERT" "Install"
         if [ -f "$cert_file" ] || [ -f "$key_file" ]; then
             if [ "$FORCE" = true ]; then
                 log "Overwriting existing files for $domain (--force)"
