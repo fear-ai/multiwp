@@ -12,6 +12,9 @@ RUN_PARAM=""
 OUT_DIR=""
 PAD_OVERRIDE=""
 REPORT_MODE="true"
+DURATION_RAW=""
+DOMAIN_OVERRIDE=""
+DURATION_MODE="false"
 
 usage() {
     cat <<'EOF'
@@ -19,9 +22,12 @@ slice-logs.sh - Extract log slices for a perf run based on run.param metadata.
 
 Usage:
   slice-logs.sh --run-param PATH [--out-dir DIR] [--pad SEC]
+  slice-logs.sh --duration WINDOW --domain NAME [--out-dir DIR] [--pad SEC]
 
 Options:
   --run-param PATH  Path to run.param file (required)
+  --duration WINDOW  Slice logs for the last WINDOW (default minutes; suffix: s|m|h|d)
+  --domain NAME  Domain to slice (required with --duration)
   --out-dir DIR  Output directory for sliced logs (default: run.param directory)
   --pad SEC  Override LOG_PAD_SEC from run.param
   --report  Write a log summary file (default)
@@ -30,10 +36,10 @@ Options:
 
 Notes:
   - This script does not alter any source logs.
-  - Log slices are written with the same prefix as run.param.
-  - When report output is enabled, the summary log is written to ${prefix}_logs.txt
-    and a compatibility copy is written to ${prefix}_slice.log.
+  - Log slices are written with the run.param prefix or a generated prefix in --duration mode.
+  - When report output is enabled, the summary log is written to ${prefix}_logs.txt.
   - Apache log selection is best-effort and may warn if a matching file is not found.
+  - When using --duration, the slice window is UTC now back WINDOW, plus any pad.
   - When a PERF report and Apache access slice exist, this script appends summary
     rows to perf_runs.csv and perf_segments.csv in the output directory.
 EOF
@@ -42,7 +48,7 @@ EOF
 log_msg() {
     local msg="$1"
     if [ "$REPORT_MODE" = "true" ]; then
-        echo "$msg" | tee -a "$SLICE_LOG" "$SLICE_LOG_COMPAT"
+        echo "$msg" | tee -a "$SLICE_LOG"
     else
         echo "$msg"
     fi
@@ -70,6 +76,14 @@ while getopts ":-:" opt; do
                 run-param)
                     [ -n "${!OPTIND-}" ] || err "--run-param requires a value"
                     RUN_PARAM="${!OPTIND}"; OPTIND=$((OPTIND + 1)) ;;
+                duration=*) DURATION_RAW="${OPTARG#*=}" ;;
+                duration)
+                    [ -n "${!OPTIND-}" ] || err "--duration requires a value"
+                    DURATION_RAW="${!OPTIND}"; OPTIND=$((OPTIND + 1)) ;;
+                domain=*) DOMAIN_OVERRIDE="${OPTARG#*=}" ;;
+                domain)
+                    [ -n "${!OPTIND-}" ] || err "--domain requires a value"
+                    DOMAIN_OVERRIDE="${!OPTIND}"; OPTIND=$((OPTIND + 1)) ;;
                 out-dir=*) OUT_DIR="${OPTARG#*=}" ;;
                 out-dir)
                     [ -n "${!OPTIND-}" ] || err "--out-dir requires a value"
@@ -87,32 +101,79 @@ while getopts ":-:" opt; do
     esac
 done
 
-[ -n "$RUN_PARAM" ] || err "--run-param is required"
-[ -f "$RUN_PARAM" ] || err "run.param not found: $RUN_PARAM"
-
-OUT_DIR="${OUT_DIR:-$(cd "$(dirname "$RUN_PARAM")" && pwd)}"
-mkdir -p "$OUT_DIR"
-
-PREFIX="$(basename "$RUN_PARAM")"
-PREFIX="${PREFIX%_run.param}"
-
-SLICE_LOG=""
-SLICE_LOG_COMPAT=""
-if [ "$REPORT_MODE" = "true" ]; then
-    SLICE_LOG="$OUT_DIR/${PREFIX}_logs.txt"
-    SLICE_LOG_COMPAT="$OUT_DIR/${PREFIX}_slice.log"
-    : > "$SLICE_LOG"
-    : > "$SLICE_LOG_COMPAT"
+if [ -n "$RUN_PARAM" ] && [ -n "$DURATION_RAW" ]; then
+    err "--run-param and --duration cannot be used together"
+fi
+if [ -z "$RUN_PARAM" ] && [ -z "$DURATION_RAW" ]; then
+    err "Use --run-param or --duration/--domain"
 fi
 
-DOMAIN="$(param_var "$RUN_PARAM" "DOMAIN" || true)"
-UTC_START="$(param_var "$RUN_PARAM" "UTC_START" || true)"
-UTC_END="$(param_var "$RUN_PARAM" "UTC_END" || true)"
-LOG_PAD_SEC="$(param_var "$RUN_PARAM" "LOG_PAD_SEC" || true)"
+if [ -n "$RUN_PARAM" ]; then
+    [ -f "$RUN_PARAM" ] || err "run.param not found: $RUN_PARAM"
+fi
 
-[ -n "$DOMAIN" ] || err "DOMAIN missing in run.param"
-[ -n "$UTC_START" ] || err "UTC_START missing in run.param"
-[ -n "$UTC_END" ] || err "UTC_END missing in run.param"
+if [ -n "$RUN_PARAM" ]; then
+    OUT_DIR="${OUT_DIR:-$(cd "$(dirname "$RUN_PARAM")" && pwd)}"
+else
+    RUN_ID="$(date -u +%Y%m%d_%H%M%S)"
+    OUT_DIR="${OUT_DIR:-/var/tmp/multiwp/slice_${RUN_ID}}"
+fi
+mkdir -p "$OUT_DIR"
+
+if [ -n "$RUN_PARAM" ]; then
+    PREFIX="$(basename "$RUN_PARAM")"
+    PREFIX="${PREFIX%_run.param}"
+else
+    [ -n "$DOMAIN_OVERRIDE" ] || err "--domain is required with --duration"
+    PREFIX="${DOMAIN_OVERRIDE//./_}_${RUN_ID}"
+    DURATION_MODE="true"
+fi
+
+SLICE_LOG=""
+if [ "$REPORT_MODE" = "true" ]; then
+    SLICE_LOG="$OUT_DIR/${PREFIX}_logs.txt"
+    : > "$SLICE_LOG"
+fi
+
+if [ -n "$RUN_PARAM" ]; then
+    DOMAIN="$(param_var "$RUN_PARAM" "DOMAIN" || true)"
+    UTC_START="$(param_var "$RUN_PARAM" "UTC_START" || true)"
+    UTC_END="$(param_var "$RUN_PARAM" "UTC_END" || true)"
+    LOG_PAD_SEC="$(param_var "$RUN_PARAM" "LOG_PAD_SEC" || true)"
+
+    [ -n "$DOMAIN" ] || err "DOMAIN missing in run.param"
+    [ -n "$UTC_START" ] || err "UTC_START missing in run.param"
+    [ -n "$UTC_END" ] || err "UTC_END missing in run.param"
+else
+    DOMAIN="$DOMAIN_OVERRIDE"
+    if ! [[ "$DURATION_RAW" =~ ^[0-9]+[smhdSMHD]?$ ]]; then
+        err "--duration must be N, Ns, Nm, Nh, or Nd (default minutes)"
+    fi
+    duration_value="${DURATION_RAW%[smhdSMHD]}"
+    duration_unit="${DURATION_RAW:${#duration_value}:1}"
+    if [ -z "$duration_unit" ]; then
+        duration_unit="m"
+    fi
+    case "$duration_unit" in
+        s|S) duration_sec="$duration_value" ;;
+        m|M) duration_sec=$((duration_value * 60)) ;;
+        h|H) duration_sec=$((duration_value * 3600)) ;;
+        d|D) duration_sec=$((duration_value * 86400)) ;;
+        *) err "--duration must use s, m, h, or d suffix" ;;
+    esac
+    UTC_END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    UTC_START=$(python3 - "$UTC_END" "$duration_sec" <<'PYCODE'
+import sys
+from datetime import datetime, timedelta, timezone
+
+end = datetime.strptime(sys.argv[1], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+duration = int(sys.argv[2])
+start = end - timedelta(seconds=duration)
+print(start.strftime("%Y-%m-%dT%H:%M:%SZ"))
+PYCODE
+)
+    LOG_PAD_SEC="${LOG_PAD_SEC:-0}"
+fi
 
 PAD_SEC="${PAD_OVERRIDE:-$LOG_PAD_SEC}"
 PAD_SEC="${PAD_SEC:-0}"
@@ -152,13 +213,14 @@ slice_apache() {
     fi
 
     if $sudo; then
-        sudo python3 - "$src" "$dest" "$PAD_START" "$PAD_END" <<'PYCODE'
+        log_start=$(sudo python3 - "$src" "$dest" "$PAD_START" "$PAD_END" <<'PYCODE'
 import sys
 from datetime import datetime
 
 src, dest, start_s, end_s = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 start = datetime.fromisoformat(start_s)
 end = datetime.fromisoformat(end_s)
+first_dt = None
 
 def parse_apache(ts):
     return datetime.strptime(ts, "%d/%b/%Y:%H:%M:%S %z")
@@ -172,17 +234,23 @@ with open(src, "r", errors="ignore") as f_in, open(dest, "w") as f_out:
             dt = parse_apache(ts)
         except ValueError:
             continue
+        if first_dt is None:
+            first_dt = dt
         if start <= dt <= end:
             f_out.write(line)
+if first_dt and start < first_dt:
+    print(first_dt.isoformat())
 PYCODE
+)
     else
-        python3 - "$src" "$dest" "$PAD_START" "$PAD_END" <<'PYCODE'
+        log_start=$(python3 - "$src" "$dest" "$PAD_START" "$PAD_END" <<'PYCODE'
 import sys
 from datetime import datetime
 
 src, dest, start_s, end_s = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 start = datetime.fromisoformat(start_s)
 end = datetime.fromisoformat(end_s)
+first_dt = None
 
 def parse_apache(ts):
     return datetime.strptime(ts, "%d/%b/%Y:%H:%M:%S %z")
@@ -196,9 +264,17 @@ with open(src, "r", errors="ignore") as f_in, open(dest, "w") as f_out:
             dt = parse_apache(ts)
         except ValueError:
             continue
+        if first_dt is None:
+            first_dt = dt
         if start <= dt <= end:
             f_out.write(line)
+if first_dt and start < first_dt:
+    print(first_dt.isoformat())
 PYCODE
+)
+    fi
+    if [ "$DURATION_MODE" = "true" ] && [ -n "$log_start" ]; then
+        log_msg "WARN log ${src} starts at ${log_start}"
     fi
 }
 
@@ -214,7 +290,7 @@ slice_syslog() {
     fi
 
     if $sudo; then
-        sudo python3 - "$src" "$dest" "$PAD_START" "$PAD_END" "$YEAR" <<'PYCODE'
+        log_start=$(sudo python3 - "$src" "$dest" "$PAD_START" "$PAD_END" "$YEAR" <<'PYCODE'
 import sys
 from datetime import datetime, timezone
 
@@ -222,6 +298,7 @@ src, dest, start_s, end_s, year_s = sys.argv[1], sys.argv[2], sys.argv[3], sys.a
 start = datetime.fromisoformat(start_s)
 end = datetime.fromisoformat(end_s)
 year = int(year_s)
+first_dt = None
 
 def parse_syslog(ts):
     dt = datetime.strptime(f"{year} {ts}", "%Y %b %d %H:%M:%S")
@@ -237,11 +314,16 @@ with open(src, "r", errors="ignore") as f_in, open(dest, "w") as f_out:
             dt = parse_syslog(ts)
         except ValueError:
             continue
+        if first_dt is None:
+            first_dt = dt
         if start <= dt <= end:
             f_out.write(line)
+if first_dt and start < first_dt:
+    print(first_dt.isoformat())
 PYCODE
+)
     else
-        python3 - "$src" "$dest" "$PAD_START" "$PAD_END" "$YEAR" <<'PYCODE'
+        log_start=$(python3 - "$src" "$dest" "$PAD_START" "$PAD_END" "$YEAR" <<'PYCODE'
 import sys
 from datetime import datetime, timezone
 
@@ -249,6 +331,7 @@ src, dest, start_s, end_s, year_s = sys.argv[1], sys.argv[2], sys.argv[3], sys.a
 start = datetime.fromisoformat(start_s)
 end = datetime.fromisoformat(end_s)
 year = int(year_s)
+first_dt = None
 
 def parse_syslog(ts):
     dt = datetime.strptime(f"{year} {ts}", "%Y %b %d %H:%M:%S")
@@ -264,9 +347,17 @@ with open(src, "r", errors="ignore") as f_in, open(dest, "w") as f_out:
             dt = parse_syslog(ts)
         except ValueError:
             continue
+        if first_dt is None:
+            first_dt = dt
         if start <= dt <= end:
             f_out.write(line)
+if first_dt and start < first_dt:
+    print(first_dt.isoformat())
 PYCODE
+)
+    fi
+    if [ "$DURATION_MODE" = "true" ] && [ -n "$log_start" ]; then
+        log_msg "WARN log ${src} starts at ${log_start}"
     fi
 }
 
@@ -276,6 +367,7 @@ domain_label="${DOMAIN%%.*}"
 LOG_IDS=(
     apache_ssl_access
     apache_ssl_error
+    apache_admin_access
     apache_access
     apache_error
     syslog
@@ -286,6 +378,7 @@ LOG_IDS=(
 declare -A LOG_TYPE=(
     [apache_ssl_access]=apache
     [apache_ssl_error]=apache
+    [apache_admin_access]=apache
     [apache_access]=apache
     [apache_error]=apache
     [syslog]=syslog
@@ -296,6 +389,7 @@ declare -A LOG_TYPE=(
 declare -A LOG_DEST=(
     [apache_ssl_access]="${PREFIX}_apache_ssl_access.log"
     [apache_ssl_error]="${PREFIX}_apache_ssl_error.log"
+    [apache_admin_access]="${PREFIX}_apache_admin_access.log"
     [apache_access]="${PREFIX}_apache_access.log"
     [apache_error]="${PREFIX}_apache_error.log"
     [syslog]="${PREFIX}_syslog.log"
@@ -306,12 +400,16 @@ declare -A LOG_DEST=(
 declare -A LOG_SOURCES=(
     [apache_ssl_access]="/var/log/apache2/${DOMAIN}_ssl_access.log|/var/log/apache2/${domain_nodot}_ssl_access.log|/var/log/apache2/${domain_label}_ssl_access.log"
     [apache_ssl_error]="/var/log/apache2/${DOMAIN}_ssl_error.log|/var/log/apache2/${domain_nodot}_ssl_error.log|/var/log/apache2/${domain_label}_ssl_error.log"
+    [apache_admin_access]="/var/log/apache2/${DOMAIN}_admin_access.log|/var/log/apache2/${domain_nodot}_admin_access.log|/var/log/apache2/${domain_label}_admin_access.log"
     [apache_access]="/var/log/apache2/${DOMAIN}-access.log|/var/log/apache2/${DOMAIN}_access.log|/var/log/apache2/${domain_nodot}_access.log|/var/log/apache2/${domain_label}_access.log"
     [apache_error]="/var/log/apache2/${DOMAIN}-error.log|/var/log/apache2/${DOMAIN}_error.log|/var/log/apache2/${domain_nodot}_error.log|/var/log/apache2/${domain_label}_error.log"
     [syslog]="/var/log/syslog"
     [auth]="/var/log/auth.log"
     [kern]="/var/log/kern.log"
     [ufw]="/var/log/ufw.log"
+)
+declare -A LOG_OPTIONAL=(
+    [apache_admin_access]=true
 )
 
 pick_first() {
@@ -339,6 +437,9 @@ slice_registered_log() {
     local src
     src="$(resolve_log_source "$log_id" || true)"
     if [ -z "$src" ]; then
+        if [ "${LOG_OPTIONAL[$log_id]-}" = "true" ]; then
+            return 0
+        fi
         log_msg "WARN no matching ${log_id} log"
         return 0
     fi
@@ -353,6 +454,72 @@ slice_registered_log() {
 for log_id in "${LOG_IDS[@]}"; do
     slice_registered_log "$log_id"
 done
+
+analyze_admin_log() {
+    local admin_log="$OUT_DIR/${LOG_DEST[apache_admin_access]}"
+    if [ ! -f "$admin_log" ]; then
+        log_msg "INFO admin access log missing; skip admin timing"
+        return 0
+    fi
+    local summary
+    summary=$(python3 - "$admin_log" <<'PYCODE'
+import sys
+
+path = sys.argv[1]
+threshold_us = 1_000_000
+total = 0
+slow = 0
+max_us = 0
+max_path = ""
+max_status = ""
+
+with open(path, "r", errors="ignore") as f:
+    for line in f:
+        if not line.strip():
+            continue
+        parts = line.rsplit(" ", 1)
+        if len(parts) != 2:
+            continue
+        try:
+            us = int(parts[1])
+        except ValueError:
+            continue
+        total += 1
+        if us >= threshold_us:
+            slow += 1
+        if us > max_us:
+            max_us = us
+            req = ""
+            status = ""
+            chunks = line.split('"')
+            if len(chunks) > 1:
+                req = chunks[1]
+            if len(chunks) > 2:
+                status_part = chunks[2].strip().split()
+                status = status_part[0] if status_part else ""
+            req_parts = req.split()
+            max_path = req_parts[1] if len(req_parts) >= 2 else ""
+            max_status = status
+
+max_ms = int(round(max_us / 1000.0)) if max_us else 0
+print(f"ADMIN_LOG={path}")
+print("ADMIN_SLOW_THRESHOLD_MS=1000")
+print(f"ADMIN_TOTAL={total}")
+print(f"ADMIN_SLOW_1S={slow}")
+print(f"ADMIN_MAX_MS={max_ms}")
+if max_path:
+    print(f"ADMIN_MAX_PATH={max_path}")
+if max_status:
+    print(f"ADMIN_MAX_STATUS={max_status}")
+PYCODE
+)
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        log_msg "$line"
+    done <<<"$summary"
+}
+
+analyze_admin_log
 
 generate_csv() {
     local report="$OUT_DIR/${PREFIX}_report.txt"

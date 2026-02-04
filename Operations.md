@@ -31,20 +31,17 @@ The dependency chain is explicit: Cloudflare edge behavior depends on correct DN
       1. [3.7.1 Redirect Config](#371-redirect-config)
 3. [4. Origin TLS](#4-origin-tls)
    1. [4.1 Host Services](#41-host-services)
-   2. [4.2 Ubuntu updates](#42-ubuntu-updates)
-   3. [4.3 User Permissions](#43-user-permissions)
-   4. [4.4 Origin Certs](#44-origin-certs)
-   5. [4.5 Web Vhosts](#45-web-vhosts)
-   6. [4.6 PHP Runtime and Database](#46-php-runtime-and-database)
-      1. [4.6.1 PHP Runtime Setup](#461-php-runtime-setup)
-      2. [4.6.2 PHP Tuning Policy](#462-php-tuning-policy)
-      3. [4.6.3 Database Inventory](#463-database-inventory)
-   7. [4.7 WordPress Files and Permissions](#47-wordpress-files-and-permissions)
-   8. [4.8 .htaccess Structure and Routing](#48-htaccess-structure-and-routing)
-   9. [4.9 wp-config.php Settings](#49-wp-configphp-settings)
+   2. [4.2 Host Baseline (HardenUbuntu)](#42-host-baseline-hardenubuntu)
+   3. [4.3 Origin Certs](#43-origin-certs)
+   4. [4.4 Web Vhosts](#44-web-vhosts)
+   5. [4.5 WordPress Files and Permissions](#45-wordpress-files-and-permissions)
+   6. [4.6 .htaccess Structure and Routing](#46-htaccess-structure-and-routing)
+   7. [4.7 wp-config.php Settings](#47-wp-configphp-settings)
 4. [5. Multisite Ops](#5-multisite-ops)
    1. [5.1 Site Onboarding](#51-site-onboarding)
    2. [5.2 Site Troubleshooting](#52-site-troubleshooting)
+   3. [5.3 Security Hardening (Future)](#53-security-hardening-future)
+   4. [5.4 WordPress Core Update Strategy (Future)](#54-wordpress-core-update-strategy-future)
 5. [6. Verification](#6-verification)
    1. [6.1 Validation Checks](#61-validation-checks)
    2. [6.2 Script Partitioning](#62-script-partitioning)
@@ -240,49 +237,19 @@ Operational notes:
 The origin layer provides the TLS endpoint Cloudflare connects to and the Apache vhost routing that serves WordPress. This layer must be correct before Full (strict) can succeed at the edge.
 
 ### 4.1 Host Services
-Provision Ubuntu 24 with Apache 2.4, PHP 8.x, MySQL 8.x. Check CONF.md for the latest site-specific recommendations (versions, paths, domains).
+Provision Ubuntu 24 with Apache 2.4, PHP 8.x, and MySQL 8.x. Check `CONF.md` for the latest site-specific recommendations (versions, paths, domains).
 
-Operations introduces the host baseline here so operators see the dependency chain in context. The full hardening sequence, with commands and verification steps, is in `HardenUbuntu.md`. Complete that guide (including a run of `check-server.sh`) before moving on to origin certificates and vhost wiring in the subsections below. When the baseline is complete, return to section 4.4 (`Operations.md#44-origin-certs`).
+Operations introduces the host baseline here so operators see the dependency chain in context. All Apache, PHP, and MySQL installation and configuration steps live in `HardenUbuntu.md`, which is the authoritative host baseline document. Complete that guide (including a run of `check-server.sh`) before moving on to origin certificates and vhost wiring in the subsections below. When the baseline is complete, return to section 4.3 (`Operations.md#43-origin-certs`).
 
-### 4.2 Ubuntu updates
-Keep the host patched with unattended security updates so origin services are not exposed to known vulnerabilities. This is a foundational dependency for the rest of the stack because Apache, PHP, OpenSSL, and kernel fixes arrive through Ubuntu security updates. Configure this before or alongside initial server provisioning.
+### 4.2 Host Baseline (HardenUbuntu)
+The host baseline includes Ubuntu updates, SSH policy, network/sysctl, UFW, Apache/PHP/MySQL configuration, and service validation. This content is intentionally centralized in `HardenUbuntu.md` so host-level policy remains consistent and does not drift across multiple documents.
 
-Install and enable unattended upgrades:
-```bash
-sudo apt-get update && sudo apt-get install -y unattended-upgrades
-sudo systemctl enable --now unattended-upgrades.service
-```
+Required sequence:
+1) Complete `HardenUbuntu.md` sections in order.
+2) Run `check-server.sh` and resolve any FAIL/ERROR results.
+3) Return here to continue origin certs, vhosts, and WordPress-layer configuration.
 
-Confirm the service state and recent activity:
-```bash
-systemctl status unattended-upgrades.service
-systemctl is-enabled unattended-upgrades.service
-journalctl -u unattended-upgrades.service --since "7 days ago"
-```
-
-Review and adjust configuration as needed:
-```bash
-sudo sed -n '1,200p' /etc/apt/apt.conf.d/20auto-upgrades
-sudo sed -n '1,200p' /etc/apt/apt.conf.d/50unattended-upgrades
-```
-
-Use a dry run when validating changes:
-```bash
-sudo unattended-upgrades --dry-run --debug
-```
-
-If automatic reboots are allowed, set a window that matches maintenance expectations. If reboots are disabled, document the manual reboot cadence and ensure kernel updates are applied intentionally.
-
-### 4.3 User Permissions
-The deployment user (typically `ubuntu`) must be in the `ssl-cert` group to run scripts that read SSL certificates.
-
-```bash
-sudo usermod -aG ssl-cert ubuntu
-```
-
-After adding the group, log out and log back in, or run `newgrp ssl-cert` to activate. Verify with `groups ubuntu`.
-
-### 4.4 Origin Certs
+### 4.3 Origin Certs
 HTTPS vhosts reference these paths per template. The certificate and key must be readable by the `ssl-cert` group and owned by root.
 
 - `/etc/ssl/cloudflare-origin/certs/<safe>.crt`
@@ -301,10 +268,10 @@ sudo scripts/get-cert.sh --api <domain>
 
 Validation for this step should follow the same sequence: use `check-origin.sh` to confirm origin cert paths and permissions before moving on to vhost generation.
 
-### 4.5 Web Vhosts
+### 4.4 Web Vhosts
 The web server uses one vhost per domain, driven by templates that reference the origin certificates.
 
-- Enable Apache modules: `sudo a2enmod rewrite ssl headers && sudo systemctl reload apache2`.
+- Apache modules required for vhosts (rewrite, ssl, headers) are part of the host baseline in `HardenUbuntu.md`. Verify they are enabled before generating vhosts.
 - Model: one vhost per domain, no wildcards.
 - Templates: `templates/apache-*.conf`.
 - Script: `sudo scripts/apache-vhost.sh`.
@@ -320,38 +287,7 @@ Host validation note: Apache’s `Require host` does **not** validate the `Host`
 ```
 If you do not require host header validation, omit the `Require host`/`Require expr` blocks entirely and rely on `ServerName`/`ServerAlias` plus the default vhost fallback.
 
-### 4.6 PHP Runtime and Database
-PHP is part of the origin runtime and must be configured before WordPress is installed or tuned. This stack uses Apache `mod_php` (not PHP-FPM), so PHP settings are read from the Apache SAPI configuration, and concurrency limits are governed by Apache prefork worker counts. Database inventory belongs here because WordPress configuration and script checks depend on knowing the database name and user.
-
-#### 4.6.1 PHP Runtime Setup
-Use the Ubuntu-packaged PHP 8.x stack and keep the runtime configuration in the Apache SAPI path:
-
-- PHP runtime config: `/etc/php/<version>/apache2/php.ini`.
-- OPcache config: `/etc/php/<version>/mods-available/opcache.ini` (enabled via Apache SAPI `conf.d` symlink).
-- Module validation: `php -v`, `php -m`, and `apache2ctl -M` (confirm `php` module is loaded).
-
-Minimum PHP extension expectations for WordPress in this stack:
-- Core: `curl`, `mbstring`, `xml`, `zip`, `json`, `openssl`.
-- Media: `gd` or `imagick` (one is required for image processing).
-- DB: `mysqli` or `pdo_mysql`.
-- Optional: `redis` if object caching is enabled.
-
-Keep PHP configuration uniform across sites. Per-site PHP configuration is out of scope; all sites share the same runtime on the host.
-
-#### 4.6.2 PHP Tuning Policy
-PHP tuning must be evidence-based and coordinated with Apache worker limits. Each Apache prefork worker is a full PHP process, so PHP memory limits and OPcache sizing directly affect how many concurrent requests the host can tolerate. Keep the tuning loop in `Perf.md` and apply changes only after collecting baseline telemetry.
-
-Tune and validate in this order:
-1) Confirm OPcache is enabled and sized for your plugin/theme footprint.
-2) Review PHP memory and execution limits (`memory_limit`, `max_execution_time`, `max_input_time`, `max_input_vars`, `post_max_size`, `upload_max_filesize`).
-3) Re-run `perf-load.sh` with telemetry to verify CPU and memory behavior.
-
-Use `Perf.md` section “PHP OPcache” (`Perf.md#php-opcache`) for baseline recommendations and measurement commands.
-
-#### 4.6.3 Database Inventory
-Database name and user configuration should be tracked alongside the domain inventory so the origin and WordPress layers can be validated consistently. Record `db_name` and `db_user` in `domains.csv` so `setup-wp.sh` and `check-wp.sh` can validate database alignment without guessing.
-
-### 4.7 WordPress Files and Permissions
+### 4.5 WordPress Files and Permissions
 Keep WordPress readable by the web server while keeping code write-restricted. The goal is to make uploads writable without granting write access to the core, plugins, themes, or configuration files.
 
 Site roots and layout:
@@ -378,7 +314,7 @@ Template sources:
 - Single-site templates: `templates/wp-config-singlesite.php` and `templates/wp-config-singlesite-deployed.php`.
 - `.htaccess` templates: `templates/htaccess-multisite` and `templates/htaccess-singlesite`.
 
-### 4.8 .htaccess Structure and Routing
+### 4.6 .htaccess Structure and Routing
 We keep WordPress rewrite rules in `.htaccess` rather than moving them into vhost files. This keeps per-site routing logic close to the WordPress install and avoids duplicating rules across vhosts. The tradeoff is that Apache must allow overrides and must permit symlink traversal so rewrite directives are honored.
 
 Common structure (both templates):
@@ -416,7 +352,7 @@ Do not remove both `FollowSymLinks` and `SymLinksIfOwnerMatch` while `.htaccess`
 
 We have discussed honoring Cloudflare HTTPS signals at the multisite `.htaccess` layer as an additional safeguard. If that is ever implemented, keep it limited to the multisite `.htaccess` and do not add it to the `zero.directory` single-site `.htaccess`.
 
-### 4.9 wp-config.php Settings
+### 4.7 wp-config.php Settings
 This section documents the baseline `wp-config.php` flags we expect in production, and it mirrors the template comments so configuration is consistent across environments.
 
 Defaults and environment flags:
@@ -500,6 +436,33 @@ Authoritative checks, in the order they affect routing:
 - **Apache vhost (`ServerName`)**: confirm the SSL vhost for the domain has a matching `ServerName` and that the vhost is enabled. If the `ServerName` does not match the request, Apache selects a different vhost and WordPress never sees the correct host. Example check: `grep -R "ServerName <domain>" /etc/apache2/sites-available` and confirm the file is enabled in `/etc/apache2/sites-enabled`.
 
 Use the mapping steps in this section to correct data first, then reload Apache if you update vhost files so the routing change takes effect. Ensure edge policy is already aligned in the Cloudflare section above before public cutover.
+
+### 5.3 Security Hardening (Future)
+
+**Current State**: Basic security (HTTPS, Cloudflare WAF, isolated certs).
+
+**Investigation Needed:**
+- Enable WordPress audit logging
+- Implement fail2ban for login attempts
+- Review WordPress file permissions
+- Consider moving wp-config.php outside web root
+- Enable Cloudflare Bot Fight Mode or challenge pages
+- Review database user privileges (do we need GRANT ALL?)
+
+**Benefit**: Reduced attack surface, better incident response.
+
+### 5.4 WordPress Core Update Strategy (Future)
+
+**Current State**: Centralized updates affect all sites.
+
+**Investigation Needed:**
+- Define testing procedure for core updates
+- Identify test sites to update first
+- Rollback procedure if update breaks sites
+- Communication plan for maintenance windows
+- Consider staging environment for update testing
+
+**Benefit**: Safer updates, less risk of network-wide breakage.
 
 ## 6. Verification
 Use the checks in this section after provisioning to confirm the stack is healthy end to end. These checks are read-oriented and are designed to highlight the first failing layer.

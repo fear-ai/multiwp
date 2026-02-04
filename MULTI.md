@@ -354,7 +354,9 @@ For this project:
 - WordPress runtime needs a web server-owned tree for uploads and read access to code
 - Automation should run under a privileged operator account rather than direct root login
 - Certificate files must be readable by validation scripts without granting full root access
-- See `Operations.md` section 4.7 for the exact ownership, permissions, and operator access model
+- See `Operations.md` section 4.5 for the exact ownership, permissions, and operator access model
+
+WordPress security settings (for example, `wp-config.php` flags and template defaults) are documented in `Operations.md` section 4.7 (`Operations.md#47-wp-configphp-settings`) and mirrored in `templates/wp-config-*.php`. This document focuses on architectural rationale and boundaries; host-level controls live in `HardenUbuntu.md`, while procedural, file-level WordPress settings live in Operations.
 
 **Why This Matters:**
 - Scripts need to read certificates for validation
@@ -560,40 +562,36 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 
 ## 8. Future Investigation
 
+### 8.0 System Administration Summary
+This summary provides short, operationally oriented versions of the items below so system administrators can scan future work without reading the full investigation notes. Detailed material remains in the subsections that follow.
+
+- **Backups and restore (see 8.3)**: document and test full restore, then design per-site restore flow for multisite.
+- **Monitoring and alerting (see 8.4)**: define minimum uptime and certificate checks, then expand to Apache and DB telemetry.
+- **Staging environment (see 8.6)**: evaluate a staging host or local test workflow for updates and plugin changes.
+- **Scaling strategy (see 8.9)**: define thresholds that trigger splitting the multisite or adding additional origins.
+
 ### 8.1 Cloudflare API Automation
 
-**Current State**: Scripts are available and used selectively, with manual UI steps still used for validation or edge-only changes.
+**Approach**: Treat Cloudflare as the authoritative edge layer for TLS, HTTPS enforcement, security headers, and rulesets. Prefer API‑driven configuration for repeatability and bulk changes, while using the UI for discovery, validation, and changes that have not yet been standardized or verified in scripts.
 
-**Investigation Needed:**
-- Expand coverage for cloud-dns.sh and get-cert.sh with repeatable test runs.
-- Clarify which steps remain UI-only vs scriptable for each onboarding phase.
-- Continue refining token/key scoping and account separation as the domain count grows.
-- Document failure modes and recovery procedures
-- Compare reliability of API vs UI workflows
+**Stance**:
+- Cache, firewall, and rate rules should be standardized across zones whenever possible.
+- The cache rule logic is settled for the current phase; changes should be driven by measured outcomes rather than ad‑hoc adjustments.
+- API workflows are the preferred method for applying established settings; UI is used to prototype, validate, and audit.
 
-**Benefit**: Faster onboarding, less manual work, scriptable bulk operations.
+**Benefit**: Consistent edge posture, fewer manual steps, and faster onboarding once the settings are standardized.
 
-**Risk**: API failures harder to debug than UI. Need solid error handling.
-
-**Test Plan**: Use dedicated test domains (realdao.org, talkdao.net, recomp.top) to exercise API workflows.
+**Risk**: API failures can be opaque; script error handling and verification must remain a first‑class concern.
 
 ---
 
 ### 8.2 Database Isolation & Security
 
-**Current State**: All sites share wordpress_multisite database. No row-level or table-level isolation.
+**Current State**: All sites share a single WordPress multisite database. Isolation is logical (site tables and IDs), not physical.
 
-**Questions:**
-- Can we use separate databases per site while keeping multisite benefits?
-- Would HyperDB or LudicrousDB provide better isolation?
-- What's the performance impact of per-site databases?
-- How would backups/restores change?
-
-**Benefit**: Better tenant isolation, easier per-site restoration, clearer blast radius.
-
-**Tradeoff**: More complex, may lose some multisite benefits, higher resource usage.
-
----
+**Architectural implications:**
+- Stronger isolation improves blast radius and restore options but increases operational complexity.
+- The decision depends on real measurements (query volume, contention, buffer pressure), which are tracked in performance work.
 
 ### 8.3 Automated Backup & Restore Procedures
 
@@ -631,20 +629,11 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 
 ### 8.5 Performance Optimization
 
-**Questions:**
-- Is database becoming bottleneck as site count grows?
-- Should high-traffic sites move to dedicated installs?
-- Would Redis/Memcached object caching help?
-- Are Cloudflare Cache and Redirect Rules optimally configured?
-- Should we implement rate limiting per site?
+**Current State**: We benchmark selectively and do not yet have a repeatable optimization cycle tied to scaling thresholds.
 
-**Investigation:**
-- Baseline current performance (response times, database queries)
-- Monitor resource usage as sites are added
-- Define thresholds for moving sites to single-site installs
-- Test object caching impact on multisite
-
----
+**Architectural implications:**
+- Optimization decisions should follow consistent measurement, not ad‑hoc tuning.
+- Changes that improve one site can affect others in a multisite core.
 
 ### 8.6 Staging Environment
 
@@ -680,19 +669,11 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 
 ### 8.8 Security Hardening
 
-**Current State**: Basic security (HTTPS, Cloudflare WAF, isolated certs).
+**Current State**: Security controls are split between Cloudflare edge protections and host‑level hardening. This document focuses on the architectural choices; operational steps live elsewhere.
 
-**Investigation Needed:**
-- Enable WordPress audit logging
-- Implement fail2ban for login attempts
-- Review WordPress file permissions
-- Consider moving wp-config.php outside web root
-- Enable Cloudflare Bot Fight Mode or challenge pages
-- Review database user privileges (do we need GRANT ALL?)
-
-**Benefit**: Reduced attack surface, better incident response.
-
----
+**Architectural implications:**
+- Security choices must preserve uniform edge behavior to avoid drift.
+- Host hardening and WordPress settings should remain aligned with the edge model.
 
 ### 8.9 Scaling Strategy
 
@@ -711,18 +692,10 @@ If only options are updated: site thinks it's at new domain but WordPress routes
 
 ### 8.10 WordPress Core Update Strategy
 
-**Current State**: Centralized updates affect all sites.
+**Current State**: One core update affects every site. This is efficient but increases blast radius.
 
-**Investigation Needed:**
-- Define testing procedure for core updates
-- Identify test sites to update first
-- Rollback procedure if update breaks sites
-- Communication plan for maintenance windows
-- Consider staging environment for update testing
-
-**Benefit**: Safer updates, less risk of network-wide breakage.
-
----
+**Architectural implications:**
+- A single core simplifies management but requires stronger validation and rollback practices.
 
 ## 9. References
 

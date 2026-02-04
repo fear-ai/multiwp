@@ -231,6 +231,7 @@ Stage 3: Limited write operations (future, gated)
 Stage 4: Integration hooks (future)
 - Integrate with `check-domain.sh` or `check-cf.sh` to cross-reference portal availability with zone metadata.
 
+## Open Items
 Open items for the script:
 - Confirm whether Cloudflare exposes API endpoints for MCP portals in the Access API.
 - Identify a minimal MCP handshake sequence that can be performed from shell, or select an MCP CLI tool as an optional dependency.

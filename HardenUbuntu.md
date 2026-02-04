@@ -2,12 +2,12 @@
 Date: January 16, 2026
 
 ## Introduction
-This guide defines the Ubuntu host hardening baseline for our WordPress origin servers. It focuses on operating system security, access control, patching, and logging so the host is stable before Apache, PHP, MySQL, or WordPress are configured. The emphasis is on clear, repeatable commands and verification steps so each change can be audited.
+This guide defines the Ubuntu host hardening baseline for our WordPress origin servers. It focuses on operating system security, access control, patching, and logging, and it includes Apache, PHP, and MySQL installation and baseline configuration so the host is stable before WordPress is configured. The emphasis is on clear, repeatable commands and verification steps so each change can be audited.
 
 ## Scope and ordering
 The steps below follow dependency order. Access controls and SSH come first, then firewall, then updates, then time synchronization and logging. Optional protections follow after the core baseline. Apply these steps during initial provisioning or before any major production changes.
 
-This guide assumes you started in `README.md` and then moved into `Operations.md` for the dependency chain. Operations introduces host services in section 4.1 and then expects you to complete the host baseline here before continuing to origin certificates and vhost wiring. After completing the baseline and running `check-server.sh`, return to `Operations.md` section 4.4 (`Operations.md#44-origin-certs`) and proceed in order.
+This guide assumes you started in `README.md` and then moved into `Operations.md` for the dependency chain. Operations introduces host services in section 4.1 and then expects you to complete the host baseline here before continuing to origin certificates and vhost wiring. After completing the baseline and running `check-server.sh`, return to `Operations.md` section 4.3 (`Operations.md#43-origin-certs`) and proceed in order.
 
 Validation sequence (matches `check-server.sh` output order):
 1) OS and kernel
@@ -143,6 +143,9 @@ long_query_time = 10
 
 Adjust `innodb_buffer_pool_size` to match available memory when you begin performance tuning, but keep it explicit in the file so the value is predictable across reboots. If you enable the slow query log, ensure the file path is writable by the MySQL service and use a value of `long_query_time` that matches your diagnostics window.
 
+Database inventory for WordPress:
+Record `db_name` and `db_user` in `domains.csv` so `setup-wp.sh` and `check-wp.sh` can validate database alignment without guessing. This is not a MySQL runtime setting, but it is part of the host-level baseline because the database instance is shared across sites and must be known consistently by the operational tooling.
+
 ## Cron service and schedules
 Cron provides host-level scheduling that affects WordPress maintenance, backups, and system automation. Keep the configuration file‑based so it is persistent and auditable, and use `check-server.sh` to confirm the cron service is active and enabled.
 
@@ -163,6 +166,15 @@ Use your own administrative name. The examples below use `uwadmin`:
 sudo adduser uwadmin
 sudo usermod -aG sudo uwadmin
 ```
+
+### Certificate permissions (ssl-cert group)
+The deployment user (typically `ubuntu`) must be in the `ssl-cert` group to run scripts that read origin certificates. This keeps certificate access scoped to administrative users while keeping files owned by root.
+
+```bash
+sudo usermod -aG ssl-cert ubuntu
+```
+
+After adding the group, log out and log back in, or run `newgrp ssl-cert` to activate. Verify with `groups ubuntu`.
 
 ## SSH key basics
 SSH uses a public and private key pair stored under `~/.ssh`. The private key stays on the client and is never copied to the server. The public key is installed in `authorized_keys` on the server to enable passwordless login. Keep permissions tight: `.ssh` should be 700 and `authorized_keys` should be 600.
@@ -465,6 +477,12 @@ Module usage affects attack surface and compatibility. Start by documenting what
 apache2ctl -M
 ```
 
+Enable the baseline modules required for WordPress vhosts if they are not already active:
+```bash
+sudo a2enmod rewrite ssl headers
+sudo systemctl reload apache2
+```
+
 Current stance: keep the distro-default module set for the installed Apache version. The list below documents typical requirements and possible reductions for future review, but do not disable modules unless a specific need is identified and you can validate the impact.
 
 For a WordPress + Apache + mod_php stack, the following modules are typically required or expected: `mpm_prefork`, `php`, `rewrite`, `ssl`, `headers`, `setenvif`, `reqtimeout`, `mime`, `dir`, `alias`, `deflate`, and the core authz/authn/logging modules. The items below are common candidates for removal when you want to reduce surface area, but only after confirming they are unused in your vhosts and `.htaccess`.
@@ -543,10 +561,26 @@ php -i | rg -n "memory_limit|max_execution_time|max_input_vars|post_max_size|upl
 php -i | rg -n "opcache.enable|opcache.memory_consumption|opcache.max_accelerated_files|opcache.revalidate_freq"
 ```
 
+Minimum PHP extension expectations for WordPress in this stack:
+- Core: `curl`, `mbstring`, `xml`, `zip`, `json`, `openssl`.
+- Media: `gd` or `imagick` (one is required for image processing).
+- DB: `mysqli` or `pdo_mysql`.
+- Optional: `redis` if object caching is enabled.
+
+Keep PHP configuration uniform across sites. Per-site PHP configuration is out of scope; all sites share the same runtime on the host.
+
 Security-oriented baseline (recommended):
 - `expose_php = Off` to avoid advertising PHP version.
 - `display_errors = Off` to avoid leaking details to clients.
 - `log_errors = On` so runtime errors are captured in logs.
+
+### PHP tuning policy
+PHP tuning must be evidence-based and coordinated with Apache worker limits. Each Apache prefork worker is a full PHP process, so PHP memory limits and OPcache sizing directly affect how many concurrent requests the host can tolerate. Keep the tuning loop in `Perf.md` and apply changes only after collecting baseline telemetry.
+
+Tune and validate in this order:
+1) Confirm OPcache is enabled and sized for your plugin/theme footprint.
+2) Review PHP memory and execution limits (`memory_limit`, `max_execution_time`, `max_input_time`, `max_input_vars`, `post_max_size`, `upload_max_filesize`).
+3) Re-run `perf-load.sh` with telemetry to verify CPU and memory behavior.
 
 OPcache must be enabled for performance. Use `Perf.md` for sizing guidance and tuning workflow; do not tune in isolation from Apache worker limits.
 

@@ -23,12 +23,13 @@ CACHE_BUST_PARAM="cache_bust"
 CACHE_MODE="both"
 INTERVAL=1
 MYSQL_INTERVAL="${MYSQL_INTERVAL:-5}"
+VMSTAT_INTERVAL="${VMSTAT_INTERVAL:-5}"
 LOG_PAD_SEC="${LOG_PAD_SEC:-5}"
 MODE="init"
 TELEMETRY_DEFAULT="sar"
 TELEMETRY_LIST="$TELEMETRY_DEFAULT"
 TELEMETRY_SELECTED=()
-TELEMETRY_ORDER=(sar pidstat vmstat iostat cgtop mysql)
+TELEMETRY_ORDER=(sar pidstat vmstat cgtop mysql)
 declare -A TELEMETRY_KIND=(
     [sar]=cmd
     [pidstat]=cmd
@@ -61,7 +62,7 @@ declare -A TELEMETRY_SUFFIX=(
 )
 TELEMETRY_CMD_SAR=(sar -u -r -n DEV -q)
 TELEMETRY_CMD_PIDSTAT=(pidstat -ru -C 'apache2|mysqld|wrk')
-TELEMETRY_CMD_VMSTAT=(vmstat)
+TELEMETRY_CMD_VMSTAT=(vmstat -n)
 TELEMETRY_CMD_IOSTAT=(iostat -xz)
 TELEMETRY_CMD_CGTOP=(/usr/bin/systemd-cgtop -b -d)
 USE_SAR=false
@@ -80,18 +81,20 @@ SET_MYSQL_INTERVAL=false
 HEAD_MODE="false"
 REPORT_MODE="true"
 ERR_MODE="false"
+SLICE_MODE="false"
 ALLOW_ROOT=false
 
 usage() {
     cat <<'EOF'
-perf-load.sh - Run init or load tests with optional telemetry collection.
+perf-load.sh - Run init, load, or telemetry-only checks with optional telemetry collection.
 Example: perf-load.sh --load --domain zero.directory
 
 Options:
   --domain NAME  Domain to test (repeatable; positional also accepted)
   --init  Run init-mode tests (default)
   --load  Run load-mode tests
-  --duration DURATION  wrk duration per run (default: 20s init and load)
+  --none  Run telemetry and optional HEAD requests only (no wrk2)
+  --duration DURATION  Duration per run (wrk duration for init/load; telemetry window for --none)
   --threads N  wrk threads (default: 1 init, 2 load)
   --connections N  wrk connections (default: 1 init, 4 load)
   --rate N  wrk2 fixed request rate N req/sec (default: 10 init, 20 load)
@@ -106,10 +109,11 @@ Options:
   --report  Emit summary metrics after each wrk run (default)
   --no-report  Disable summary metrics output
   --err  Write stderr for wrk, curl, and telemetry tools to .err files
+  --slice  Run slice-logs.sh after each domain run (writes *_logs.txt and log slices)
   --help  Show this help
 
 Notes:
-  - wrk2 is always used; a rate is always applied (default per mode).
+  - wrk2 is used for init/load modes only; --none skips wrk2 entirely.
   - Telemetry defaults to sar; override with --telemetry=none or a comma list.
   - When running through an external command runner, use a timeout of at least 60 seconds.
   - Output files include the domain and run ID for easy correlation.
@@ -123,16 +127,23 @@ while getopts ":-:" opt; do
                 help) usage; exit 0 ;;
                 init)
                     if $MODE_SET && [ "$MODE" != "init" ]; then
-                        err "--init and --load are mutually exclusive"
+                        err "--init, --load, and --none are mutually exclusive"
                     fi
                     MODE="init"
                     MODE_SET=true
                     ;;
                 load)
                     if $MODE_SET && [ "$MODE" != "load" ]; then
-                        err "--init and --load are mutually exclusive"
+                        err "--init, --load, and --none are mutually exclusive"
                     fi
                     MODE="load"
+                    MODE_SET=true
+                    ;;
+                none)
+                    if $MODE_SET && [ "$MODE" != "none" ]; then
+                        err "--init, --load, and --none are mutually exclusive"
+                    fi
+                    MODE="none"
                     MODE_SET=true
                     ;;
                 duration=*)
@@ -225,6 +236,7 @@ while getopts ":-:" opt; do
                 report) REPORT_MODE="true" ;;
                 no-report) REPORT_MODE="false" ;;
                 err) ERR_MODE="true" ;;
+                slice) SLICE_MODE="true" ;;
                 no-telemetry|telemetry-full|pidstat)
                     err "--${OPTARG} removed; use --telemetry=none or --telemetry=all"
                     ;;
@@ -259,11 +271,16 @@ if [ "$MODE" = "init" ]; then
     $SET_THREADS || THREADS=1
     $SET_CONNECTIONS || CONNECTIONS=1
     $SET_RATE || RATE=10
-else
+elif [ "$MODE" = "load" ]; then
     $SET_DURATION || DURATION="20s"
     $SET_THREADS || THREADS=2
     $SET_CONNECTIONS || CONNECTIONS=4
     $SET_RATE || RATE=20
+else
+    $SET_DURATION || DURATION="20s"
+    $SET_THREADS || THREADS="na"
+    $SET_CONNECTIONS || CONNECTIONS="na"
+    $SET_RATE || RATE="na"
 fi
 
 WRK_BIN="${WRK_BIN:-}"
@@ -273,6 +290,10 @@ if [ -z "$WRK_BIN" ]; then
     else
         WRK_BIN="wrk2"
     fi
+fi
+LOAD_TOOL="$WRK_BIN"
+if [ "$MODE" = "none" ]; then
+    LOAD_TOOL="none"
 fi
 
 telemetry_has() {
@@ -301,7 +322,14 @@ telemetry_cmd_for() {
     local name="${TELEMETRY_CMD_MAP[$tool]-}"
     [ -n "$name" ] || return 1
     local -n base="$name"
-    out=("${base[@]}" "$INTERVAL")
+    case "$tool" in
+        vmstat)
+            out=("bash" "-c" "vmstat -n $VMSTAT_INTERVAL | tail -n +3")
+            ;;
+        *)
+            out=("${base[@]}" "$INTERVAL")
+            ;;
+    esac
 }
 
 telemetry_cmd_string() {
@@ -397,7 +425,9 @@ parse_telemetry_list() {
 
 parse_telemetry_list "$TELEMETRY_LIST"
 
-require_cmds "$WRK_BIN"
+if [ "$MODE" != "none" ]; then
+    require_cmds "$WRK_BIN"
+fi
 for item in "${TELEMETRY_SELECTED[@]}"; do
     req="${TELEMETRY_REQ[$item]-}"
     if [ -n "$req" ]; then
@@ -429,8 +459,8 @@ kv "MODE" "$MODE"
 kv "DURATION" "$DURATION"
 kv "THREADS" "$THREADS"
 kv "CONNECTIONS" "$CONNECTIONS"
-kv "RATE" "${RATE:-na}"
-kv "WRK_BIN" "$WRK_BIN"
+    kv "RATE" "${RATE:-na}"
+    kv "WRK_BIN" "$WRK_BIN"
 kv "CACHE" "$CACHE_MODE"
 kv "INTERVAL" "$INTERVAL"
 kv "MYSQL_INTERVAL" "$MYSQL_INTERVAL"
@@ -525,9 +555,19 @@ start_mysql_perf() {
         return 0
     fi
     (
+        local fail_count=0
+        local max_fail=3
         while true; do
             sleep "$MYSQL_INTERVAL"
-            mysql_perf_sample "$file" "$err_file" || break
+            if mysql_perf_sample "$file" "$err_file"; then
+                fail_count=0
+            else
+                fail_count=$((fail_count + 1))
+                if [ "$fail_count" -ge "$max_fail" ]; then
+                    warn "MySQL perf sampling failed ${fail_count} times; stopping mysql-perf log"
+                    break
+                fi
+            fi
         done
     ) &
     MYSQL_PERF_PID=$!
@@ -548,7 +588,6 @@ summarize_wrk() {
     local req_per_sec
     local total_requests
     local non_2xx
-    local not_200_pct
 
     if [ ! -s "$file" ]; then
         warn "Missing or empty wrk output for ${domain} (${cache}): $file"
@@ -579,12 +618,6 @@ summarize_wrk() {
         latency_max="na"
     fi
 
-    if [ -n "$total_requests" ] && [ "$total_requests" -gt 0 ] 2>/dev/null; then
-        not_200_pct=$(awk -v n="$non_2xx" -v t="$total_requests" 'BEGIN {printf "%.2f", (n / t) * 100}')
-    else
-        not_200_pct="na"
-    fi
-
     if [ "$REPORT_MODE" = "true" ]; then
         report_section "PERF" "Summary"
         report_kv "DOMAIN" "$domain"
@@ -592,7 +625,8 @@ summarize_wrk() {
         report_kv "REQ_PER_SEC" "${req_per_sec:-na}"
         report_kv "LATENCY_AVG" "${latency_avg:-na}"
         report_kv "LATENCY_MAX" "${latency_max:-na}"
-        report_kv "NOT_200_PCT" "$not_200_pct"
+        report_kv "TOTAL_REQUESTS" "${total_requests:-na}"
+        report_kv "NON_200" "${non_2xx:-0}"
     fi
 }
 
@@ -1132,54 +1166,59 @@ for domain in "${DOMAINS[@]}"; do
         fi
     fi
 
-    wrk_cmd_cached=("$WRK_BIN" -t"$THREADS" -c"$CONNECTIONS" -d"$DURATION" -R"$RATE")
-    wrk_cmd_bust=("$WRK_BIN" -t"$THREADS" -c"$CONNECTIONS" -d"$DURATION" -R"$RATE")
+    if [ "$MODE" = "none" ]; then
+        sleep "$DURATION"
+    else
+        wrk_cmd_cached=("$WRK_BIN" -t"$THREADS" -c"$CONNECTIONS" -d"$DURATION" -R"$RATE")
+        wrk_cmd_bust=("$WRK_BIN" -t"$THREADS" -c"$CONNECTIONS" -d"$DURATION" -R"$RATE")
 
-    if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "cached" ]; then
-        LOAD_CMD="$(cmd_join "${wrk_cmd_cached[@]}" "$base_url")"
-        set +e
-        if $ERR_MODE; then
-            run_cmd "wrk:cached" "both" "$OUT_DIR/${prefix}_wrk.txt" "$OUT_DIR/${prefix}_wrk.err" -- "${wrk_cmd_cached[@]}" "$base_url"
-        else
-            run_cmd "wrk:cached" "out" "$OUT_DIR/${prefix}_wrk.txt" -- "${wrk_cmd_cached[@]}" "$base_url"
-        fi
-        wrk_status=$?
-        set -e
-        if [ -z "$LOAD_EXIT" ] || [ "$LOAD_EXIT" -eq 0 ] 2>/dev/null; then
-            LOAD_EXIT="$wrk_status"
-        fi
-        check_expected_file "$OUT_DIR/${prefix}_wrk.txt" "wrk output (cached)"
-        summarize_wrk "$domain" "cached" "$OUT_DIR/${prefix}_wrk.txt"
-        if [ "$REPORT_MODE" = "true" ]; then
-            if $USE_PIDSTAT; then
-                summarize_pidstat "$domain" "cached" "$OUT_DIR/${prefix}_pidstat.log"
+        if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "cached" ]; then
+            LOAD_CMD="$(cmd_join "${wrk_cmd_cached[@]}" "$base_url")"
+            set +e
+            if $ERR_MODE; then
+                run_cmd "wrk:cached" "both" "$OUT_DIR/${prefix}_wrk.txt" "$OUT_DIR/${prefix}_wrk.err" -- "${wrk_cmd_cached[@]}" "$base_url"
+            else
+                run_cmd "wrk:cached" "out" "$OUT_DIR/${prefix}_wrk.txt" -- "${wrk_cmd_cached[@]}" "$base_url"
             fi
-            if $USE_SAR; then
-                summarize_sar "$domain" "cached" "$OUT_DIR/${prefix}_sar.log"
+            wrk_status=$?
+            set -e
+            if [ -z "$LOAD_EXIT" ] || [ "$LOAD_EXIT" -eq 0 ] 2>/dev/null; then
+                LOAD_EXIT="$wrk_status"
+            fi
+            check_expected_file "$OUT_DIR/${prefix}_wrk.txt" "wrk output (cached)"
+            summarize_wrk "$domain" "cached" "$OUT_DIR/${prefix}_wrk.txt"
+            if [ "$REPORT_MODE" = "true" ]; then
+                if $USE_PIDSTAT; then
+                    summarize_pidstat "$domain" "cached" "$OUT_DIR/${prefix}_pidstat.log"
+                fi
+                if $USE_SAR; then
+                    summarize_sar "$domain" "cached" "$OUT_DIR/${prefix}_sar.log"
+                fi
             fi
         fi
-    fi
-    if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "bust" ]; then
-        LOAD_BUST_CMD="$(cmd_join "${wrk_cmd_bust[@]}" "$bust_url")"
-        set +e
-        if $ERR_MODE; then
-            run_cmd "wrk:bust" "both" "$OUT_DIR/${prefix}_wrk_bust.txt" "$OUT_DIR/${prefix}_wrk_bust.err" -- "${wrk_cmd_bust[@]}" "$bust_url"
-        else
-            run_cmd "wrk:bust" "out" "$OUT_DIR/${prefix}_wrk_bust.txt" -- "${wrk_cmd_bust[@]}" "$bust_url"
-        fi
-        wrk_status=$?
-        set -e
-        if [ -z "$LOAD_EXIT" ] || [ "$LOAD_EXIT" -eq 0 ] 2>/dev/null; then
-            LOAD_EXIT="$wrk_status"
-        fi
-        check_expected_file "$OUT_DIR/${prefix}_wrk_bust.txt" "wrk output (bust)"
-        summarize_wrk "$domain" "bust" "$OUT_DIR/${prefix}_wrk_bust.txt"
-        if [ "$REPORT_MODE" = "true" ]; then
-            if $USE_PIDSTAT; then
-                summarize_pidstat "$domain" "bust" "$OUT_DIR/${prefix}_pidstat.log"
+
+        if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "bust" ]; then
+            LOAD_BUST_CMD="$(cmd_join "${wrk_cmd_bust[@]}" "$bust_url")"
+            set +e
+            if $ERR_MODE; then
+                run_cmd "wrk:bust" "both" "$OUT_DIR/${prefix}_wrk_bust.txt" "$OUT_DIR/${prefix}_wrk_bust.err" -- "${wrk_cmd_bust[@]}" "$bust_url"
+            else
+                run_cmd "wrk:bust" "out" "$OUT_DIR/${prefix}_wrk_bust.txt" -- "${wrk_cmd_bust[@]}" "$bust_url"
             fi
-            if $USE_SAR; then
-                summarize_sar "$domain" "bust" "$OUT_DIR/${prefix}_sar.log"
+            wrk_status=$?
+            set -e
+            if [ -z "$LOAD_EXIT" ] || [ "$LOAD_EXIT" -eq 0 ] 2>/dev/null; then
+                LOAD_EXIT="$wrk_status"
+            fi
+            check_expected_file "$OUT_DIR/${prefix}_wrk_bust.txt" "wrk output (bust)"
+            summarize_wrk "$domain" "bust" "$OUT_DIR/${prefix}_wrk_bust.txt"
+            if [ "$REPORT_MODE" = "true" ]; then
+                if $USE_PIDSTAT; then
+                    summarize_pidstat "$domain" "bust" "$OUT_DIR/${prefix}_pidstat.log"
+                fi
+                if $USE_SAR; then
+                    summarize_sar "$domain" "bust" "$OUT_DIR/${prefix}_sar.log"
+                fi
             fi
         fi
     fi
@@ -1191,15 +1230,28 @@ for domain in "${DOMAINS[@]}"; do
             check_expected_file "$MYSQL_PERF_LOG" "mysql perf log"
         fi
     fi
+    if [ "$REPORT_MODE" = "true" ] && [ "$MODE" = "none" ]; then
+        if $USE_PIDSTAT; then
+            summarize_pidstat "$domain" "none" "$OUT_DIR/${prefix}_pidstat.log"
+        fi
+        if $USE_SAR; then
+            summarize_sar "$domain" "none" "$OUT_DIR/${prefix}_sar.log"
+        fi
+    fi
 
     DOMAIN_END_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     DOMAIN_END_LOCAL=$(date +%Y-%m-%dT%H:%M:%S)
+    RUN_PARAM="$OUT_DIR/${prefix}_run.param"
     {
         echo "HOSTNAME: $HOSTNAME_VAL"
         echo "ORIGIN_IPV4: $ORIGIN_IPV4_VAL"
         echo "RUN_ID: $RUN_ID"
         echo "RUN_DIR: $OUT_DIR"
-        echo "KIND: load"
+        if [ "$MODE" = "none" ]; then
+            echo "KIND: idle"
+        else
+            echo "KIND: load"
+        fi
         echo "DOMAIN: $domain"
         echo "MODE: $MODE"
         echo "CACHE_MODE: $CACHE_MODE"
@@ -1223,7 +1275,7 @@ for domain in "${DOMAINS[@]}"; do
         echo "THREADS: $THREADS"
         echo "CONNECTIONS: $CONNECTIONS"
         echo "DURATION: $DURATION"
-        echo "LOAD_TOOL: $WRK_BIN"
+        echo "LOAD_TOOL: $LOAD_TOOL"
         if [ -n "$LOAD_CMD" ]; then
             echo "LOAD_CMD: $LOAD_CMD"
         fi
@@ -1249,6 +1301,7 @@ for domain in "${DOMAINS[@]}"; do
         fi
         if $USE_VMSTAT; then
             echo "VMSTAT_CMD: $VMSTAT_CMD"
+            echo "VMSTAT_INTERVAL_SEC: $VMSTAT_INTERVAL"
         fi
         if $USE_IOSTAT; then
             echo "IOSTAT_CMD: $IOSTAT_CMD"
@@ -1264,7 +1317,17 @@ for domain in "${DOMAINS[@]}"; do
             echo "MYSQL_PERF_CMD: mysql -N -e SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_data'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_reads'; SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_read_requests'; SHOW GLOBAL STATUS LIKE 'Questions'; SHOW VARIABLES LIKE 'innodb_buffer_pool_size'; SHOW VARIABLES LIKE 'innodb_page_size';"
             echo "MYSQL_PERF_INTERVAL_SEC: $MYSQL_INTERVAL"
         fi
-    } > "$OUT_DIR/${prefix}_run.param"
+    } > "$RUN_PARAM"
+
+    if [ "$SLICE_MODE" = "true" ]; then
+        if [ -x "$SCRIPTS_DIR/slice-logs.sh" ]; then
+            if ! "$SCRIPTS_DIR/slice-logs.sh" --run-param "$RUN_PARAM"; then
+                warn "slice-logs failed for ${domain}"
+            fi
+        else
+            warn "slice-logs.sh not found; skipping slice for ${domain}"
+        fi
+    fi
 done
 
 status_pass "run=ok"

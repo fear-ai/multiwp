@@ -213,6 +213,7 @@ export_rules() {
               expression: .expression,
               description: .description,
               enabled: .enabled,
+              ratelimit: .ratelimit,
               action_parameters: .action_parameters,
               logging: .logging
             } | with_entries(select(.value != null)))

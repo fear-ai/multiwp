@@ -336,7 +336,8 @@ mysql -N -e "SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total'; SHOW GLOB
 mysql -N -e "SELECT table_schema AS db, ROUND(SUM(data_length + index_length) / 1024 / 1024, 1) AS size_mb FROM information_schema.tables GROUP BY table_schema ORDER BY size_mb DESC;" > "${OUT_DIR}/mysql_db_sizes.txt"
 ```
 
-TODO: decide how we reconcile runtime values (SHOW VARIABLES/STATUS) with the persistent config file values in `/etc/mysql/mysql.conf.d/mysqld.cnf`, and where to report mismatches when they appear.
+#### MySQL runtime vs config reconciliation
+Decide how to reconcile runtime values (SHOW VARIABLES/STATUS) with the persistent config file values in `/etc/mysql/mysql.conf.d/mysqld.cnf`, and where to report mismatches when they appear.
 
 #### MySQL runtime metrics log
 For performance runs, capture a lightweight, timestamped MySQL metrics log so each perf directory is self-contained. This avoids reliance on external logs or log rotation while still showing how MySQL behaved during the run.
@@ -1059,6 +1060,33 @@ These are not required for the current stack but remain valid upgrade paths:
 - Optional microcache at the origin for short-lived anonymous caching. If added, keep TTL in the 1–5 second range, bypass on authenticated cookies and admin paths, and ensure purge hooks fire on publish.
 - Stale-while-revalidate at the edge or origin once purge behavior is proven and you want brief resilience during origin blips.
 - Cache key normalization when query strings drive the cache-bust behavior for specific templates.
+
+#### Database Isolation & Security (Future)
+**Current State**: All sites share wordpress_multisite database. No row-level or table-level isolation.
+
+**Questions:**
+- Can we use separate databases per site while keeping multisite benefits?
+- Would HyperDB or LudicrousDB provide better isolation?
+- What's the performance impact of per-site databases?
+- How would backups/restores change?
+
+**Benefit**: Better tenant isolation, easier per-site restoration, clearer blast radius.
+
+**Tradeoff**: More complex, may lose some multisite benefits, higher resource usage.
+
+#### Performance Optimization (Future)
+**Questions:**
+- Is database becoming bottleneck as site count grows?
+- Should high-traffic sites move to dedicated installs?
+- Would Redis/Memcached object caching help?
+- Are Cloudflare Cache and Redirect Rules optimally configured?
+- Should we implement rate limiting per site?
+
+**Investigation:**
+- Baseline current performance (response times, database queries)
+- Monitor resource usage as sites are added
+- Define thresholds for moving sites to single-site installs
+- Test object caching impact on multisite
 
 ### Alternatives and tooling (CLI-only focus)
 Our environment is remote and CLI-only, so prioritize tools that run from the shell without long-lived services.

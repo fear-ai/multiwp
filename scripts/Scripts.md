@@ -43,7 +43,7 @@ When outputting key/value pairs, use `DOMAIN` for the apex domain, `ZONE` for th
 Inputs and outputs live in a few focused places so updates stay consistent:
 
 - **Command-line interfaces**: `scripts/Scripts.md` (this document) plus each script’s `usage()` output. `scripts/Options.csv` cross-references options by script.
-- **Domain inventory (`domains.csv`)**: The header row in `domains.csv` is the schema, and `Record.md` is the authoritative policy for values and status transitions. `Plan.md` captures the design rationale for the schema and any planned expansions.
+- **Domain inventory (`domains.csv`)**: The header row in `domains.csv` is the schema, and `Record.md` is the authoritative policy for values and status transitions.
 - **Cloudflare auth files (`.auth`)**: `scripts/example.auth` is the reference format; `scripts/Scripts.md` documents expected variables, defaults, and precedence rules.
 - **Script output formats**: `scripts/Scripts.md` documents the unified output conventions for new and updated scripts. `scripts/Shell.md` documents the underlying log/error helpers.
 
@@ -140,6 +140,7 @@ Tables below list the **complete** set of `SECTION` values and expected `Topic` 
 | `MCP` | `mcp.sh`, `mcp-cf.sh` | `Server`, `Request`, `Response` |
 | `INIT` | `perf-load.sh` | `Run`, `Domain` |
 | `LOAD` | `perf-load.sh` | `Run`, `Domain` |
+| `NONE` | `perf-load.sh` | `Run`, `Domain` |
 | `TEST` | `test_common.sh`, `test_cli.sh`, `test_cmd.sh`, `test_cf.sh`, `test_mcp.sh` | `Setup`, `Cases`, `Results` |
 
 #### Script-to-section mapping
@@ -171,7 +172,7 @@ Use this mapping when implementing or refactoring output so every script emits t
 | `check-domain.sh` | `ORCH` | `Selection`, `Run`, `Results` |
 | `mcp.sh` | `MCP` | `Server`, `Request`, `Response` |
 | `mcp-cf.sh` | `MCP` | `Server`, `Request`, `Response` |
-| `perf-load.sh` | `INIT`, `LOAD` | `Run`, `Domain` |
+| `perf-load.sh` | `INIT`, `LOAD`, `NONE` | `Run`, `Domain` |
 | `test_common.sh` | `TEST` | `Setup`, `Cases`, `Results` |
 | `test_cli.sh` | `TEST` | `Setup`, `Cases`, `Results` |
 | `test_cmd.sh` | `TEST` | `Setup`, `Cases`, `Results` |
@@ -1067,13 +1068,13 @@ Notes:
 #### perf-load.sh (verification/investigation)
 
 Purpose:
-- Runs init or sustained load checks with `wrk2` and an explicit rate (default per mode), with optional telemetry collection for CPU, memory, IO, and network.
+- Runs init or sustained load checks with `wrk2` and an explicit rate (default per mode), or runs telemetry-only checks with `--none`, with optional telemetry collection for CPU, memory, IO, and network.
 
 Arguments:
 - One or more domain names, provided positionally or via `--domain` (repeatable).
 
 Options (script-specific):
- - `--init` or `--load`
+ - `--init`, `--load`, or `--none`
  - `--domain NAME`
  - `--duration DURATION`
  - `--threads N`
@@ -1090,6 +1091,7 @@ Options (script-specific):
  - `--report`
  - `--no-report`
  - `--err`
+ - `--slice`
 
 Common arguments: --help.
 
@@ -1105,11 +1107,13 @@ Notes:
 - When `--head` is supplied, cached headers are saved as `${prefix}_head.txt` and cache-busted headers as `${prefix}_head_bust.txt`.
 - `--cache` controls whether cached, cache-busted, or both runs are executed (`both`, `cached`, `bust`).
 - `--telemetry` accepts `sar`, `pidstat`, `vmstat`, `iostat`, `cgtop`, `mysql`, `all`, or `none`, and it accepts comma lists (for example, `sar,pidstat`).
-- `wrk2` is always used and always receives `-R <rate>`, either from `--rate` or from mode defaults.
+- `wrk2` is used for init/load modes only and always receives `-R <rate>`, either from `--rate` or from mode defaults. `--none` skips `wrk2` and uses `--duration` as the telemetry window.
+- When `--none` is used with `--report`, the report contains telemetry summaries (sar/pidstat) with `CACHE=none`.
 - When running `perf-load.sh` through an external command runner, use a timeout of at least 60 seconds.
 - Telemetry writes logs alongside `wrk` or `wrk2` output in the run directory. Command dependencies vary by telemetry scope.
-- `--report` (default) emits a per-run summary of `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, and `NOT_200_PCT`. Use `--no-report` to suppress it.
+- `--report` (default) emits a per-run summary of `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, `TOTAL_REQUESTS`, and `NON_200`. Use `--no-report` to suppress it.
 - `--err` writes stderr for `wrk2`, `curl`, and telemetry tools to per-run `.err` files alongside the `.txt` and `.log` outputs.
+- `--slice` runs `slice-logs.sh` after each domain run using the generated `run.param` file.
 - When telemetry includes `sar`, `--report` emits `CPU_TOTAL_PCT_MAX`, `CPU_BUSY_CORES_MAX`, and `LOAD_1_MAX`. If telemetry includes `sar` plus any other tool, it also emits `MEM_AVAIL_MB_MIN`, `MEM_AVAIL_MB_AVG`, `MEM_USED_PCT_MAX`, `MEM_USED_PCT_AVG`, `CPU_USER_PCT_MAX`, `CPU_SYSTEM_PCT_MAX`, `CPU_IOWAIT_PCT_MAX`, `CPU_STEAL_PCT_MAX`, `CPU_TOTAL_BIN5_AVG`, `CPU_TOTAL_TREND`, and `LOAD_1_AVG`. When telemetry includes `pidstat`, `--report` emits `APACHE_CPU_SUM_AVG`, `APACHE_CPU_SUM_MAX`, `APACHE_CPU_SAMPLES`, `APACHE_CPU_SUM_BIN5_AVG`, and `APACHE_CPU_SUM_TREND`.
 - When telemetry includes `mysql`, the run also writes `${prefix}_mysql-perf.log` using the MySQL sampling interval (default 5 seconds, override with `--mysql-interval`).
 
@@ -1123,6 +1127,8 @@ Arguments:
 
 Options (script-specific):
  - `--run-param PATH`
+ - `--duration WINDOW`
+ - `--domain NAME`
  - `--out-dir DIR`
  - `--pad SEC`
  - `--report`
@@ -1137,13 +1143,16 @@ Notes:
 - Reads `run.param` in `KEY: value` format and writes sliced logs using the same prefix.
 - Apache log selection is best-effort and warns if a matching file is not found.
 - Uses `sudo` for log reads if the file is not readable by the current user.
-- When report output is enabled (default), the summary log is written to `${prefix}_logs.txt` and a compatibility copy to `${prefix}_slice.log`. Use `--no-report` to suppress these.
+- If a `${domain}_admin_access.log` slice is present, the summary includes `ADMIN_*` timing values derived from the `%D` microsecond field; missing admin logs are reported as info and do not fail the run.
+- When report output is enabled (default), the summary log is written to `${prefix}_logs.txt`. Use `--no-report` to suppress it.
 - When a `${prefix}_report.txt` and Apache access slice exist, the script appends
   summary rows to `perf_runs.csv` and `perf_segments.csv` in the output directory.
+- When `--duration WINDOW` is used (with `--domain NAME`), the script slices logs from the current UTC time back `WINDOW` and does not require a run.param file. The default unit is minutes; add `s`, `m`, `h`, or `d` for explicit units.
+- When slicing by duration, the script warns if the window starts before the first timestamp found in a log file.
 
 ## Option Cross-Reference (Alphabetical)
 
-This cross-reference lists options alphabetically and the scripts that implement them. CSV files are exports for future processing; this list is the human-readable view.
+This cross-reference lists options alphabetically and the scripts that implement them. CSV files are exports for future processing; this list is the human-readable view. Any future option registry or CSV automation work belongs in this document as an implementation detail.
 
 - -e,check-cf.sh
 - -s,check-cf.sh
@@ -1173,11 +1182,11 @@ This cross-reference lists options alphabetically and the scripts that implement
 - --date,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 - --dest,rules-cf.sh
 - --dns-provider,onboard-zone.sh
-- --domain,back-wp.sh;apache-vhost.sh;check-edge.sh;check-origin.sh;check-verify.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;onboard-zone.sh;perf-load.sh;test-record.sh;check-domain.sh
+- --domain,back-wp.sh;apache-vhost.sh;check-edge.sh;check-origin.sh;check-verify.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;onboard-zone.sh;perf-load.sh;slice-logs.sh;test-record.sh;check-domain.sh
 - --domains-file,check-auth.sh;check-verify.sh;cloud-redirect.sh;cloud-settings.sh;onboard-zone.sh;test-record.sh
 - --downgrade,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 - --dry-run,cloud-redirect.sh;cloud-settings.sh
-- --duration,perf-load.sh
+- --duration,perf-load.sh;slice-logs.sh
 - --email,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
 - --err,perf-load.sh
 - --file,rules-cf.sh
@@ -1301,8 +1310,8 @@ This keeps refactors bounded, improves reviewability, and makes it easier to rea
 
 The items below capture small, implementation-focused follow-ups that keep helper behavior and option parsing consistent as the script surface grows.
 
-- Helper predicates: document the shared `cf_has_env`/`cf_has_all` pattern used by `cf_has_*` helpers so future additions follow the same empty-vs-unset semantics and avoid divergent checks.
+- Helper predicates: `cf_has_env` and `cf_has_all` (in `auth.sh`) form the shared pattern for credential checks. `cf_has_env` treats unset and empty as absent, while `cf_has_all` requires every variable in the list to be present and non-empty. Intended usage: gate Cloudflare API calls and auth selection on presence checks (token/key/CA key), and validate required IDs (account/zone) before API requests. These helpers do not validate formats or resolve values; they only confirm presence. All `cf_has_*` helpers should delegate to these two functions so empty-vs-unset semantics stay consistent, and new helpers should follow the same pattern rather than re-implementing checks.
 - Enum parsing: evaluate whether option values with limited sets (for example `--site-type`, `singlesite|multisite|autosite`, or `api|manual|auto`) should accept environment equivalents with explicit enum validation, and if so, keep CLI/env/auth error messaging aligned.
-- Origin cert auth policy: revisit whether `get-cert.sh` should prefer the global API key for Origin CA issuance, with `CF_CA_KEY` as a fallback, and document the rationale and any security tradeoffs before changing the default.
-- Review `test-record.sh` uses and `check-domain.sh` overlap to decide whether to consolidate or keep distinct.
-- UFW allowlist verification: revisit how `check-server.sh` should validate Cloudflare allowlists (marker comment vs. CIDR match) once UFW workflow is finalized.
+- Origin cert auth policy: `CF_CA_KEY` is required for Origin CA issuance and does not overlap with the global API key. The policy is to keep CA key usage scoped to Origin CA endpoints, and not to treat the global key as a substitute for CA key. Token vs key selection for non-Origin-CA API calls is documented elsewhere; do not conflate that with CA key usage.
+- Review `test-record.sh` uses and `check-domain.sh` overlap to decide whether to consolidate or keep distinct (postponed).
+- UFW allowlist verification: decide whether `check-server.sh` should validate by marker comment, by CIDR content, or by both, once the UFW workflow and template placement are finalized (postponed).

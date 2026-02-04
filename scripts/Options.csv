@@ -27,11 +27,11 @@ Option,Scripts
 --date,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 --dest,rules-cf.sh
 --dns-provider,onboard-zone.sh
---domain,back-wp.sh;apache-vhost.sh;check-edge.sh;check-origin.sh;check-verify.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;onboard-zone.sh;perf-load.sh;test-record.sh;check-domain.sh
+--domain,back-wp.sh;apache-vhost.sh;check-edge.sh;check-origin.sh;check-verify.sh;check-wp.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;onboard-zone.sh;perf-load.sh;slice-logs.sh;test-record.sh;check-domain.sh
 --domains-file,check-auth.sh;check-verify.sh;cloud-redirect.sh;cloud-settings.sh;onboard-zone.sh;test-record.sh
 --downgrade,cloud-redirect.sh;onboard-zone.sh;test-record.sh
 --dry-run,cloud-redirect.sh;cloud-settings.sh
---duration,perf-load.sh
+--duration,perf-load.sh;slice-logs.sh
 --err,perf-load.sh
 --email,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
 --file,rules-cf.sh
@@ -48,6 +48,7 @@ Option,Scripts
 --ip,onboard-zone.sh
 --key,check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test-record.sh;verify-cf-auth.sh
 --load,perf-load.sh
+--none,perf-load.sh
 --managed-add-security-headers,cloud-settings.sh
 --manual,get-cert.sh
 --min-tls-version,cloud-settings.sh
@@ -66,6 +67,7 @@ Option,Scripts
 --raw,check-cf.sh
 --rate,perf-load.sh
 --report,perf-load.sh;slice-logs.sh
+--slice,perf-load.sh
 --redirect-url,cloud-redirect.sh;onboard-zone.sh
 --registrar,onboard-zone.sh
 --run-id,back-wp.sh;perf-load.sh

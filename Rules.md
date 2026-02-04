@@ -35,7 +35,7 @@ The get operation should follow a simple, auditable path:
 
 If the phase has no rules, or if only disabled rules exist and `--all` is not set, the script exits with a clear error so exports cannot silently produce empty files.
 
-The portable payload should contain only a rules list and optional metadata that helps with human review, such as name or description. The file may retain a `phase` field when present in the source ruleset so put can use it directly; if no phase is present, put defaults to the phase associated with `--type`.
+The portable payload should contain only a rules list and optional metadata that helps with human review, such as name or description. When the source includes a `ratelimit` object (for `http_ratelimit` rules), it must be preserved in the export so the API accepts the rule on put. The file may retain a `phase` field when present in the source ruleset so put can use it directly; if no phase is present, put defaults to the phase associated with `--type`.
 
 ## Put workflow
 Put is explicit and opt-in. The script should never modify a zone unless `--put` is provided and one or more `--dest` values are specified.

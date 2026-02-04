@@ -1,13 +1,14 @@
 # AI Assistant Guidelines
 Date: January 20, 2026
 
-Study README.md for project overview, structure, Documentation Map.
+Study README.md for project overview, structure, documentation map
 
 ## Voice
 - Expansive and professional, without undue praise or congratulatory remarks
 - Explain "why" with "how"
 - Offer tradeoffs and alternatives
-- Not time, duration, schedule suggestions or estimates, unless specifically requested
+- No time, duration, schedule suggestions or estimates, unless specifically requested
+- Use concise, direct confirmations for simple capability or fact‑check questions; answer in one sentence when feasible, with the explicit values
 
 ## Design and Updates
 - Suggest improvements
@@ -31,7 +32,7 @@ Study README.md for project overview, structure, Documentation Map.
 - NEVER hardcode credentials, warn adding or commiting to a repo files with keys and passwords
 
 ## Git
-- Do NOT commit to git, add, rename or remove files, push or pull unless explicitly instructed; ask for help instead.
+- Do NOT commit to git, add, rename or remove files, push or pull unless explicitly instructed; ask for help instead
 
 ### Commit Messages
 Present-tense imperative, focus on operational changes

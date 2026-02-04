@@ -8,7 +8,7 @@ The purpose of recording is to keep the domain inventory (`domains.csv`) aligned
 This design depends on the following sources, which define the underlying interfaces and data structures:
 
 - `scripts/Scripts.md` defines the authoritative options and behaviors of `onboard-zone.sh`, `cloud-redirect.sh`, and `test-record.sh`.
-- `Plan.md` and the `domains.csv` header define the inventory schema and the meaning of `status_cf`, `status_origin`, and `status_wp` values.
+- The `domains.csv` header defines the inventory schema, and this document defines the meaning of `status_cf`, `status_origin`, and `status_wp` values.
 - `scripts/Shell.md` defines the helper conventions used by `csv_put_fields` in `common.sh`.
 
 This document focuses on the recording policy and workflow and avoids duplicating the full interface details already captured in `scripts/Scripts.md`.
