@@ -21,9 +21,8 @@ CONNECTIONS=""
 RATE=""
 CACHE_BUST_PARAM="cache_bust"
 CACHE_MODE="both"
-INTERVAL=1
+INTERVAL=5
 MYSQL_INTERVAL="${MYSQL_INTERVAL:-5}"
-VMSTAT_INTERVAL="${VMSTAT_INTERVAL:-5}"
 LOG_PAD_SEC="${LOG_PAD_SEC:-5}"
 MODE="init"
 TELEMETRY_DEFAULT="sar"
@@ -60,18 +59,17 @@ declare -A TELEMETRY_SUFFIX=(
     [iostat]=iostat
     [cgtop]=cgtop
 )
-TELEMETRY_CMD_SAR=(sar -u -r -n DEV -q)
+TELEMETRY_CMD_SAR=(sar -u -r)
 TELEMETRY_CMD_PIDSTAT=(pidstat -ru -C 'apache2|mysqld|wrk')
 TELEMETRY_CMD_VMSTAT=(vmstat -n)
 TELEMETRY_CMD_IOSTAT=(iostat -xz)
-TELEMETRY_CMD_CGTOP=(/usr/bin/systemd-cgtop -b -d)
+TELEMETRY_CMD_CGTOP=(/usr/bin/systemd-cgtop -b -n 0 -d)
 USE_SAR=false
 USE_PIDSTAT=false
 USE_VMSTAT=false
 USE_IOSTAT=false
 USE_CGTOP=false
 USE_MYSQL_PERF=false
-TELEMETRY_DETAIL=false
 MODE_SET=false
 SET_DURATION=false
 SET_THREADS=false
@@ -102,7 +100,7 @@ Options:
   --out-dir DIR  Output directory (default: /var/tmp/multiwp/perf_<run-id>)
   --cache-bust PARAM  Cache-bust query parameter name (default: cache_bust)
   --cache MODE  Run cached, bust, or both (default: both; values: both|cached|bust)
-  --interval N  Telemetry interval in seconds (default: 1)
+  --interval N  Telemetry interval in seconds (default: 5)
   --mysql-interval N  MySQL perf sampling interval in seconds (default: 5)
   --telemetry LIST  Telemetry tools (default: sar; values: sar,pidstat,vmstat,iostat,cgtop,mysql,all,none)
   --head  Write response headers for cached and cache-busted requests
@@ -324,7 +322,7 @@ telemetry_cmd_for() {
     local -n base="$name"
     case "$tool" in
         vmstat)
-            out=("bash" "-c" "vmstat -n $VMSTAT_INTERVAL | tail -n +3")
+            out=("vmstat" "-n" "$INTERVAL")
             ;;
         *)
             out=("${base[@]}" "$INTERVAL")
@@ -360,7 +358,6 @@ parse_telemetry_list() {
             USE_IOSTAT=false
             USE_CGTOP=false
             USE_MYSQL_PERF=false
-            TELEMETRY_DETAIL=false
             TELEMETRY_LIST="none"
             return
             ;;
@@ -415,11 +412,6 @@ parse_telemetry_list() {
         esac
     done
 
-    TELEMETRY_DETAIL=false
-    if $USE_SAR && { $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP; }; then
-        TELEMETRY_DETAIL=true
-    fi
-
     TELEMETRY_LIST="$(telemetry_selected_string)"
 }
 
@@ -434,6 +426,9 @@ for item in "${TELEMETRY_SELECTED[@]}"; do
         require_cmds "$req"
     fi
 done
+if $USE_SAR; then
+    require_cmds sadf
+fi
 if [ "$REPORT_MODE" = "true" ] && { $USE_SAR || $USE_PIDSTAT; }; then
     require_cmds python3
 fi
@@ -624,86 +619,10 @@ summarize_wrk() {
         report_kv "CACHE" "$cache"
         report_kv "REQ_PER_SEC" "${req_per_sec:-na}"
         report_kv "LATENCY_AVG" "${latency_avg:-na}"
-        report_kv "LATENCY_MAX" "${latency_max:-na}"
-        report_kv "TOTAL_REQUESTS" "${total_requests:-na}"
-        report_kv "NON_200" "${non_2xx:-0}"
+    report_kv "LATENCY_MAX" "${latency_max:-na}"
+    report_kv "TOTAL_REQUESTS" "${total_requests:-na}"
+    report_kv "NON_200" "${non_2xx:-0}"
     fi
-}
-
-bin5_trend_sar_cpu() {
-    local file="$1"
-    python3 - "$file" "$cmd" <<'EOF'
-import re
-import sys
-
-path = sys.argv[1]
-vals = []
-sec = None
-
-def to_seconds(t, ampm):
-    h, m, s = map(int, t.split(":"))
-    if ampm == "PM" and h != 12:
-        h += 12
-    if ampm == "AM" and h == 12:
-        h = 0
-    return h * 3600 + m * 60 + s
-
-with open(path, "r", encoding="utf-8", errors="replace") as fh:
-    for line in fh:
-        if re.match(r"^\d\d:\d\d:\d\d\s+[AP]M\s+CPU\s+%user", line):
-            sec = "cpu"
-            continue
-        if re.match(r"^\d\d:\d\d:\d\d\s+[AP]M\s+(kbmemfree|runq-sz|IFACE)", line):
-            sec = None
-            continue
-        if sec != "cpu":
-            continue
-        parts = line.split()
-        if len(parts) < 9 or parts[2] != "all":
-            continue
-        if not re.match(r"^[0-9.]+$", parts[8]):
-            continue
-        ts = to_seconds(parts[0], parts[1])
-        total = 100.0 - float(parts[8])
-        vals.append((ts, total))
-
-vals.sort(key=lambda x: x[0])
-series = [v for _, v in vals]
-
-if not series:
-    print("BIN5_AVG=na")
-    print("TREND=na")
-    raise SystemExit(0)
-
-n = len(series)
-size = max(1, n // 5)
-bins = []
-i = 0
-for b in range(5):
-    j = n if b == 4 else min(n, i + size)
-    chunk = series[i:j]
-    if chunk:
-        bins.append(sum(chunk) / len(chunk))
-    i = j
-
-bin_str = ",".join(f"{v:.2f}" for v in bins)
-
-first = bins[0]
-last = bins[-1]
-if first == 0:
-    trend = "na"
-else:
-    pct = (last - first) / first * 100.0
-    if pct > 5:
-        trend = f"rising ({pct:.1f}%)"
-    elif pct < -5:
-        trend = f"falling ({pct:.1f}%)"
-    else:
-        trend = f"flat ({pct:.1f}%)"
-
-print(f"BIN5_AVG={bin_str}")
-print(f"TREND={trend}")
-EOF
 }
 
 bin5_trend_pidstat_cmd() {
@@ -764,13 +683,18 @@ for b in range(5):
     i = j
 
 bin_str = ",".join(f"{v:.2f}" for v in bins)
-
-first = bins[0]
-last = bins[-1]
-if first == 0:
+if len(bins) < 2:
+    trend = "na"
+elif sum(bins) == 0:
     trend = "na"
 else:
-    pct = (last - first) / first * 100.0
+    mean = sum(bins) / len(bins)
+    x = list(range(len(bins)))
+    x_mean = (len(bins) - 1) / 2.0
+    cov = sum((xi - x_mean) * (yi - mean) for xi, yi in zip(x, bins))
+    var = sum((xi - x_mean) ** 2 for xi in x)
+    slope = cov / var if var else 0.0
+    pct = (slope * (len(bins) - 1)) / mean * 100.0
     if pct > 5:
         trend = f"rising ({pct:.1f}%)"
     elif pct < -5:
@@ -815,21 +739,14 @@ summarize_sar() {
     local domain="$1"
     local cache="$2"
     local file="$3"
-    local mem_avail_kb_min
     local mem_avail_mb_min
-    local mem_avail_kb_avg
     local mem_avail_mb_avg
-    local mem_used_pct_max
-    local mem_used_pct_avg
-    local cpu_idle_min
+    local mem_used_mb_max
+    local mem_used_mb_avg
     local cpu_total_max
-    local cpu_user_max
-    local cpu_system_max
-    local cpu_iowait_max
-    local cpu_steal_max
+    local cpu_idle_min
+    local cpu_idle_avg
     local cpu_busy_cores_max
-    local load_1_max
-    local load_1_avg
     local cpu_bin5
     local cpu_trend
 
@@ -837,122 +754,191 @@ summarize_sar() {
         warn "Missing or empty sar output for ${domain} (${cache}): $file"
         return
     fi
+    local summary
+    summary=$(python3 - "$file" "$CPU_CORES" <<'PYCODE'
+import sys
+from datetime import datetime
 
-    mem_avail_kb_min=$(awk '
-        /^..:..:.. [AP]M +kbmemfree/ {sec="mem"; next}
-        /^..:..:.. [AP]M +(CPU|runq-sz|IFACE)/ {sec=""; next}
-        /^..:..:.. [AP]M/ && sec=="mem" && $3 ~ /^[0-9]/ {print $4}
-    ' "$file" | sort -n | head -n 1)
+path = sys.argv[1]
+cores = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
 
-    mem_used_pct_max=$(awk '
-        /^..:..:.. [AP]M +kbmemfree/ {sec="mem"; next}
-        /^..:..:.. [AP]M +(CPU|runq-sz|IFACE)/ {sec=""; next}
-        /^..:..:.. [AP]M/ && sec=="mem" && $3 ~ /^[0-9]/ {print $6}
-    ' "$file" | sort -n | tail -n 1)
-    mem_avail_kb_avg=$(awk '
-        /^..:..:.. [AP]M +kbmemfree/ {sec="mem"; next}
-        /^..:..:.. [AP]M +(CPU|runq-sz|IFACE)/ {sec=""; next}
-        /^..:..:.. [AP]M/ && sec=="mem" && $3 ~ /^[0-9]/ {sum+=$4; n++}
-        END {if (n>0) printf "%.0f", sum/n}
-    ' "$file")
-    mem_used_pct_avg=$(awk '
-        /^..:..:.. [AP]M +kbmemfree/ {sec="mem"; next}
-        /^..:..:.. [AP]M +(CPU|runq-sz|IFACE)/ {sec=""; next}
-        /^..:..:.. [AP]M/ && sec=="mem" && $3 ~ /^[0-9]/ {sum+=$6; n++}
-        END {if (n>0) printf "%.2f", sum/n}
-    ' "$file")
+cpu_records = []
+mem_avail = []
+mem_used_kb = []
 
-    cpu_idle_min=$(awk '
-        /^..:..:.. [AP]M +CPU +%user/ {sec="cpu"; next}
-        /^..:..:.. [AP]M +(kbmemfree|runq-sz|IFACE)/ {sec=""; next}
-        /^..:..:.. [AP]M/ && sec=="cpu" && $3=="all" {print $9}
-    ' "$file" | sort -n | head -n 1)
-    cpu_user_max=$(awk '
-        /^..:..:.. [AP]M +CPU +%user/ {sec="cpu"; next}
-        /^..:..:.. [AP]M +(kbmemfree|runq-sz|IFACE)/ {sec=""; next}
-        /^..:..:.. [AP]M/ && sec=="cpu" && $3=="all" {print $4}
-    ' "$file" | sort -n | tail -n 1)
-    cpu_system_max=$(awk '
-        /^..:..:.. [AP]M +CPU +%user/ {sec="cpu"; next}
-        /^..:..:.. [AP]M +(kbmemfree|runq-sz|IFACE)/ {sec=""; next}
-        /^..:..:.. [AP]M/ && sec=="cpu" && $3=="all" {print $6}
-    ' "$file" | sort -n | tail -n 1)
-    cpu_iowait_max=$(awk '
-        /^..:..:.. [AP]M +CPU +%user/ {sec="cpu"; next}
-        /^..:..:.. [AP]M +(kbmemfree|runq-sz|IFACE)/ {sec=""; next}
-        /^..:..:.. [AP]M/ && sec=="cpu" && $3=="all" {print $7}
-    ' "$file" | sort -n | tail -n 1)
-    cpu_steal_max=$(awk '
-        /^..:..:.. [AP]M +CPU +%user/ {sec="cpu"; next}
-        /^..:..:.. [AP]M +(kbmemfree|runq-sz|IFACE)/ {sec=""; next}
-        /^..:..:.. [AP]M/ && sec=="cpu" && $3=="all" {print $8}
-    ' "$file" | sort -n | tail -n 1)
-    if [ -n "$cpu_idle_min" ]; then
-        cpu_total_max=$(awk -v idle="$cpu_idle_min" 'BEGIN {printf "%.2f", 100 - idle}')
-    fi
-    if [ -n "$cpu_total_max" ]; then
-        cpu_busy_cores_max=$(awk -v total="$cpu_total_max" -v cores="$CPU_CORES" 'BEGIN {printf "%.2f", (total/100) * cores}')
-    fi
+mode = None
+idx = {}
 
-    load_1_max=$(awk '
-        /^..:..:.. [AP]M +runq-sz/ {sec="load"; next}
-        /^..:..:.. [AP]M +(CPU|kbmemfree|IFACE)/ {sec=""; next}
-        /^..:..:.. [AP]M/ && sec=="load" && $3 ~ /^[0-9]/ {print $5}
-    ' "$file" | sort -n | tail -n 1)
+def parse_ts(ts):
+    try:
+        return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S %Z")
+    except Exception:
+        return None
 
-    load_1_avg=$(awk '
-        /^..:..:.. [AP]M +runq-sz/ {sec="load"; next}
-        /^..:..:.. [AP]M +(CPU|kbmemfree|IFACE)/ {sec=""; next}
-        /^..:..:.. [AP]M/ && sec=="load" && $3 ~ /^[0-9]/ {sum+=$5; n++}
-        END {if (n>0) printf "%.2f", sum/n}
-    ' "$file")
+with open(path, "r", encoding="utf-8", errors="replace") as fh:
+    for line in fh:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            header = line.lstrip("#").strip()
+            cols = [c.strip() for c in header.split(";")]
+            if "CPU" in cols and "%user" in cols:
+                mode = "cpu"
+                idx = {name: i for i, name in enumerate(cols)}
+            elif "kbmemfree" in cols and "kbavail" in cols:
+                mode = "mem"
+                idx = {name: i for i, name in enumerate(cols)}
+            elif "runq-sz" in cols and "ldavg-1" in cols:
+                mode = "load"
+                idx = {name: i for i, name in enumerate(cols)}
+            else:
+                mode = None
+                idx = {}
+            continue
+        parts = [p.strip() for p in line.split(";")]
+        if mode == "cpu":
+            cpu_id = parts[idx.get("CPU", 3)]
+            if cpu_id not in ("-1", "all"):
+                continue
+            idle = float(parts[idx["%idle"]])
+            user = float(parts[idx["%user"]])
+            system = float(parts[idx["%system"]])
+            iowait = float(parts[idx["%iowait"]])
+            steal = float(parts[idx["%steal"]])
+            ts = parse_ts(parts[idx["timestamp"]])
+            total = 100.0 - idle
+            cpu_records.append((ts, total, user, system, iowait, steal))
+        elif mode == "mem":
+            mem_avail.append(float(parts[idx["kbavail"]]))
+            mem_used_kb.append(float(parts[idx["kbmemused"]]))
+def safe_min(vals):
+    return min(vals) if vals else None
 
-    if [ -n "$mem_avail_kb_min" ]; then
-        mem_avail_mb_min=$((mem_avail_kb_min / 1024))
-    fi
-    if [ -n "$mem_avail_kb_avg" ]; then
-        mem_avail_mb_avg=$((mem_avail_kb_avg / 1024))
-    fi
-    cpu_bin5="na"
-    cpu_trend="na"
-    if [ "$REPORT_MODE" = "true" ]; then
-        while IFS='=' read -r k v; do
-            case "$k" in
-                BIN5_AVG) cpu_bin5="$v" ;;
-                TREND) cpu_trend="$v" ;;
-            esac
-        done < <(bin5_trend_sar_cpu "$file")
-    fi
+def safe_max(vals):
+    return max(vals) if vals else None
+
+def safe_avg(vals):
+    return sum(vals) / len(vals) if vals else None
+
+cpu_total = [r[1] for r in cpu_records]
+cpu_idle = [100.0 - r[1] for r in cpu_records]
+cpu_user = [r[2] for r in cpu_records]
+cpu_system = [r[3] for r in cpu_records]
+cpu_iowait = [r[4] for r in cpu_records]
+cpu_steal = [r[5] for r in cpu_records]
+
+cpu_total_max = safe_max(cpu_total)
+cpu_busy_cores = (cpu_total_max / 100.0) * cores if cpu_total_max is not None else None
+
+mem_avail_mb_min = safe_min(mem_avail)
+mem_avail_mb_avg = safe_avg(mem_avail)
+mem_used_mb_max = safe_max(mem_used_kb)
+mem_used_mb_avg = safe_avg(mem_used_kb)
+if mem_avail_mb_min is not None:
+    mem_avail_mb_min = int(mem_avail_mb_min / 1024)
+if mem_avail_mb_avg is not None:
+    mem_avail_mb_avg = int(mem_avail_mb_avg / 1024)
+if mem_used_mb_max is not None:
+    mem_used_mb_max = int(mem_used_mb_max / 1024)
+if mem_used_mb_avg is not None:
+    mem_used_mb_avg = int(mem_used_mb_avg / 1024)
+
+def bin5(series):
+    if not series:
+        return "na", "na"
+    series = sorted(series, key=lambda x: x[0] or datetime.min)
+    vals = [v for _, v, *_ in series]
+    n = len(vals)
+    size = max(1, n // 5)
+    bins = []
+    i = 0
+    for b in range(5):
+        j = n if b == 4 else min(n, i + size)
+        chunk = vals[i:j]
+        if chunk:
+            bins.append(sum(chunk) / len(chunk))
+        i = j
+    bin_str = ",".join(f"{v:.2f}" for v in bins)
+    if len(bins) < 2:
+        trend = "na"
+        return bin_str, trend
+    mean = sum(bins) / len(bins)
+    if mean == 0:
+        trend = "na"
+        return bin_str, trend
+    x = list(range(len(bins)))
+    x_mean = (len(bins) - 1) / 2.0
+    cov = sum((xi - x_mean) * (yi - mean) for xi, yi in zip(x, bins))
+    var = sum((xi - x_mean) ** 2 for xi in x)
+    slope = cov / var if var else 0.0
+    pct = (slope * (len(bins) - 1)) / mean * 100.0
+    if pct > 5:
+        trend = f"rising ({pct:.1f}%)"
+    elif pct < -5:
+        trend = f"falling ({pct:.1f}%)"
+    else:
+        trend = f"flat ({pct:.1f}%)"
+    return bin_str, trend
+
+bin_str, trend = bin5(cpu_records)
+
+def emit(name, val, fmt=None):
+    if val is None:
+        print(f"{name}=na")
+    else:
+        if fmt:
+            print(f"{name}={fmt.format(val)}")
+        else:
+            print(f"{name}={val}")
+
+emit("MEM_AVAIL_MB_MIN", mem_avail_mb_min)
+emit("MEM_AVAIL_MB_AVG", mem_avail_mb_avg)
+emit("MEM_USED_MB_MAX", mem_used_mb_max)
+emit("MEM_USED_MB_AVG", mem_used_mb_avg)
+emit("CPU_TOTAL_PCT_MAX", cpu_total_max, "{:.2f}")
+emit("CPU_IDLE_PCT_MIN", safe_min(cpu_idle), "{:.2f}")
+emit("CPU_IDLE_PCT_AVG", safe_avg(cpu_idle), "{:.2f}")
+emit("CPU_BUSY_CORES_MAX", cpu_busy_cores, "{:.2f}")
+print(f"CPU_TOTAL_BIN5_AVG={bin_str}")
+print(f"CPU_TOTAL_TREND={trend}")
+PYCODE
+)
+    while IFS='=' read -r k v; do
+        case "$k" in
+            MEM_AVAIL_MB_MIN) mem_avail_mb_min="$v" ;;
+            MEM_AVAIL_MB_AVG) mem_avail_mb_avg="$v" ;;
+            MEM_USED_MB_MAX) mem_used_mb_max="$v" ;;
+            MEM_USED_MB_AVG) mem_used_mb_avg="$v" ;;
+            CPU_TOTAL_PCT_MAX) cpu_total_max="$v" ;;
+            CPU_IDLE_PCT_MIN) cpu_idle_min="$v" ;;
+            CPU_IDLE_PCT_AVG) cpu_idle_avg="$v" ;;
+            CPU_BUSY_CORES_MAX) cpu_busy_cores_max="$v" ;;
+            CPU_TOTAL_BIN5_AVG) cpu_bin5="$v" ;;
+            CPU_TOTAL_TREND) cpu_trend="$v" ;;
+        esac
+    done <<<"$summary"
 
     report_section "PERF" "Telemetry"
     report_kv "DOMAIN" "$domain"
     report_kv "CACHE" "$cache"
-    if [ "$TELEMETRY_DETAIL" = "true" ]; then
-        report_kv "MEM_AVAIL_MB_MIN" "${mem_avail_mb_min:-na}"
-        report_kv "MEM_AVAIL_MB_AVG" "${mem_avail_mb_avg:-na}"
-        report_kv "MEM_USED_PCT_MAX" "${mem_used_pct_max:-na}"
-        report_kv "MEM_USED_PCT_AVG" "${mem_used_pct_avg:-na}"
-        report_kv "CPU_TOTAL_PCT_MAX" "${cpu_total_max:-na}"
-        report_kv "CPU_USER_PCT_MAX" "${cpu_user_max:-na}"
-        report_kv "CPU_SYSTEM_PCT_MAX" "${cpu_system_max:-na}"
-        report_kv "CPU_IOWAIT_PCT_MAX" "${cpu_iowait_max:-na}"
-        report_kv "CPU_STEAL_PCT_MAX" "${cpu_steal_max:-na}"
-        report_kv "CPU_BUSY_CORES_MAX" "${cpu_busy_cores_max:-na}"
-        report_kv "CPU_TOTAL_BIN5_AVG" "$cpu_bin5"
-        report_kv "CPU_TOTAL_TREND" "$cpu_trend"
-        report_kv "LOAD_1_MAX" "${load_1_max:-na}"
-        report_kv "LOAD_1_AVG" "${load_1_avg:-na}"
-    else
-        report_kv "CPU_TOTAL_PCT_MAX" "${cpu_total_max:-na}"
-        report_kv "CPU_BUSY_CORES_MAX" "${cpu_busy_cores_max:-na}"
-        report_kv "LOAD_1_MAX" "${load_1_max:-na}"
-    fi
+    report_kv "MEM_AVAIL_MB_MIN" "${mem_avail_mb_min:-na}"
+    report_kv "MEM_AVAIL_MB_AVG" "${mem_avail_mb_avg:-na}"
+    report_kv "MEM_USED_MB_MAX" "${mem_used_mb_max:-na}"
+    report_kv "MEM_USED_MB_AVG" "${mem_used_mb_avg:-na}"
+    report_kv "CPU_TOTAL_PCT_MAX" "${cpu_total_max:-na}"
+    report_kv "CPU_IDLE_PCT_MIN" "${cpu_idle_min:-na}"
+    report_kv "CPU_IDLE_PCT_AVG" "${cpu_idle_avg:-na}"
+    report_kv "CPU_BUSY_CORES_MAX" "${cpu_busy_cores_max:-na}"
+    report_kv "CPU_TOTAL_BIN5_AVG" "$cpu_bin5"
+    report_kv "CPU_TOTAL_TREND" "$cpu_trend"
 }
 
 summarize_pidstat() {
     local domain="$1"
     local cache="$2"
     local file="$3"
+    local include_wrk="${4:-true}"
     local apache_avg
     local apache_max
     local apache_samples
@@ -1009,7 +995,7 @@ summarize_pidstat() {
         done < <(bin5_trend_pidstat_cmd "$file" wrk)
     fi
 
-    report_section "PERF" "Telemetry"
+    report_section "PERF" "Telemetry-Process"
     report_kv "DOMAIN" "$domain"
     report_kv "CACHE" "$cache"
     report_kv "APACHE_CPU_SUM_AVG" "${apache_avg:-na}"
@@ -1022,11 +1008,13 @@ summarize_pidstat() {
     report_kv "MYSQL_CPU_SAMPLES" "${mysql_samples:-0}"
     report_kv "MYSQL_CPU_SUM_BIN5_AVG" "$mysql_bin5"
     report_kv "MYSQL_CPU_SUM_TREND" "$mysql_trend"
-    report_kv "WRK_CPU_SUM_AVG" "${wrk_avg:-na}"
-    report_kv "WRK_CPU_SUM_MAX" "${wrk_max:-na}"
-    report_kv "WRK_CPU_SAMPLES" "${wrk_samples:-0}"
-    report_kv "WRK_CPU_SUM_BIN5_AVG" "$wrk_bin5"
-    report_kv "WRK_CPU_SUM_TREND" "$wrk_trend"
+    if [ "$include_wrk" = "true" ]; then
+        report_kv "WRK_CPU_SUM_AVG" "${wrk_avg:-na}"
+        report_kv "WRK_CPU_SUM_MAX" "${wrk_max:-na}"
+        report_kv "WRK_CPU_SAMPLES" "${wrk_samples:-0}"
+        report_kv "WRK_CPU_SUM_BIN5_AVG" "$wrk_bin5"
+        report_kv "WRK_CPU_SUM_TREND" "$wrk_trend"
+    fi
 }
 
 report_section() {
@@ -1056,6 +1044,9 @@ start_telemetry() {
                 local err_file="$OUT_DIR/${prefix}_${suffix}.err"
                 local pid
                 telemetry_cmd_for "$tool" cmd
+                if [ "$tool" = "sar" ] && [ -n "${SAR_RAW-}" ]; then
+                    out_file="$SAR_RAW"
+                fi
                 if [ "$ERR_MODE" = "true" ]; then
                     pid=$(start_cmd "telemetry:${tool}" "both" "$out_file" "$err_file" -- "${cmd[@]}")
                 else
@@ -1074,6 +1065,29 @@ stop_telemetry() {
             kill "$pid" >/dev/null 2>&1 || true
         fi
     done
+}
+
+finalize_sar_log() {
+    if ! $USE_SAR; then
+        return 0
+    fi
+    if [ -z "${SAR_BIN-}" ] || [ ! -f "$SAR_BIN" ]; then
+        warn "Missing sar binary output; skip sadf conversion"
+        return 0
+    fi
+    if [ -z "${SAR_LOG-}" ]; then
+        warn "Missing sar log path; skip sadf conversion"
+        return 0
+    fi
+    local err_file=""
+    local cmd
+    cmd="sadf -d \"$SAR_BIN\" -- -u -r | awk 'BEGIN {keep=0} /^# / {if (\$0 ~ /;CPU;%user/ || \$0 ~ /;kbmemfree;/) {keep=1; print; next} keep=0; next} keep {print}'"
+    if [ "$ERR_MODE" = "true" ]; then
+        err_file="${SAR_LOG%.log}.err"
+        run_cmd "sadf:sar" "both" "$SAR_LOG" "$err_file" -- bash -c "$cmd"
+    else
+        run_cmd "sadf:sar" "out" "$SAR_LOG" -- bash -c "$cmd"
+    fi
 }
 
 for domain in "${DOMAINS[@]}"; do
@@ -1096,7 +1110,13 @@ for domain in "${DOMAINS[@]}"; do
     HEAD_BUST_CMD=""
     LOAD_CMD=""
     LOAD_BUST_CMD=""
+    DID_CACHED=false
+    DID_BUST=false
     SAR_CMD=""
+    SAR_BIN=""
+    SAR_RAW=""
+    SAR_LOG=""
+    SADF_CMD=""
     PIDSTAT_CMD=""
     VMSTAT_CMD=""
     IOSTAT_CMD=""
@@ -1105,7 +1125,12 @@ for domain in "${DOMAINS[@]}"; do
     MYSQL_PERF_LOG=""
     MYSQL_PERF_ERR=""
     if $USE_SAR; then
+        SAR_BIN="$OUT_DIR/${prefix}_sar.bin"
+        SAR_RAW="$OUT_DIR/${prefix}_sar.raw.log"
+        SAR_LOG="$OUT_DIR/${prefix}_sar.log"
+        TELEMETRY_CMD_SAR=(sar -o "$SAR_BIN" -u -r)
         SAR_CMD="$(telemetry_cmd_string sar)"
+        SADF_CMD="sadf -d $SAR_BIN -- -u -r | awk 'BEGIN {keep=0} /^# / {if ($0 ~ /;CPU;%user/ || $0 ~ /;kbmemfree;/) {keep=1; print; next} keep=0; next} keep {print}'"
     fi
     if $USE_PIDSTAT; then
         PIDSTAT_CMD="$(telemetry_cmd_string pidstat)"
@@ -1173,6 +1198,7 @@ for domain in "${DOMAINS[@]}"; do
         wrk_cmd_bust=("$WRK_BIN" -t"$THREADS" -c"$CONNECTIONS" -d"$DURATION" -R"$RATE")
 
         if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "cached" ]; then
+            DID_CACHED=true
             LOAD_CMD="$(cmd_join "${wrk_cmd_cached[@]}" "$base_url")"
             set +e
             if $ERR_MODE; then
@@ -1187,17 +1213,10 @@ for domain in "${DOMAINS[@]}"; do
             fi
             check_expected_file "$OUT_DIR/${prefix}_wrk.txt" "wrk output (cached)"
             summarize_wrk "$domain" "cached" "$OUT_DIR/${prefix}_wrk.txt"
-            if [ "$REPORT_MODE" = "true" ]; then
-                if $USE_PIDSTAT; then
-                    summarize_pidstat "$domain" "cached" "$OUT_DIR/${prefix}_pidstat.log"
-                fi
-                if $USE_SAR; then
-                    summarize_sar "$domain" "cached" "$OUT_DIR/${prefix}_sar.log"
-                fi
-            fi
         fi
 
         if [ "$CACHE_MODE" = "both" ] || [ "$CACHE_MODE" = "bust" ]; then
+            DID_BUST=true
             LOAD_BUST_CMD="$(cmd_join "${wrk_cmd_bust[@]}" "$bust_url")"
             set +e
             if $ERR_MODE; then
@@ -1212,30 +1231,42 @@ for domain in "${DOMAINS[@]}"; do
             fi
             check_expected_file "$OUT_DIR/${prefix}_wrk_bust.txt" "wrk output (bust)"
             summarize_wrk "$domain" "bust" "$OUT_DIR/${prefix}_wrk_bust.txt"
-            if [ "$REPORT_MODE" = "true" ]; then
-                if $USE_PIDSTAT; then
-                    summarize_pidstat "$domain" "bust" "$OUT_DIR/${prefix}_pidstat.log"
-                fi
-                if $USE_SAR; then
-                    summarize_sar "$domain" "bust" "$OUT_DIR/${prefix}_sar.log"
-                fi
-            fi
         fi
     fi
 
     if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP; then
         stop_telemetry
         stop_mysql_perf
+        finalize_sar_log
         if [ -n "$MYSQL_PERF_LOG" ]; then
             check_expected_file "$MYSQL_PERF_LOG" "mysql perf log"
         fi
     fi
-    if [ "$REPORT_MODE" = "true" ] && [ "$MODE" = "none" ]; then
-        if $USE_PIDSTAT; then
-            summarize_pidstat "$domain" "none" "$OUT_DIR/${prefix}_pidstat.log"
-        fi
-        if $USE_SAR; then
-            summarize_sar "$domain" "none" "$OUT_DIR/${prefix}_sar.log"
+    if [ "$REPORT_MODE" = "true" ]; then
+        if [ "$MODE" = "none" ]; then
+            if $USE_PIDSTAT; then
+                summarize_pidstat "$domain" "none" "$OUT_DIR/${prefix}_pidstat.log" false
+            fi
+            if $USE_SAR; then
+                summarize_sar "$domain" "none" "$OUT_DIR/${prefix}_sar.log"
+            fi
+        else
+            if $DID_CACHED; then
+                if $USE_PIDSTAT; then
+                summarize_pidstat "$domain" "cached" "$OUT_DIR/${prefix}_pidstat.log" true
+                fi
+                if $USE_SAR; then
+                    summarize_sar "$domain" "cached" "$OUT_DIR/${prefix}_sar.log"
+                fi
+            fi
+            if $DID_BUST; then
+                if $USE_PIDSTAT; then
+                    summarize_pidstat "$domain" "bust" "$OUT_DIR/${prefix}_pidstat.log" true
+                fi
+                if $USE_SAR; then
+                    summarize_sar "$domain" "bust" "$OUT_DIR/${prefix}_sar.log"
+                fi
+            fi
         fi
     fi
 
@@ -1295,13 +1326,21 @@ for domain in "${DOMAINS[@]}"; do
         fi
         if $USE_SAR; then
             echo "SAR_CMD: $SAR_CMD"
+            if [ -n "$SAR_BIN" ]; then
+                echo "SAR_BIN: $SAR_BIN"
+            fi
+            if [ -n "$SAR_LOG" ]; then
+                echo "SAR_LOG: $SAR_LOG"
+            fi
+            if [ -n "$SADF_CMD" ]; then
+                echo "SADF_CMD: $SADF_CMD"
+            fi
         fi
         if $USE_PIDSTAT; then
             echo "PIDSTAT_CMD: $PIDSTAT_CMD"
         fi
         if $USE_VMSTAT; then
             echo "VMSTAT_CMD: $VMSTAT_CMD"
-            echo "VMSTAT_INTERVAL_SEC: $VMSTAT_INTERVAL"
         fi
         if $USE_IOSTAT; then
             echo "IOSTAT_CMD: $IOSTAT_CMD"

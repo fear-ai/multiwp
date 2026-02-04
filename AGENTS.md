@@ -1,5 +1,4 @@
 # AI Assistant Guidelines
-Date: January 20, 2026
 
 Study README.md for project overview, structure, documentation map
 
@@ -17,9 +16,9 @@ Study README.md for project overview, structure, documentation map
 - Update documentation
 
 ## Edit
-- Preserve existing content do NOT delete details and references, unless so instructed
 - Update TOC if present
-- Run destructive file, directory, content operations without an explicit confirmation or an allow rule
+- Preserve existing content; do NOT delete details and references, unless so instructed
+- Do NOT run destructive file, directory, content operations without an explicit confirmation or an allow rule
 
 ## Markdown
 - ATX headers (`#`, `##`)
@@ -29,10 +28,10 @@ Study README.md for project overview, structure, documentation map
 ## Security
 - Identify security issues in system operation, code or documentation
 - Document required access permissions and policies, but mindful of OpSec
-- NEVER hardcode credentials, warn adding or commiting to a repo files with keys and passwords
+- NEVER hardcode credentials, warn adding or committing to a repo files with keys and passwords
 
 ## Git
-- Do NOT commit to git, add, rename or remove files, push or pull unless explicitly instructed; ask for help instead
+- Do NOT commit to git, add, rename or remove files, push or pull unless explicitly instructed
 
 ### Commit Messages
 Present-tense imperative, focus on operational changes
