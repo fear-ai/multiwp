@@ -682,3 +682,44 @@ sudo needrestart
 
 ## Kernel TCP tuning note
 The commented `net/ipv4/tcp_fin_timeout` and `net/ipv4/tcp_keepalive_intvl` lines in `/etc/ufw/sysctl.conf` (or `/etc/sysctl.conf` on some hosts) are intentionally left disabled. They alter global TCP behavior and should only be enabled when there is a clear operational reason such as socket exhaustion or stale connections, followed by validation. On a typical WordPress origin, the kernel defaults are appropriate and safer.
+
+## Shell environment: NO_COLOR
+
+ANSI color escapes corrupt captured output. They break `grep` and `awk` matches
+on otherwise-plain text, and they make log files awkward to read and diff. Set
+`NO_COLOR=1` host-wide so both interactive and non-interactive shells inherit
+it. This is honored by curl, `ls`, `grep`, GNU coreutils, Boost.Test, and
+GoogleTest.
+
+Two files are needed because `~/.bashrc` returns early for non-interactive
+shells, so a setting placed only there would be missed by exactly the automated
+runs that need it most.
+
+```bash
+# pam_env, read for both sshd and login sessions
+grep -q '^NO_COLOR=' /etc/environment || \
+    echo 'NO_COLOR=1' | sudo tee -a /etc/environment
+
+# login shells that source /etc/profile
+echo 'export NO_COLOR=1' | sudo tee /etc/profile.d/no-color.sh
+sudo chmod 644 /etc/profile.d/no-color.sh
+```
+
+Verify after a new login; an existing session keeps the environment it started
+with.
+
+```bash
+bash -lc 'echo "NO_COLOR=${NO_COLOR:-<unset>}"'   # expect NO_COLOR=1
+```
+
+Do **not** set `TERM=dumb` to suppress color. `TERM` changes how programs format
+output, not only whether they colorize it, and several scripts in this
+repository parse output whose layout is hardcoded against a normal terminal.
+Setting `TERM=dumb` risks changing column widths, progress rendering, and line
+wrapping, which silently breaks those parsers. `NO_COLOR` addresses color alone
+and is the correct control.
+
+Individual test harnesses also accept explicit flags, useful when a single run
+must be clean regardless of environment: `--no_color_output` for Boost.Test and
+`--gtest_color=no` for GoogleTest. Both auto-disable color when stdout is a
+pipe, so a redirected run is usually already clean.

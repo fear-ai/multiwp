@@ -642,7 +642,7 @@ Use consistent parameters across runs and record them in the results.
 - `cache-bust` query parameter name (defaults to `cache_bust`).
 - `interval` telemetry sampling interval (seconds).
 - `mysql-interval` MySQL perf sampling interval (seconds, default 5).
-- `telemetry` selects telemetry tools (`sar`, `pidstat`, `vmstat`, `iostat`, `cgtop`, `mysql`, `all`, `none`), with comma lists allowed.
+- `telemetry` selects telemetry tools (`sar`, `pidstat`, `vmstat`, `iostat`, `cgtop`, `mysql`, `all`, `none`), with comma lists allowed. `all` expands to `sar,pidstat,vmstat,cgtop,mysql`; include `iostat` explicitly if you want it.
 - `head` write response headers for cached and cache-busted requests.
 - `cache` selects cached, bust, or both runs (default: `both`).
 - `report` emit a summary of key wrk2 metrics after each run.
@@ -651,9 +651,9 @@ When `--head` is used, cached headers are saved as `${prefix}_head.txt` and cach
 
 When running `perf-load.sh` through an external command runner, use a timeout of at least 60 seconds.
 
-When `--report` is used, the summary always reports `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, and `NOT_200_PCT`. `LATENCY_AVG` is taken from the `Latency` line; if wrk2 reports NaN or `0.00us` there, the script falls back to the `Thread calibration: mean lat.` value.
+When `--report` is used, the summary always reports `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, `TOTAL_REQUESTS`, and `NON_200`. Latency values are normalized to milliseconds and formatted with comma-separated thousands and no decimals. `LATENCY_AVG` is taken from the `Latency` line; if wrk2 reports NaN or `0.00us` there, the script falls back to the `Thread calibration: mean lat.` value.
 
-When `--report` is used with telemetry enabled, the summary reports `CPU_TOTAL_PCT_MAX`, `CPU_BUSY_CORES_MAX`, and `LOAD_1_MAX` if `sar` is selected. If telemetry includes `sar` plus any other tool, it also reports `MEM_AVAIL_MB_MIN`, `MEM_AVAIL_MB_AVG`, `MEM_USED_PCT_MAX`, `MEM_USED_PCT_AVG`, `CPU_USER_PCT_MAX`, `CPU_SYSTEM_PCT_MAX`, `CPU_IOWAIT_PCT_MAX`, `CPU_STEAL_PCT_MAX`, `CPU_TOTAL_BIN5_AVG`, `CPU_TOTAL_TREND`, and `LOAD_1_AVG`. If telemetry includes `pidstat`, it reports `APACHE_CPU_SUM_AVG`, `APACHE_CPU_SUM_MAX`, `APACHE_CPU_SAMPLES`, `APACHE_CPU_SUM_BIN5_AVG`, and `APACHE_CPU_SUM_TREND`.
+When `--report` is used with telemetry enabled, the summary reports `CPU_TOTAL_PCT_MAX`, `CPU_TOTAL_PCT_AVG`, `CPU_BUSY_CORES_MAX`, `CPU_IDLE_PCT_MIN`, `CPU_IDLE_PCT_AVG`, `MEM_AVAIL_MB_MIN`, `MEM_AVAIL_MB_AVG`, `MEM_USED_MB_MAX`, `MEM_USED_MB_AVG`, `CPU_TOTAL_BIN5_AVG`, and `CPU_TOTAL_TREND` when `sar` is selected. If telemetry includes `pidstat`, it reports `APACHE_CPU_SUM_AVG`, `APACHE_CPU_SUM_MAX`, `APACHE_CPU_SAMPLES`, `APACHE_CPU_SUM_BIN5_AVG`, and `APACHE_CPU_SUM_SLOPE_PCT` (and the same pattern for `MYSQL_CPU_SUM_*` and `WRK_CPU_SUM_*` when those processes are present). Process CPU values (`*_CPU_SUM_*`) are reported as percentages representing summed per-process CPU.
 
 ### Run metadata file
 Each perf run directory should include a `run.param` file per domain with the run parameters and time bounds. This file is intended to make post-processing and correlation reliable without relying on filename conventions. The format is `KEY: value` with one entry per line so it can be parsed by simple tooling. Each `run.param` is named with the same prefix as its corresponding output files.
@@ -662,8 +662,10 @@ We use UTC internally for time bounds to match Cloudflare and Apache access logs
 
 Required fields (all runs):
 - `HOSTNAME`, `ORIGIN_IPV4`
+- `CPU_CORES` (value from `_NPROCESSORS_ONLN`)
 - `RUN_ID`, `RUN_DIR`, `KIND` (`idle` or `load`), `DOMAIN`, `MODE`, `CACHE_MODE`
 - `UTC_START`, `UTC_END`
+- `RUN_WINDOW_SEC`
 - `LOCAL_TZ`, `LOCAL_OFFSET`, `LOCAL_START`, `LOCAL_END`
 - `LOG_PAD_SEC`
 - `SCRIPT_EXIT`
@@ -749,6 +751,10 @@ Telemetry selection is driven by `--telemetry`. The metadata file records:
 
 The summary report (`${prefix}_report.txt`) is enabled by default and is derived from raw files; it should never replace the raw tool output. Use `--no-report` to suppress it. The report is intended for quick triage, while the raw logs are the source of truth for deeper analysis.
 
+Trend fields (`CPU_TOTAL_TREND` and `*_SLOPE_PCT`) are computed from a least-squares linear fit across the five bin averages (the same values shown in `*_BIN5_AVG`). The slope is converted into a percent change across the run relative to the bin mean, so positive values indicate rising pressure and negative values indicate falling pressure. Values are reported as percentages with one decimal place (for example, `275.4%`) and no descriptive labels.
+
+Telemetry sections are emitted once per domain (no cache designation) even when cached and bust runs are both executed, so the report does not duplicate system metrics across cache modes. These sections use `PERF:Process` for per-process metrics and `PERF:Telemetry` for system metrics.
+
 #### Cache handling and run modes
 When `--cache=both` is selected, the script performs two runs and writes two files (`*_bust.txt` and the cached base name). For single-cache modes, only one file is written, and the cache mode is recorded in `run.param`.
 
@@ -803,7 +809,6 @@ Sliced logs are written into the same run directory with a consistent naming con
 - `${prefix}_kern.log`
 - `${prefix}_ufw.log`
 - `${prefix}_logs.txt` (summary of slice window and warnings; written by default)
-- `${prefix}_slice.log` (compatibility copy of the summary log)
 When `perf-load.sh --err` is enabled, per-tool stderr output is written alongside each `.txt` and `.log` file using the same prefix and a `.err` suffix.
 
 Each file preserves the original log order and includes only entries inside the window. No reformatting is performed. The summary log records the window, assumptions, and missing file warnings; use `--no-report` to suppress it.
@@ -838,14 +843,28 @@ System logs:
 
 The summary does not replace the raw slices; it provides a quick review and highlights anomalies.
 
+##### Automated log analysis (proposed)
+The log slicer currently only extracts slices and records the window. The next step is to compute a compact analysis block from the sliced logs and append it to `${prefix}_logs.txt` so each run has a consistent, machine‑readable summary. This can be implemented without modifying the raw slices.
+
+Suggested analysis items:
+- Apache access: total requests, 2xx/3xx/4xx/5xx counts, top paths, top remote IPs, and cache‑bust counts.
+- Apache access (bust): count and average latency when request time is available in the log format.
+- Apache error: unique error lines with counts and a separate list of 5xx‑related errors.
+- Auth log: failed login count, unique usernames, and top source IPs.
+- UFW log: block count and top source IPs.
+- Kernel log: unique warnings or errors with counts.
+
+This analysis should be read‑only, operate only on the sliced files, and skip missing logs with a warning. It should not require access to full log history and must preserve ordering and content in the raw slices.
+
 ##### CLI and integration
-Implement log slicing as a standalone script (for example, `scripts/slice-logs.sh`) so it can be used after a run or against historical data. Suggested interface:
+The log slicer is a standalone script and is also invoked by `perf-load.sh --slice`. Use it directly for historical runs or ad‑hoc windows:
 
 ```
-slice-logs.sh --run-dir /var/tmp/multiwp/perf_<RUN_ID> --domain alphaeos.net
+slice-logs.sh --run-param /var/tmp/multiwp/perf_<RUN_ID>/<prefix>_run.param
+slice-logs.sh --duration 50m --domain alphaeos.net
 ```
 
-The script should locate the matching `${prefix}_run.param`, compute the window, and write the sliced logs alongside the perf outputs. Integrating log slicing into `perf-load.sh` can be deferred until the log slicer stabilizes.
+The script locates the matching `${prefix}_run.param` (when provided), computes the window, and writes sliced logs alongside the perf outputs.
 
 ##### Reliability and safety
 The log slicer must be read-only and must not edit log files. It should:
@@ -870,25 +889,31 @@ done
 Collect CPU, memory, and IO metrics during each test window so origin pressure can be correlated with latency. When telemetry is enabled, `perf-load.sh` starts and stops telemetry per domain and saves the logs alongside `wrk2` output using the same run identifier.
 
 ```bash
-vmstat 1 > "$OUT/vmstat.log" &
-pidstat -ru -C apache2 1 > "$OUT/pidstat-apache.log" &
-iostat -xz 1 > "$OUT/iostat.log" &
-sar -u -r -n DEV 1 > "$OUT/sar.log" &
+vmstat -n 5 > "$OUT/vmstat.log" &
+VMSTAT_PID=$!
+pidstat -ru -C apache2\|mysqld\|wrk 5 > "$OUT/pidstat.log" &
+PIDSTAT_PID=$!
+iostat -xz 5 > "$OUT/iostat.log" &
+IOSTAT_PID=$!
+sar -o "$OUT/sar.bin" -u -r 5 > "$OUT/sar.raw.log" &
+SAR_PID=$!
 ```
 
 Stop telemetry after the run:
 ```bash
-pkill -f "vmstat 1"
-pkill -f "pidstat -ru"
-pkill -f "iostat -xz"
-pkill -f "sar -u"
+kill "$VMSTAT_PID"
+kill "$PIDSTAT_PID"
+kill "$IOSTAT_PID"
+kill "$SAR_PID"
+sadf -d "$OUT/sar.bin" -- -u -r > "$OUT/sar.log"
 ```
 
 What each tool provides:
 - `vmstat`: overall CPU, memory, and run queue pressure (quick health signal).
 - `pidstat`: per-process CPU and memory, useful to confirm Apache or MySQL saturation.
 - `iostat`: disk IO latency and queue depth for storage bottlenecks.
-- `sar`: time-series summary across CPU, memory, and network for post-run analysis.
+- `sar`: time-series summary across CPU and memory for post-run analysis (we keep only the CPU and memory sections).
+- `systemd-cgtop`: cgroup-level CPU and memory summaries for top-level services and slices.
 
 ### Load & Telemetry Tools
 The load and telemetry tools we rely on come from distinct projects and they emit different formats. This matters for correlation and post-processing, so we record the origin, scope, and output shape here. All of the tools listed below are open source.
@@ -905,14 +930,16 @@ Key arguments:
 
 Key arguments and format notes:
 - `pidstat`: `-u` (CPU), `-r` (memory), `-C <name>` (filter by command). Output is time-stamped and split into CPU and memory sections.
-- `sar`: `-u` (CPU), `-r` (memory), `-n DEV` (network), `-q` (load). Output is time-stamped and sectioned by resource type.
-- `vmstat`: interval only (for example, `vmstat 1`), no timestamps by default; the interval and line order imply time progression.
+- `sar`: `-u` (CPU), `-r` (memory). We write binary output and convert with `sadf -d` for parsing; only CPU and memory sections are retained.
+- `vmstat`: interval only (for example, `vmstat -n 5`), no timestamps by default; the interval and line order imply time progression. `-n` suppresses repeated headers.
 - `iostat`: `-xz` (extended stats and utilization), optional `-t` if you need explicit timestamps. Without `-t`, output is block-based with time implied by interval.
+- `systemd-cgtop`: `-b` (batch output), `-n 0` (run continuously), `-d <sec>` (interval). Output is per-cgroup without timestamps.
 
 Overlap and uniqueness:
 - `vmstat` and `sar` both report CPU and memory, but `sar` is easier for time-series parsing and aggregation.
 - `pidstat` is the only tool that attributes CPU/memory to a specific process, which is essential for separating Apache from MySQL.
 - `iostat` is the only tool that provides queue depth and device latency metrics, which are required to identify storage bottlenecks.
+- `systemd-cgtop` provides a cgroup view that complements per-process `pidstat` when you want to see systemd service totals.
 
 ### Test Duration
 Use this section to record how long runs actually take and to explain how to estimate or bound them. `wrk2` duration is per run, not total time; a cached + bust run takes roughly 2 × duration plus startup overhead and telemetry shutdown.
