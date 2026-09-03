@@ -1106,16 +1106,17 @@ Notes:
 - Telemetry defaults to `sar`; use `--telemetry=none` or a comma list to change it. The default telemetry interval is 5 seconds unless overridden by `--interval`.
 - When `--head` is supplied, cached headers are saved as `${prefix}_head.txt` and cache-busted headers as `${prefix}_head_bust.txt`.
 - `--cache` controls whether cached, cache-busted, or both runs are executed (`both`, `cached`, `bust`).
-- `--telemetry` accepts `sar`, `pidstat`, `vmstat`, `iostat`, `cgtop`, `mysql`, `all`, or `none`, and it accepts comma lists (for example, `sar,pidstat`).
+- `--telemetry` accepts `sar`, `pidstat`, `vmstat`, `iostat`, `cgtop`, `mysql`, `all`, or `none`, and it accepts comma lists (for example, `sar,pidstat`). `all` expands to `sar,pidstat,vmstat,cgtop,mysql` (include `iostat` explicitly if desired).
 - `wrk2` is used for init/load modes only and always receives `-R <rate>`, either from `--rate` or from mode defaults. `--none` skips `wrk2` and uses `--duration` as the telemetry window.
 - When `--none` is used with `--report`, the report contains telemetry summaries (sar/pidstat) with `CACHE=none`.
 - When running `perf-load.sh` through an external command runner, use a timeout of at least 60 seconds.
 - Telemetry writes logs alongside `wrk` or `wrk2` output in the run directory. Command dependencies vary by telemetry scope.
 - `sar` writes binary output (`${prefix}_sar.bin`) and uses `sadf -d` to generate `${prefix}_sar.log` for parsing; stdout from `sar` is captured in `${prefix}_sar.raw.log`. The script uses CPU and memory sections only (no run queue or device sections).
 - `--report` (default) emits a per-run summary of `REQ_PER_SEC`, `LATENCY_AVG`, `LATENCY_MAX`, `TOTAL_REQUESTS`, and `NON_200`. Use `--no-report` to suppress it.
+- Latency values in the report are normalized to milliseconds and formatted with comma-separated thousands and no decimals.
 - `--err` writes stderr for `wrk2`, `curl`, and telemetry tools to per-run `.err` files alongside the `.txt` and `.log` outputs.
 - `--slice` runs `slice-logs.sh` after each domain run using the generated `run.param` file.
-- When telemetry includes `sar`, `--report` emits `CPU_TOTAL_PCT_MAX`, `CPU_BUSY_CORES_MAX`, `CPU_IDLE_PCT_MIN`, `CPU_IDLE_PCT_AVG`, `MEM_AVAIL_MB_MIN`, `MEM_AVAIL_MB_AVG`, `MEM_USED_MB_MAX`, `MEM_USED_MB_AVG`, `CPU_TOTAL_BIN5_AVG`, and `CPU_TOTAL_TREND`. `MEM_AVAIL_*` and `MEM_USED_*` are derived from `kbavail` and `kbmemused` in sar output. When telemetry includes `pidstat`, `--report` emits `APACHE_CPU_SUM_AVG`, `APACHE_CPU_SUM_MAX`, `APACHE_CPU_SAMPLES`, `APACHE_CPU_SUM_BIN5_AVG`, and `APACHE_CPU_SUM_TREND` under `PERF:Telemetry-Process`.
+- When telemetry includes `sar`, `--report` emits `CPU_TOTAL_PCT_MAX`, `CPU_TOTAL_PCT_AVG`, `CPU_BUSY_CORES_MAX`, `CPU_IDLE_PCT_MIN`, `CPU_IDLE_PCT_AVG`, `MEM_AVAIL_MB_MIN`, `MEM_AVAIL_MB_AVG`, `MEM_USED_MB_MAX`, `MEM_USED_MB_AVG`, `CPU_TOTAL_BIN5_AVG`, and `CPU_TOTAL_TREND`. `MEM_AVAIL_*` and `MEM_USED_*` are derived from `kbavail` and `kbmemused` in sar output. When telemetry includes `pidstat`, `--report` emits `APACHE_CPU_SUM_AVG`, `APACHE_CPU_SUM_MAX`, `APACHE_CPU_SAMPLES`, `APACHE_CPU_SUM_BIN5_AVG`, and `APACHE_CPU_SUM_SLOPE_PCT` under `PERF:Process` (and the same pattern for MySQL and wrk when present). Process CPU values (`*_CPU_SUM_*`) are reported as percentages representing summed per-process CPU. Telemetry sections are emitted once per domain without a cache designation, and slope values are percentages with one decimal and no descriptive labels.
 - `LOAD_1_*` and the sar run queue section are postponed; only CPU and memory sections are kept in the sar log.
 - When telemetry includes `mysql`, the run also writes `${prefix}_mysql-perf.log` using the MySQL sampling interval (default 5 seconds, override with `--mysql-interval`).
 

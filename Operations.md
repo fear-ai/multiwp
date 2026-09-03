@@ -474,12 +474,39 @@ The list below covers the standard checks by layer. Use them to confirm configur
 
 Edge checks (Cloudflare):
 - DNS reachability: `dig A <domain> +short`, `dig AAAA <domain> +short`.
+- Delegation: `dig +short NS <domain>`. Parking nameservers mean the domain has lapsed or moved; nothing on the origin will fix that.
 - Functional edge check: browse domain → confirm HTTPS and admin login; confirm Cloudflare Full (strict) and DNS after each addition.
+- Served check, the scriptable form of the functional check. Expect `http=200 ssl=0`:
+
+```bash
+for h in zero.directory alphaeos.net avtranscript.com talkdao.org; do
+    printf '%-20s ' "$h"
+    curl -sS -o /dev/null \
+         -w 'http=%{http_code} ssl=%{ssl_verify_result} t=%{time_total}s\n' \
+         -m 25 "https://$h/"
+done
+```
+
+`zero.directory` is the highest-priority URL: verify it first, and after any Apache, PHP-FPM, or MySQL restart. A site is confirmed as WordPress when the body contains `wp-includes` or `wp-content` and `/wp-login.php` returns 200.
+
+Probe the public URL, not loopback. Loopback presents the default vhost or the default certificate, so `https://127.0.0.1/` returns 403, a bare `Host:` header returns 421 on SNI mismatch, and `--resolve` to loopback returns curl error 60. None of those indicate a site fault. When a probe does fail, two traps: a TLS error can mask an outage, so re-test with `-k` before concluding anything about certificates; and if the answer addresses are not this origin (`curl -sS ifconfig.me`), the fault is upstream -- confirm the origin still serves with `curl -sSk --resolve '<domain>:443:127.0.0.1' https://<domain>/`, and leave the vhosts in place until the domain is recovered or the blog is retired.
 
 Origin checks (host and vhost wiring):
 - Host baseline: run `check-server.sh` and review Apache module surface, listeners, and tuning values alongside `HardenUbuntu.md`.
 - Vhosts present/enabled: `sudo ls /etc/apache2/sites-available`, `sudo ls /etc/apache2/sites-enabled`.
 - SSL/TLS cert validation: `sudo openssl x509 -in /etc/ssl/cloudflare-origin/certs/<safe>.crt -noout -subject -issuer -dates -ext subjectAltName`.
+- Services and listeners: `systemctl is-active mysql php8.3-fpm apache2`, `ss -ltnp | grep -E ':80|:443|:3306'`.
+- Memory pressure: these services share a 3910 MB host with the Zero node used for diagnostics. When that node runs, available memory falls to roughly 300 MB and `apache2`, `mysqld`, and `php-fpm` all appear in the kernel OOM victim table. If sites are slow or unreachable, check `journalctl -k | grep -i oom-kill` and `free -m` before changing any web configuration.
+
+Restarting the stack: restart dependencies first so each service finds its backend available, then re-run the served check above.
+
+```bash
+sudo systemctl restart mysql
+sudo systemctl restart php8.3-fpm
+sudo apache2ctl configtest && sudo systemctl reload apache2
+```
+
+Use `reload` for Apache when only configuration changed; `restart` drops in-flight connections. Always run `configtest` first -- a syntax error plus a restart takes every site down at once.
 
 WordPress checks:
 - WordPress state: `sudo -u www-data wp --path=<wp_root> core version`, `wp site list` (example: `/var/www/html/wordpress` on Ubuntu, with `wordpress` as the chosen subdirectory).
