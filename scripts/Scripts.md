@@ -159,6 +159,7 @@ Use this mapping when implementing or refactoring output so every script emits t
 | `cloud-settings.sh` | `SETTINGS` | `ZoneSettings`, `Baseline` |
 | `rules-cf.sh` | `RULES` | `Get`, `Put`, `Copy` |
 | `onboard-zone.sh` | `ZONE` | `Create`, `Dns`, `Record` |
+| `onboard-site.sh` | `ZONE` | `Create`, `Dns`, `RedirectRule`, `NextSteps` |
 | `get-cert.sh` | `CERT` | `OriginCa`, `Install`, `Verify` |
 | `cloudflare-ips.sh` | `FIREWALL` | `IpList`, `UfwRules` |
 | `apache-vhost.sh` | `ORIGIN` | `Vhosts`, `Enable`, `Tls` |
