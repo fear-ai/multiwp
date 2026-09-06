@@ -251,7 +251,13 @@ apply_rules() {
     for domain in "${domains[@]}"; do
         local zone_id
         init_auth_for_domain "$domain"
-        zone_id="${CF_ZONE_ID-}"
+        # Only reuse a preset CF_ZONE_ID when it belongs to this domain.
+        # The auth file sets CF_ZONE_ID for its own zone, so trusting it
+        # unconditionally would write every --dest to that zone instead.
+        zone_id=""
+        if [ -n "${CF_ZONE_ID-}" ] && [ "${CF_ZONE-}" = "$domain" ]; then
+            zone_id="$CF_ZONE_ID"
+        fi
         if [ -z "$zone_id" ]; then
             if ! cf_zone_id_for_domain "$domain"; then
                 err "No zone ID resolved for $domain"
