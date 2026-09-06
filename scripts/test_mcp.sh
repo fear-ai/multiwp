@@ -7,6 +7,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS_DIR="$ROOT_DIR/scripts"
 
+. "$SCRIPTS_DIR/common.sh"
 . "$SCRIPTS_DIR/mcp.sh"
 
 set +e

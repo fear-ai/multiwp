@@ -128,6 +128,10 @@ HSTS is enabled as part of the managed security headers baseline, so treat it as
 #### 3.4.7 Cache Rules
 Cache Rules are configured in the Cloudflare UI under `Caching` → `Cache Rules` (not `Rules`). Use `Perf.md` as the canonical source for cache rule expressions, ordering, and validation. Cache Rules have a restricted field set; for cookie-based bypass logic, use `http.cookie contains` and the Expression Editor to avoid unsupported identifiers. Cache-bust query parameters are not special in Cloudflare; by default they become part of the cache key, so use an explicit bypass rule for `cache_bust` when testing.
 
+Edge TTL and low-traffic zones: `cf-cache-status: EXPIRED` means the object was cached, its edge TTL elapsed, and Cloudflare revalidated against the origin. It is not a rule failure. Cloudflare caches per colo, so an object stays warm only if that colo receives a request for it within the TTL. On zones receiving roughly 70-125 requests per hour spread across colos, a 2 hour `edge_ttl` expires between visitors and the measured cache ratio stays low; the busiest zone here reached 34.5 percent while the quietest sat near 1 percent under the same rule. `edge_ttl` is set to 86400 on the multisite zones for this reason. Raising the TTL is the correct lever for low-traffic sites; a single MISS on a cold object proves nothing, so confirm behaviour by requesting the same URL twice and reading `age` on the second response.
+
+Reading `cf-cache-status` when the origin sends no cache headers: with `edge_ttl` mode `override_origin`, Cloudflare imposes its own TTL and the absence of `Cache-Control` or `Expires` at the origin does not prevent edge caching. Do not add `mod_expires` on that evidence alone.
+
 ### 3.5 Automation
 Cloudflare UI is authoritative for SSL mode, redirects, and headers. Automation scripts help with DNS, origin certificate placement, and vhost generation when repeatability is needed.
 
@@ -330,13 +334,37 @@ Single-site routing:
 Multisite routing:
 - Adds a `wp-admin` trailing slash rule that preserves an optional site prefix:
   `^([_0-9a-zA-Z-]+/)?wp-admin$ -> $1wp-admin/`.
-- Short-circuits rewriting for real files or directories, then normalizes requests with optional site prefixes so `wp-content`, `wp-admin`, `wp-includes`, and `.php` paths resolve correctly.
+- Short-circuits rewriting for real files or directories, then normalizes requests carrying a site prefix so `wp-content`, `wp-admin`, `wp-includes`, and `.php` paths resolve correctly.
+- The prefix group in the two normalization rules is mandatory, not optional. An optional group (`(...)?`) matches the empty string, so a request with no prefix rewrites to itself and loops until `LimitInternalRecursion` aborts it with a 500. See "Rewrite recursion" below.
 - Finishes with a front controller rule that sends the remaining requests to `index.php`.
 - These extra rules are required for subdirectory networks with mapped apex domains; they keep multisite routing intact when the external host maps to an internal subdirectory.
+
+Rewrite recursion:
+
+The two multisite normalization rules strip a leading site prefix and re-dispatch the request:
+
+```
+RewriteRule ^([_0-9a-zA-Z-]+/)(wp-(content|admin|includes).*) $2 [L]
+RewriteRule ^([_0-9a-zA-Z-]+/)(.*\.php)$ $2 [L]
+```
+
+Both groups must be mandatory. When the prefix group was written as optional, a request with no prefix produced `$2` equal to the original URI: the rule rewrote the request to itself, Apache restarted `.htaccess` processing, and the request looped until `LimitInternalRecursion` (default 10) aborted it. The client received a 500 and the error log recorded `AH00124`.
+
+The visible symptom was 500 responses on probe traffic for nonexistent paths under `wp-content`, for example `wp-content/plugins/<name>/<file>.php`. Those paths do not exist on disk; the 500 came from the loop, not from PHP executing anything. Requests for a nonexistent `.php` at the document root returned 404 correctly, because the earlier real-file/directory short-circuit caught them before these rules were reached.
+
+Diagnosis and check:
+
+```
+sudo grep -c AH00124 /var/log/apache2/<site>_ssl_error.log
+curl -sSkI --resolve <domain>:443:127.0.0.1 https://<domain>/wp-content/plugins/none/x.php
+```
+
+A correct configuration returns 404 and adds no `AH00124` entry. A 500 with a new `AH00124` means a normalization rule has an optional prefix group.
 
 Template sources and validation:
 - `.htaccess` templates live in `templates/htaccess-multisite` and `templates/htaccess-singlesite`.
 - `check-wp.sh --template-check` can be used to confirm the live `.htaccess` contains the required rules.
+- The template is the source of the defect if it recurs: a site provisioned from an uncorrected `templates/htaccess-multisite` inherits the loop. Fix the template, not only the deployed file.
 
 Apache requirements for `.htaccess`:
 - Keep `AllowOverride All` on the WordPress docroot so `.htaccess` rewrite rules are honored.

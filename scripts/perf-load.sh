@@ -283,8 +283,8 @@ fi
 
 WRK_BIN="${WRK_BIN:-}"
 if [ -z "$WRK_BIN" ]; then
-    if [ -x "/home/ubuntu/WP/wrk2/wrk" ]; then
-        WRK_BIN="/home/ubuntu/WP/wrk2/wrk"
+    if [ -x "/home/ubuntu/Work/WP/wrk2/wrk" ]; then
+        WRK_BIN="/home/ubuntu/Work/WP/wrk2/wrk"
     else
         WRK_BIN="wrk2"
     fi

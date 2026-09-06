@@ -48,6 +48,19 @@ The put flow is:
 
 This design deliberately avoids a merge feature. Operators should treat the exported rules file as the source of truth and re-put when changes are made.
 
+Destination zone resolution: an auth file sets `CF_ZONE_ID` for its own zone. Put must not reuse that value for an arbitrary `--dest`, or every target is written to the auth file's zone while the log reports success. The script now reuses a preset `CF_ZONE_ID` only when `CF_ZONE` matches the destination domain, and otherwise resolves the zone ID per domain.
+
+Verify a put reached the intended zone by comparing the reported ruleset ID against the destination's own entrypoint ID:
+
+```
+curl -sS "https://api.cloudflare.com/client/v4/zones/<dest_zone_id>/rulesets/phases/<phase>/entrypoint" \
+  -H "X-Auth-Email: $CF_API_EMAIL" -H "X-Auth-Key: $CF_API_KEY"
+```
+
+A reported ID belonging to the source zone means the write went to the wrong place.
+
+Get writes the export to the current working directory unless `--file` gives a path. Pass `--file conf/<zone>_<phase>.json` to keep exports with the other ruleset files.
+
 ## Export file format
 The exported JSON must be concise and portable. The file should include only rules and a minimal set of metadata that aids review, but it must not include any Cloudflare-generated IDs.
 

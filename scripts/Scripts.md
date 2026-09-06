@@ -699,6 +699,11 @@ Environment variables:
 Cloudflare auth variables listed in `auth.sh`.
 
 Notes:
+- `--get` writes the export to the current working directory unless `--file` supplies a path. Use `--file conf/<zone>_<phase>.json` to keep exports alongside the other ruleset files.
+- A preset `CF_ZONE_ID` is reused only when `CF_ZONE` matches the destination domain; otherwise the zone ID is resolved per `--dest`. Without that guard an auth file's `CF_ZONE_ID` sends every destination's rules to the auth file's own zone while still logging success.
+- Free plans reject rate-limit periods other than 10 seconds. A rule using `period: 60` fails with `not entitled to use the period 60, can only use a period among [10]`.
+
+Notes:
 - Get strips rule IDs and zone-specific metadata so files remain portable.
 - Get exits with a clear error if the phase has no rules, or if only disabled rules exist and `--all` is not set.
 - Put replaces the entire ruleset for the target zone; there is no merge behavior.
