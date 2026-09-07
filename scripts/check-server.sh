@@ -76,7 +76,14 @@ show_file_lines() {
 
 overall_ok=true
 
+# Level vocabulary, aligned with common.sh and with the Zero node scripts
+# (zcutil/fmessage.sh, fzero.sh receipt_*): pass / info / warn / fail, where only
+# fail flips the overall result. There is deliberately no debug level.
 note_ok() {
+    status_pass "$*"
+}
+
+note_info() {
     status_info "$*"
 }
 

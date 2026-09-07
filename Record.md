@@ -28,6 +28,31 @@ The canonical mapping used throughout this repository is:
 - `zone_id` (CSV/auth) == Cloudflare zone identifier used for API calls.
 - `zone_name` (CSV) == informational echo from the API; it does not drive selection.
 
+### Per-account inventory files
+
+The inventory is split one file per Cloudflare account. No script hardcodes a path: every reference resolves through `${DOMAINS_FILE:-$ROOT_DIR/domains.csv}`, and the scripts listed in `scripts/Scripts.md` also accept `--domains-file`.
+
+| File | Account | Auth file |
+|------|---------|-----------|
+| `domains-alpha.csv` | AlphaEOS | `~/.config/cloudflare/alphaeosnet.auth` |
+| `domains-zero.csv` | Zero | `~/.config/cloudflare/zerocurrencyio.auth` |
+| `domains-zknow.csv` | zknow@protonmail.com | `~/.config/cloudflare/zknow.auth` |
+
+Usage:
+
+```
+DOMAINS_FILE=domains-zero.csv ./scripts/check-domain.sh <domain>
+./scripts/check-auth.sh --domains-file domains-zknow.csv --auth-file ~/.config/cloudflare/zknow.auth
+```
+
+Keep one account per file. `check-auth.sh` refuses to run against a file containing multiple `auth_file` values unless `--auth-file` selects one, so mixing accounts makes that check require a manual flag on every invocation.
+
+All inventory files are mode 600 and matched by `domains-*.csv` in `.gitignore`. They hold the origin IP, zone and account identifiers, database and admin usernames, and filesystem paths; none of that authenticates, but together it maps the estate.
+
+Reconcile against the API rather than trusting the file. A zone deleted at Cloudflare leaves a stale row that breaks `check-cf.sh` with "Invalid or missing zone", and a zone added outside the tooling never appears. Retired domains are tracked out-of-band by the operator so their absence is not read as drift.
+
+Note that `site_type` gates several scripts: `cloud-settings.sh` skips rows typed `none`, `ignore` or `worker`, so a row left at `none` is silently excluded from baseline application.
+
 ## Intent Signals per Site Type
 The `site_type` column is the primary intent flag, but it is not the only signal. Additional fields determine the intended behavior for each site type and prevent ambiguity during recording.
 

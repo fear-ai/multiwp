@@ -168,7 +168,15 @@ export_rules() {
     local output_path="$3"
     local zone_id
     init_auth_for_domain "$source"
-    zone_id="${CF_ZONE_ID-}"
+    # Same guard as apply_rules: only reuse a preset CF_ZONE_ID when it belongs to
+    # this domain. An auth file (or an inherited environment variable) sets
+    # CF_ZONE_ID for its own zone, so trusting it unconditionally would export
+    # that zone's rules while reporting --src, and --copy would then write them
+    # to every --dest.
+    zone_id=""
+    if [ -n "${CF_ZONE_ID-}" ] && [ "${CF_ZONE-}" = "$source" ]; then
+        zone_id="$CF_ZONE_ID"
+    fi
     if [ -z "$zone_id" ]; then
         if ! cf_zone_id_for_domain "$source"; then
             err "No zone ID resolved for $source"
@@ -221,9 +229,17 @@ export_rules() {
       | if $include_disabled == true then . else .rules = (.rules | map(select(.enabled != false))) end
       | if (.phase == null or .phase == "") then del(.phase) else . end
     '
-    if ! echo "$resp" | jq --argjson include_disabled "$include_disabled" "$filter" > "$output_path"; then
+    # Write to a temp file in the same directory and rename on success. A direct
+    # `> "$output_path"` truncates the previous export before jq runs, so a filter
+    # error or malformed response leaves a zero-byte file where a good export was
+    # - and with --copy, apply_rules then reads that same path.
+    local tmp_out
+    tmp_out=$(mktemp "${output_path}.XXXXXX") || err "Cannot create temp file next to $output_path"
+    trap 'rm -f "$tmp_out"' RETURN INT TERM
+    if ! echo "$resp" | jq --argjson include_disabled "$include_disabled" "$filter" > "$tmp_out"; then
         err "Failed to write export file: $output_path"
     fi
+    mv "$tmp_out" "$output_path" || err "Failed to move export into place: $output_path"
     log "Exported ${PHASE} rules from $source to $output_path"
 }
 

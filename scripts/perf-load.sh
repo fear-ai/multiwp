@@ -1152,6 +1152,17 @@ finalize_sar_log() {
     fi
 }
 
+# Background samplers (sar, pidstat, vmstat, iostat, cgtop, and the mysql perf
+# subshell) outlive an interrupted run unless they are stopped explicitly. The
+# normal teardown below handles a clean exit; this covers Ctrl-C and SIGTERM.
+perf_interrupt_cleanup() {
+    trap - INT TERM
+    stop_telemetry 2>/dev/null || true
+    stop_mysql_perf 2>/dev/null || true
+    exit 130
+}
+trap perf_interrupt_cleanup INT TERM
+
 for domain in "${DOMAINS[@]}"; do
     section "$MODE_UPPER" "Domain"
     kv "DOMAIN" "$domain"
@@ -1193,7 +1204,10 @@ for domain in "${DOMAINS[@]}"; do
         SAR_LOG="$OUT_DIR/${prefix}_sar.log"
         TELEMETRY_CMD_SAR=(sar -o "$SAR_BIN" -u -r)
         SAR_CMD="$(telemetry_cmd_string sar)"
-        SADF_CMD="sadf -d $SAR_BIN -- -u -r | awk 'BEGIN {keep=0} /^# / {if ($0 ~ /;CPU;%user/ || $0 ~ /;kbmemfree;/) {keep=1; print; next} keep=0; next} keep {print}'"
+        # $0 inside double quotes expands to this script's path, which recorded a
+        # syntactically invalid awk program into perf_runs.csv. Escape it so the
+        # awk field reference survives.
+        SADF_CMD="sadf -d $SAR_BIN -- -u -r | awk 'BEGIN {keep=0} /^# / {if (\$0 ~ /;CPU;%user/ || \$0 ~ /;kbmemfree;/) {keep=1; print; next} keep=0; next} keep {print}'"
     fi
     if $USE_PIDSTAT; then
         PIDSTAT_CMD="$(telemetry_cmd_string pidstat)"
@@ -1297,7 +1311,10 @@ for domain in "${DOMAINS[@]}"; do
         fi
     fi
 
-    if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP; then
+    # USE_MYSQL_PERF must be in this guard: with --telemetry=mysql alone the
+    # condition was false, stop_mysql_perf never ran, and the sampler subshell
+    # (while true; sleep; mysql ...) outlived the script - one leaked per domain.
+    if $USE_SAR || $USE_PIDSTAT || $USE_VMSTAT || $USE_IOSTAT || $USE_CGTOP || $USE_MYSQL_PERF; then
         stop_telemetry
         stop_mysql_perf
         finalize_sar_log

@@ -154,8 +154,13 @@ if [ -n "$PORTAL_URL" ]; then
         auth_header=(-H "Authorization: Bearer $MCP_BEARER_TOKEN")
     fi
 
-    headers_file=$(mktemp)
-    body_file=$(mktemp)
+    # body_file can hold an MCP response containing session tokens; both are
+    # created 0600 and removed even if curl is interrupted.
+    mcp_old_umask=$(umask); umask 077
+    headers_file=$(mktemp) || err "Cannot create temp file for response headers"
+    body_file=$(mktemp) || err "Cannot create temp file for response body"
+    umask "$mcp_old_umask"
+    trap 'rm -f "${headers_file:-}" "${body_file:-}"' EXIT INT TERM
     curl_status=0
     if ! curl -sS -m 5 -D "$headers_file" -o "$body_file" \
         -H "Content-Type: application/json" \

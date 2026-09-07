@@ -3,7 +3,9 @@
 # Keep permissions tight: chmod 600 <auth-file>
 
 # API base (priority)
-CF_API_BASE=""
+# CF_API_BASE: leave unset to use the default API endpoint. An empty value here
+# would override the default and send requests to a bare path.
+#CF_API_BASE=""
 
 # Account ID and optional name
 CF_ACCOUNT_ID=""

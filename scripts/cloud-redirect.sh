@@ -74,7 +74,7 @@ ensure_redirect_rule() {
     ruleset_resp=$(cf_api_request GET "/zones/$CF_ZONE_ID/rulesets/phases/http_request_dynamic_redirect/entrypoint")
     if [ "$(cf_api_success "$ruleset_resp")" != "true" ]; then
         log "No redirect ruleset found for $domain; creating new entrypoint ruleset"
-        payload=$(jq -n --arg desc "$desc" --arg url "$target_url" '
+        payload=$(jq -n --arg desc "$desc" --arg url "$target_url" --arg expr "$expr" --arg ref "$ref" '
             {
                 name: "Redirect rules",
                 description: "",
@@ -83,7 +83,8 @@ ensure_redirect_rule() {
                 rules: [
                     {
                         action: "redirect",
-                        expression: "true",
+                        expression: $expr,
+                        ref: $ref,
                         description: $desc,
                         enabled: true,
                         action_parameters: {
@@ -117,34 +118,21 @@ ensure_redirect_rule() {
 
     [ -n "$ruleset_id" ] || err "Missing redirect ruleset id for $domain"
 
+    # This domain's rule is identified by its ref, or by the exact host expression
+    # for rules created before refs were set. Every other rule in the zone is kept
+    # as-is: matching on `expression == "true"` (the previous behavior) rewrote an
+    # unrelated catch-all redirect to this domain's target.
     updated_rules=$(echo "$ruleset_resp" | jq -c \
         --arg expr "$expr" \
         --arg ref "$ref" \
         --arg desc "$desc" \
         --arg url "$target_url" '
         (.result.rules // []) as $rules
-        | ($rules | map(
-            if (.action == "redirect" and .expression == "true") then
-                .action = "redirect"
-                | .enabled = true
-                | .description = $desc
-                | .action_parameters = {
-                    "from_value": {
-                        "preserve_query_string": true,
-                        "status_code": 301,
-                        "target_url": { "value": $url }
-                    }
-                }
-            else
-                .
-            end
-        )) as $with_static_updated
-        | ($with_static_updated | map(select((.ref != $ref) and (.expression != $expr)))) as $filtered
-        | ($filtered | map(select(.action == "redirect" and .expression == "true"))) as $statics
-        | if ($statics | length) == 0
-          then ($filtered + [{
+        | ($rules | map(select(((.ref // "") != $ref) and (.expression != $expr)))) as $others
+        | ($others + [{
               "action": "redirect",
-              "expression": "true",
+              "expression": $expr,
+              "ref": $ref,
               "description": $desc,
               "enabled": true,
               "action_parameters": {
@@ -154,9 +142,7 @@ ensure_redirect_rule() {
                       "target_url": { "value": $url }
                   }
               }
-          }])
-          else $filtered
-          end')
+          }])')
     [ -n "$updated_rules" ] || err "Failed to build redirect rules payload for $domain"
 
     payload=$(jq -n --arg name "$ruleset_name" --arg desc "$ruleset_desc" --arg kind "$ruleset_kind" \

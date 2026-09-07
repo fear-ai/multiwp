@@ -406,7 +406,9 @@ wp_mode_flag_for() {
 
 run_edge() {
     local domains
-    read -r -a domains <<<"$(select_domains)"
+    local domains_out
+    domains_out=$(select_domains) || return 1
+    read -r -a domains <<<"$domains_out"
     local domain key auth_file zone_id ok
     for domain in "${domains[@]}"; do
         key=$(normalize_domain "$domain")
@@ -453,7 +455,9 @@ run_edge() {
 
 run_origin() {
     local domains
-    read -r -a domains <<<"$(select_domains)"
+    local domains_out
+    domains_out=$(select_domains) || return 1
+    read -r -a domains <<<"$domains_out"
     local domain key site_type root ok
     for domain in "${domains[@]}"; do
         if is_redirect_intent "$domain"; then
@@ -481,7 +485,9 @@ run_origin() {
 
 run_wp() {
     local domains
-    read -r -a domains <<<"$(select_domains)"
+    local domains_out
+    domains_out=$(select_domains) || return 1
+    read -r -a domains <<<"$domains_out"
     local domain key site_type root mode_flag ok
     for domain in "${domains[@]}"; do
         if is_redirect_intent "$domain"; then

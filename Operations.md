@@ -29,6 +29,8 @@ The dependency chain is explicit: Cloudflare edge behavior depends on correct DN
    6. [3.6 Hybrid Execution](#36-hybrid-execution)
    7. [3.7 Notes](#37-notes)
       1. [3.7.1 Redirect Config](#371-redirect-config)
+      2. [3.7.2 Redirect DNS Target](#372-redirect-dns-target)
+      3. [3.7.3 Redirect Zone Mail Records](#373-redirect-zone-mail-records)
 3. [4. Origin TLS](#4-origin-tls)
    1. [4.1 Host Services](#41-host-services)
    2. [4.2 Host Baseline (HardenUbuntu)](#42-host-baseline-hardenubuntu)
@@ -195,10 +197,11 @@ When multiple `CF_ZONE`/`CF_ZONE_ID` pairs are listed in an auth file, scripts d
 
 Environment variables always take precedence over the auth file, so one-off overrides can be provided safely at runtime without editing the file. Account-scoped tokens are verified against the account endpoint rather than the user endpoint. For a quick sanity check, use `scripts/verify-cf-auth.sh`, which validates any available account API token, global API key, and Origin CA key; Origin CA verification requires a `CF_ZONE_ID`.
 
-Domain and zone data sources:
-- `domains.csv` stores the apex domain in `domain` and the Cloudflare zone identifier in `zone_id`. The `zone_name` column is informational and is recorded from the API.
-- Auth files list zone pairs as `CF_ZONE=example.com` and `CF_ZONE_ID=<id>`; the zone name is the same apex domain used in `domains.csv`.
-- Domain-scoped scripts resolve zone IDs by matching the domain name first and only use the zone ID for API calls.
+Domain and zone data sources: the `domains.csv` schema and the canonical
+domain/zone mapping are defined in `Record.md#domain-and-zone-data-sources` and
+are not restated here. For this section it is enough that domain-scoped scripts
+resolve zone IDs by matching the domain name first, and use the zone ID only for
+API calls.
 
 ### 3.6 Hybrid Execution
 Use the mixed UI + script workflow below to keep edge policy in the UI while keeping origin actions repeatable and auditable.
@@ -237,11 +240,64 @@ Operational notes:
 - The baseline security headers now apply on both canonical and redirect zones; this trades a small redirect cost for consistent policy and simpler audits.
 - Validation: confirm HTTP and HTTPS requests for both apex and `www` return 301 to the canonical host, preserve path/query, and do not loop. Use `curl -I` from a client or a browser test, and verify that the origin is not being hit directly (UFW logs should show only Cloudflare IPs if the allowlist is active).
 
+#### 3.7.2 Redirect DNS Target
+
+A Redirect Rule answers at the edge, so Cloudflare never contacts an origin for these zones. The A record exists only so the hostname resolves and the proxy engages; its value is never used while the rule is in place.
+
+Point redirect-only zones at a non-routable address rather than a real origin:
+
+```
+A      example.com   192.0.2.1   proxied
+CNAME  www           example.com proxied
+CNAME  *             example.com proxied
+```
+
+`192.0.2.1` is IANA TEST-NET-1, reserved for documentation and guaranteed never routable. The canonical target `alternat.info` uses the IPv6 equivalent, `AAAA 100::` (RFC 6666 discard prefix); either is acceptable.
+
+Do not point these zones at the WordPress origin. Two reasons:
+
+- It publishes the origin address. A redirect zone carrying the origin IP exposes it through DNS history, an API read, or a momentary grey-cloud toggle, which defeats the Cloudflare-only UFW allowlist described in `HardenUbuntu.md`.
+- It creates a live fallback path. If a Redirect Rule is deleted, disabled, or errors, requests reach Apache. With no vhost for that name the catch-all answers, but that depends on the catch-all staying correct. A non-routable target fails closed instead.
+
+Keep the record proxied. An unproxied record would publish `192.0.2.1` to clients and break the redirect, since the rule only runs for proxied traffic.
+
+Verification:
+
+```
+curl -sSI https://<domain>/            # expect 301 to the canonical host
+curl --resolve <domain>:443:192.0.2.1 https://<domain>/   # expect no route
+```
+
+#### 3.7.3 Redirect Zone Mail Records
+
+A redirect-only zone sends and receives no mail. Leaving it with no mail records at all is worse than configuring it explicitly: without SPF and DMARC, the domain can be forged and receiving servers have no policy to consult.
+
+Set the "no mail" posture:
+
+| Record | Value | Purpose |
+|--------|-------|---------|
+| `MX` | `0 .` | Null MX (RFC 7505). Declares the domain accepts no mail so senders fail immediately instead of retrying for days. |
+| `TXT` @ | `v=spf1 -all` | No host is authorised to send as this domain. |
+| `TXT _dmarc` | `v=DMARC1; p=reject; rua=mailto:<address>` | Reject anything failing SPF or DKIM, with reports to a monitored address. |
+| `TXT *._domainkey` | `v=DKIM1; p=` | Wildcard null DKIM. Revokes every selector so retired keys cannot be replayed. |
+
+When retiring real mail hosting, remove the previous MX, SPF, DKIM and any client CNAMEs (`imap`, `pop3`, `smtp`) first, then add the four records above. Export the zone before deleting anything; removing MX records stops delivery immediately and is not reversible for mail already in flight.
+
+Removing DNS does not cancel the mail provider subscription. Cancel the account separately and export any mailbox contents first.
+
+Public resolvers serve the previous values until the old TTL expires. Confirm changes against the zone's own nameservers rather than a recursive resolver:
+
+```
+dig +short MX <domain> @<one of the zone nameservers>
+```
+
+Retired hosting also leaves stale `include:` entries in SPF. An include for a host no longer in use still authorises that host to send as the domain, so drop it rather than leaving it in place.
+
 ## 4. Origin TLS
 The origin layer provides the TLS endpoint Cloudflare connects to and the Apache vhost routing that serves WordPress. This layer must be correct before Full (strict) can succeed at the edge.
 
 ### 4.1 Host Services
-Provision Ubuntu 24 with Apache 2.4, PHP 8.x, and MySQL 8.x. Check `CONF.md` for the latest site-specific recommendations (versions, paths, domains).
+Provision Ubuntu 24 with Apache 2.4, PHP 8.x, and MySQL 8.x. Site-specific versions, paths, and domains are recorded in the operator inventory, which is maintained outside this repository.
 
 Operations introduces the host baseline here so operators see the dependency chain in context. All Apache, PHP, and MySQL installation and configuration steps live in `HardenUbuntu.md`, which is the authoritative host baseline document. Complete that guide (including a run of `check-server.sh`) before moving on to origin certificates and vhost wiring in the subsections below. When the baseline is complete, return to section 4.3 (`Operations.md#43-origin-certs`).
 
@@ -370,13 +426,10 @@ Apache requirements for `.htaccess`:
 - Keep `AllowOverride All` on the WordPress docroot so `.htaccess` rewrite rules are honored.
 - Keep `Options FollowSymLinks` unless you are prepared to validate `SymLinksIfOwnerMatch` as a tighter alternative.
 
-If you choose to switch to `SymLinksIfOwnerMatch`, validate that permalinks and admin paths still resolve correctly:
-
-1) Run `sudo apache2ctl configtest` and reload Apache.
-2) For each site, test the front page, a known permalink, `/wp-login.php`, `/wp-admin/` (redirect to login), and `/wp-json/`.
-3) Check per-site Apache error logs for rewrite or permission errors.
-
-Do not remove both `FollowSymLinks` and `SymLinksIfOwnerMatch` while `.htaccess` remains the source of rewrite rules; Apache will refuse the rewrite directives and permalinks will break.
+The validation procedure for switching to `SymLinksIfOwnerMatch`, and the warning
+about removing both options, are in
+`HardenUbuntu.md#directory-options-and-htaccess-rewrites`, which owns Apache
+directory configuration.
 
 We have discussed honoring Cloudflare HTTPS signals at the multisite `.htaccess` layer as an additional safeguard. If that is ever implemented, keep it limited to the multisite `.htaccess` and do not add it to the `zero.directory` single-site `.htaccess`.
 
@@ -569,15 +622,14 @@ Prerequisites:
 - No contact-change lock.
 - Nameservers already on Cloudflare.
 
-Namecheap:
-1) Dashboard → Domain List → choose domain → turn off Registrar Lock.
-2) Get EPP/auth code: Domain → Sharing & Transfer → Transfer Out.
-3) Cloudflare: Registrar → Transfer → enter domain + auth code; approve emails if required.
+Unlock the domain and obtain its auth code at the current registrar:
 
-NameSilo:
-1) Domain Manager → unlock domain.
-2) Get auth code: Domain Manager → getAuthCode.
-3) Cloudflare: Registrar → Transfer → enter domain + auth code; approve emails if required.
+- **Namecheap**: Dashboard → Domain List → choose domain → turn off Registrar
+  Lock; then Domain → Sharing & Transfer → Transfer Out for the EPP/auth code.
+- **NameSilo**: Domain Manager → unlock domain; then Domain Manager → getAuthCode.
+
+Then, for either registrar: Cloudflare → Registrar → Transfer → enter domain and
+auth code; approve emails if required.
 
 Cloudflare bills and adds one-year renewal; monitor status in Registrar.
 

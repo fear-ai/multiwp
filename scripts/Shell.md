@@ -104,4 +104,18 @@ Key helpers:
 
 ## Security and Operational Discipline
 
+Credentials are never passed on a command line. `auth.sh` writes them to a
+`curl -K` config file created under `umask 077` and removed by a trap; anything in
+argv is readable by any local user through `ps auxww` for the life of the request.
+The same rule applies to secrets in scripts you add.
+
+Where a secret must still be typed (an `--token`-style flag), type the command with
+a **leading space** so it is kept out of shell history. This works because Ubuntu's
+default `~/.bashrc` sets `HISTCONTROL=ignoreboth`, which includes `ignorespace`; it
+is not guaranteed on other hosts or under `sh`/`zsh`, and it hides the command from
+history only, never from `ps`. Prefer an auth file or a `--*-file` option.
+
+Errors from validators go to stderr, never stdout: a message on stdout is captured
+and discarded inside `$(...)`, and it corrupts machine-parsed `kv`/`section` output.
+
 Run scripts as a sudo-capable operator (for example, `ubuntu`) and use `priv()` for elevated actions. Avoid running as root. Only disable sudo with `--no-sudo` when the environment is constrained and you understand the impact. Never hardcode credentials; use environment variables or auth files as documented in `scripts/Scripts.md` and `scripts/example.auth`.

@@ -100,6 +100,11 @@ while getopts ":-:" opt; do
         *) err "Unknown option -${opt}" ;;
     esac
 done
+# getopts stops at the first non-option token. Without this shift and guard,
+# anything after it was silently discarded, so a trailing --domain looked
+# accepted while the slice stayed un-scoped.
+shift $((OPTIND-1))
+[ "$#" -eq 0 ] || err "Unexpected arguments: $*"
 
 if [ -n "$RUN_PARAM" ] && [ -n "$DURATION_RAW" ]; then
     err "--run-param and --duration cannot be used together"
@@ -206,14 +211,11 @@ slice_apache() {
     local dest="$2"
     [ -f "$src" ] || { log_msg "WARN missing: $src"; return 0; }
 
-    if [ ! -r "$src" ]; then
-        sudo=true
-    else
-        sudo=false
-    fi
-
-    if $sudo; then
-        log_start=$(sudo python3 - "$src" "$dest" "$PAD_START" "$PAD_END" <<'PYCODE'
+    # priv() already resolves the sudo/no-sudo decision and honours --no-sudo, so
+    # a single invocation replaces the two identical copies this function used to
+    # carry. Reading the file needs elevation only when it is not readable, but
+    # priv is harmless when it is.
+    log_start=$(priv python3 - "$src" "$dest" "$PAD_START" "$PAD_END" <<'PYCODE'
 import sys
 from datetime import datetime
 
@@ -221,6 +223,8 @@ src, dest, start_s, end_s = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 start = datetime.fromisoformat(start_s)
 end = datetime.fromisoformat(end_s)
 first_dt = None
+parsed = 0
+skipped = 0
 
 def parse_apache(ts):
     return datetime.strptime(ts, "%d/%b/%Y:%H:%M:%S %z")
@@ -233,46 +237,23 @@ with open(src, "r", errors="ignore") as f_in, open(dest, "w") as f_out:
         try:
             dt = parse_apache(ts)
         except ValueError:
+            skipped += 1
             continue
+        parsed += 1
         if first_dt is None:
             first_dt = dt
         if start <= dt <= end:
             f_out.write(line)
+if parsed == 0 and skipped > 0:
+    print("PARSE_FAILED %d" % skipped, file=sys.stderr)
+    sys.exit(2)
 if first_dt and start < first_dt:
     print(first_dt.isoformat())
 PYCODE
-)
-    else
-        log_start=$(python3 - "$src" "$dest" "$PAD_START" "$PAD_END" <<'PYCODE'
-import sys
-from datetime import datetime
-
-src, dest, start_s, end_s = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-start = datetime.fromisoformat(start_s)
-end = datetime.fromisoformat(end_s)
-first_dt = None
-
-def parse_apache(ts):
-    return datetime.strptime(ts, "%d/%b/%Y:%H:%M:%S %z")
-
-with open(src, "r", errors="ignore") as f_in, open(dest, "w") as f_out:
-    for line in f_in:
-        if "[" not in line or "]" not in line:
-            continue
-        ts = line.split("[", 1)[1].split("]", 1)[0]
-        try:
-            dt = parse_apache(ts)
-        except ValueError:
-            continue
-        if first_dt is None:
-            first_dt = dt
-        if start <= dt <= end:
-            f_out.write(line)
-if first_dt and start < first_dt:
-    print(first_dt.isoformat())
-PYCODE
-)
-    fi
+) || {
+        log_msg "ERROR could not parse any timestamp in ${src}; slice is empty"
+        return 1
+    }
     if [ "$DURATION_MODE" = "true" ] && [ -n "$log_start" ]; then
         log_msg "WARN log ${src} starts at ${log_start}"
     fi
@@ -283,14 +264,7 @@ slice_syslog() {
     local dest="$2"
     [ -f "$src" ] || { log_msg "WARN missing: $src"; return 0; }
 
-    if [ ! -r "$src" ]; then
-        sudo=true
-    else
-        sudo=false
-    fi
-
-    if $sudo; then
-        log_start=$(sudo python3 - "$src" "$dest" "$PAD_START" "$PAD_END" "$YEAR" <<'PYCODE'
+    log_start=$(priv python3 - "$src" "$dest" "$PAD_START" "$PAD_END" "$YEAR" <<'PYCODE'
 import sys
 from datetime import datetime, timezone
 
@@ -299,9 +273,24 @@ start = datetime.fromisoformat(start_s)
 end = datetime.fromisoformat(end_s)
 year = int(year_s)
 first_dt = None
+parsed = 0
+skipped = 0
 
-def parse_syslog(ts):
-    dt = datetime.strptime(f"{year} {ts}", "%Y %b %d %H:%M:%S")
+def parse_syslog(parts):
+    """Accept both syslog timestamp formats seen on Ubuntu.
+
+    rsyslog on this host writes RFC 5424-style ISO-8601 with an offset
+    (2026-09-06T00:00:03.280988+00:00), documented in Spank LogFormats.md 4.1.
+    Older/remote sources may still emit RFC 3164 (Sep  6 00:00:03), which
+    carries no year - hence the year argument for that branch only.
+    """
+    try:
+        dt = datetime.fromisoformat(parts[0])
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        pass
+    ts = " ".join(parts[0:3])
+    dt = datetime.strptime("%d %s" % (year, ts), "%Y %b %d %H:%M:%S")
     return dt.replace(tzinfo=timezone.utc)
 
 with open(src, "r", errors="ignore") as f_in, open(dest, "w") as f_out:
@@ -309,108 +298,30 @@ with open(src, "r", errors="ignore") as f_in, open(dest, "w") as f_out:
         parts = line.split()
         if len(parts) < 3:
             continue
-        ts = " ".join(parts[0:3])
         try:
-            dt = parse_syslog(ts)
+            dt = parse_syslog(parts)
         except ValueError:
+            skipped += 1
             continue
+        parsed += 1
         if first_dt is None:
             first_dt = dt
         if start <= dt <= end:
             f_out.write(line)
+if parsed == 0 and skipped > 0:
+    print("PARSE_FAILED %d" % skipped, file=sys.stderr)
+    sys.exit(2)
 if first_dt and start < first_dt:
     print(first_dt.isoformat())
 PYCODE
-)
-    else
-        log_start=$(python3 - "$src" "$dest" "$PAD_START" "$PAD_END" "$YEAR" <<'PYCODE'
-import sys
-from datetime import datetime, timezone
-
-src, dest, start_s, end_s, year_s = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
-start = datetime.fromisoformat(start_s)
-end = datetime.fromisoformat(end_s)
-year = int(year_s)
-first_dt = None
-
-def parse_syslog(ts):
-    dt = datetime.strptime(f"{year} {ts}", "%Y %b %d %H:%M:%S")
-    return dt.replace(tzinfo=timezone.utc)
-
-with open(src, "r", errors="ignore") as f_in, open(dest, "w") as f_out:
-    for line in f_in:
-        parts = line.split()
-        if len(parts) < 3:
-            continue
-        ts = " ".join(parts[0:3])
-        try:
-            dt = parse_syslog(ts)
-        except ValueError:
-            continue
-        if first_dt is None:
-            first_dt = dt
-        if start <= dt <= end:
-            f_out.write(line)
-if first_dt and start < first_dt:
-    print(first_dt.isoformat())
-PYCODE
-)
-    fi
+) || {
+        log_msg "ERROR could not parse any timestamp in ${src}; slice is empty"
+        return 1
+    }
     if [ "$DURATION_MODE" = "true" ] && [ -n "$log_start" ]; then
         log_msg "WARN log ${src} starts at ${log_start}"
     fi
 }
-
-domain_nodot="${DOMAIN//./}"
-domain_label="${DOMAIN%%.*}"
-
-LOG_IDS=(
-    apache_ssl_access
-    apache_ssl_error
-    apache_admin_access
-    apache_access
-    apache_error
-    syslog
-    auth
-    kern
-    ufw
-)
-declare -A LOG_TYPE=(
-    [apache_ssl_access]=apache
-    [apache_ssl_error]=apache
-    [apache_admin_access]=apache
-    [apache_access]=apache
-    [apache_error]=apache
-    [syslog]=syslog
-    [auth]=syslog
-    [kern]=syslog
-    [ufw]=syslog
-)
-declare -A LOG_DEST=(
-    [apache_ssl_access]="${PREFIX}_apache_ssl_access.log"
-    [apache_ssl_error]="${PREFIX}_apache_ssl_error.log"
-    [apache_admin_access]="${PREFIX}_apache_admin_access.log"
-    [apache_access]="${PREFIX}_apache_access.log"
-    [apache_error]="${PREFIX}_apache_error.log"
-    [syslog]="${PREFIX}_syslog.log"
-    [auth]="${PREFIX}_auth.log"
-    [kern]="${PREFIX}_kern.log"
-    [ufw]="${PREFIX}_ufw.log"
-)
-declare -A LOG_SOURCES=(
-    [apache_ssl_access]="/var/log/apache2/${DOMAIN}_ssl_access.log|/var/log/apache2/${domain_nodot}_ssl_access.log|/var/log/apache2/${domain_label}_ssl_access.log"
-    [apache_ssl_error]="/var/log/apache2/${DOMAIN}_ssl_error.log|/var/log/apache2/${domain_nodot}_ssl_error.log|/var/log/apache2/${domain_label}_ssl_error.log"
-    [apache_admin_access]="/var/log/apache2/${DOMAIN}_admin_access.log|/var/log/apache2/${domain_nodot}_admin_access.log|/var/log/apache2/${domain_label}_admin_access.log"
-    [apache_access]="/var/log/apache2/${DOMAIN}-access.log|/var/log/apache2/${DOMAIN}_access.log|/var/log/apache2/${domain_nodot}_access.log|/var/log/apache2/${domain_label}_access.log"
-    [apache_error]="/var/log/apache2/${DOMAIN}-error.log|/var/log/apache2/${DOMAIN}_error.log|/var/log/apache2/${domain_nodot}_error.log|/var/log/apache2/${domain_label}_error.log"
-    [syslog]="/var/log/syslog"
-    [auth]="/var/log/auth.log"
-    [kern]="/var/log/kern.log"
-    [ufw]="/var/log/ufw.log"
-)
-declare -A LOG_OPTIONAL=(
-    [apache_admin_access]=true
-)
 
 pick_first() {
     local -a list=("$@")

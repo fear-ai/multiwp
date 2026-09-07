@@ -79,8 +79,8 @@ assert_equal "Portal probe failed" "$(mcp_portal_status_message 000)" "000 messa
 assert_equal "Portal probe failed" "$(mcp_portal_status_message abc)" "non-numeric message"
 
 if [ "$failures" -gt 0 ]; then
-    echo "\n$failures test(s) failed." >&2
+    printf "\n%s test(s) failed.\n" "$failures" >&2
     exit 1
 fi
 
-echo "\nAll tests passed."
+printf "\nAll tests passed.\n"

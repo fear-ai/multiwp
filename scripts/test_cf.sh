@@ -293,17 +293,35 @@ assert_equal "token" "$CF_AUTH_CLI" "cf_auth_opt parses --auth token"
 
 
 echo "== cf_api_headers_mode =="
+# Credentials must go into the curl -K config file, never into CF_API_HEADERS,
+# because anything in the header array reaches curl's argv and is readable by
+# any local user via `ps auxww`.
 reset_auth_env
 CF_API_TOKEN="token123"
 cf_api_headers_mode "token"
-assert_contains "${CF_API_HEADERS[*]}" "Authorization: Bearer token123" "token mode adds bearer header"
+assert_contains "$(cat "$CF_API_CONFIG")" "Authorization: Bearer token123" "token mode writes bearer header to config"
+if [ "$(stat -c%a "$CF_API_CONFIG")" = "600" ]; then
+    pass "token config file is mode 600"
+else
+    fail "token config file is mode $(stat -c%a "$CF_API_CONFIG"), expected 600"
+fi
+if printf '%s' "${CF_API_HEADERS[*]}" | grep -q "token123"; then
+    fail "token leaked into CF_API_HEADERS (reaches curl argv)"
+else
+    pass "token absent from CF_API_HEADERS"
+fi
 
 reset_auth_env
 CF_API_KEY="key123"
 CF_API_EMAIL="user@example.com"
 cf_api_headers_mode "key"
-assert_contains "${CF_API_HEADERS[*]}" "X-Auth-Key: key123" "key mode adds X-Auth-Key"
-assert_contains "${CF_API_HEADERS[*]}" "X-Auth-Email: user@example.com" "key mode adds X-Auth-Email"
+assert_contains "$(cat "$CF_API_CONFIG")" "X-Auth-Key: key123" "key mode writes X-Auth-Key to config"
+assert_contains "$(cat "$CF_API_CONFIG")" "X-Auth-Email: user@example.com" "key mode writes X-Auth-Email to config"
+if printf '%s' "${CF_API_HEADERS[*]}" | grep -q "key123"; then
+    fail "key leaked into CF_API_HEADERS (reaches curl argv)"
+else
+    pass "key absent from CF_API_HEADERS"
+fi
 
 reset_auth_env
 run_subshell cf_api_headers_mode "token" >/dev/null
@@ -325,14 +343,28 @@ CF_API_TOKEN="token123"
 output=$(cf_api_request_mode "token" "GET" "/zones?name=example.com")
 assert_contains "$output" "-X" "cf_api_request_mode includes method option"
 assert_contains "$output" "GET" "cf_api_request_mode uses method"
-assert_contains "$output" "Authorization: Bearer token123" "cf_api_request_mode uses bearer auth"
+assert_contains "$output" "-K" "cf_api_request_mode passes a curl config file"
+if printf '%s' "$output" | grep -q "token123"; then
+    fail "cf_api_request_mode leaked the token into curl argv"
+else
+    pass "cf_api_request_mode keeps the token out of curl argv"
+fi
 assert_contains "$output" "https://api.cloudflare.com/client/v4/zones?name=example.com" "cf_api_request_mode builds URL"
 
 echo "== cf_origin_ca_request =="
 reset_auth_env
 CF_CA_KEY="cakey123"
-output=$(cf_origin_ca_request "GET" "/certificates?zone_id=abc")
-assert_contains "$output" "X-Auth-User-Service-Key: cakey123" "cf_origin_ca_request uses Origin CA key"
+# Run in this shell (not a subshell) so CF_API_CONFIG is observable; the stub
+# curl writes argv to stdout, which is captured separately below.
+ca_argv_file="$TMP_DIR/ca_argv.txt"
+cf_origin_ca_request "GET" "/certificates?zone_id=abc" >"$ca_argv_file"
+output=$(cat "$ca_argv_file")
+assert_contains "$(cat "$CF_API_CONFIG")" "X-Auth-User-Service-Key: cakey123" "cf_origin_ca_request writes CA key to config"
+if printf '%s' "$output" | grep -q "cakey123"; then
+    fail "cf_origin_ca_request leaked the CA key into curl argv"
+else
+    pass "cf_origin_ca_request keeps the CA key out of curl argv"
+fi
 
 reset_auth_env
 CF_API_TOKEN="token123"
@@ -412,8 +444,8 @@ assert_equal "denied missing " "$(cf_api_error_messages "$json_err")" "cf_api_er
 
 
 if [ "$failures" -gt 0 ]; then
-    echo "\n$failures test(s) failed." >&2
+    printf "\n%s test(s) failed.\n" "$failures" >&2
     exit 1
 fi
 
-echo "\nAll tests passed."
+printf "\nAll tests passed.\n"

@@ -1,6 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
+# These scripts use namerefs (local -n), declare -gA, and expansion of possibly
+# empty arrays under set -u. Those need bash 4.3+, 4.2+ and 4.4+ respectively.
+# Fail with a clear message rather than an obscure syntax error on macOS's
+# bash 3.2 or RHEL 7's 4.2.
+if [ -z "${BASH_VERSINFO:-}" ] || [ "${BASH_VERSINFO[0]}" -lt 4 ] ||
+   { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -lt 4 ]; }; then
+    echo "ERROR: bash 4.4 or newer is required (found ${BASH_VERSION:-unknown})" >&2
+    exit 1
+fi
+
 ROOT_DIR="${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SCRIPTS_DIR="${SCRIPTS_DIR:-$ROOT_DIR/scripts}"
 
@@ -82,10 +92,15 @@ parse_comma_list() {
     local -n out="$2"
     local label="${3:-list}"
     out=()
-    IFS=',' read -r -a parts <<<"$raw"
+    # Must be local and oddly named: an undeclared `parts` here collides with a
+    # caller that passes an array literally named `parts` (check-cf.sh -s), in
+    # which case the nameref and this array are the same variable and every
+    # value is appended twice.
+    local -a __pcl_parts=()
+    IFS=',' read -r -a __pcl_parts <<<"$raw"
     local ok=true
     local part trimmed
-    for part in "${parts[@]}"; do
+    for part in "${__pcl_parts[@]}"; do
         trimmed="${part#"${part%%[![:space:]]*}"}"
         trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
         if [ -z "$trimmed" ]; then
@@ -165,7 +180,6 @@ record_backup_datastore() {
         return 0
     fi
 
-    # TODO: add a write lock around datastore updates to prevent concurrent writes.
     local dir ts backup
     dir=$(dirname "$path")
     ts="${DATASTORE_DATE-}"
@@ -180,7 +194,10 @@ record_backup_datastore() {
         ts=$(date +%Y%m%d_%H%M%S)
     fi
     backup="$dir/datastore_${ts}.csv"
-    mv "$path" "$backup"
+    # Copy, never move: the live datastore must exist at all times. If the
+    # rewrite below fails, the inventory is still in place. -p preserves the
+    # 0600 mode so backups are not world-readable.
+    cp -p "$path" "$backup"
     DATASTORE_BACKUP_DONE=true
     export DATASTORE_BACKUP_DONE
     DATASTORE_BACKUP_PATH="$backup"
@@ -202,6 +219,16 @@ csv_put_fields() {
     [ -n "$dest_path" ] || err "Datastore path required"
     [ -n "$domain" ] || err "Domain required for datastore update"
     require_cmd python3
+
+    # Serialize concurrent updates; without this two runs interleave and one
+    # set of updates is lost. The lock is released when the shell exits or the
+    # fd is closed.
+    local lock_file="${dest_path}.lock"
+    local csv_lock_fd
+    if command -v flock >/dev/null 2>&1; then
+        exec {csv_lock_fd}>>"$lock_file" || err "Cannot open datastore lock: $lock_file"
+        flock -w 30 "$csv_lock_fd" || err "Timed out waiting for datastore lock: $lock_file"
+    fi
 
     record_backup_datastore "$dest_path"
     local source_path="${DATASTORE_BACKUP_PATH:-$dest_path}"
@@ -295,11 +322,42 @@ if not found:
 if not changed and source_path == dest_path:
     sys.exit(0)
 
-with open(dest_path, "w", newline="") as fh:
-    writer = csv.DictWriter(fh, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(rows)
+# Write to a temp file in the same directory, then rename over the target.
+# rename() is atomic, so a reader never sees a partial datastore and a crash
+# mid-write cannot destroy the original.
+import os
+import tempfile
+
+dest_dir = os.path.dirname(os.path.abspath(dest_path)) or "."
+try:
+    mode = os.stat(dest_path).st_mode & 0o777
+except OSError:
+    mode = 0o600
+
+fd, tmp_path = tempfile.mkstemp(dir=dest_dir, prefix=".datastore.", suffix=".tmp")
+try:
+    with os.fdopen(fd, "w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+        fh.flush()
+        os.fsync(fh.fileno())
+    # Preserve the inventory's restrictive mode; a fresh temp file would
+    # otherwise land at the process umask (typically 0644).
+    os.chmod(tmp_path, mode)
+    os.replace(tmp_path, dest_path)
+except BaseException:
+    try:
+        os.unlink(tmp_path)
+    except OSError:
+        pass
+    raise
 EOF
+    local rc=$?
+    if [ -n "${csv_lock_fd:-}" ]; then
+        exec {csv_lock_fd}>&-
+    fi
+    return $rc
 }
 
 
@@ -446,37 +504,37 @@ normalize_domain() {
 validate_domain() {
     local domain="$1"
     if [ -z "$domain" ]; then
-        echo "Error: domain is empty"
+        echo "Error: domain is empty" >&2
         return 1
     fi
     if [ ${#domain} -gt 253 ]; then
-        echo "Error: domain exceeds 253 characters"
+        echo "Error: domain exceeds 253 characters" >&2
         return 1
     fi
     if [[ "$domain" == .* || "$domain" == *. ]]; then
-        echo "Error: domain cannot start or end with a dot"
+        echo "Error: domain cannot start or end with a dot" >&2
         return 1
     fi
     if [[ "$domain" == *..* ]]; then
-        echo "Error: domain contains empty labels"
+        echo "Error: domain contains empty labels" >&2
         return 1
     fi
     if [[ "$domain" != *.* ]]; then
-        echo "Error: domain must include a dot"
+        echo "Error: domain must include a dot" >&2
         return 1
     fi
     IFS='.' read -r -a labels <<<"$domain"
     for label in "${labels[@]}"; do
         if [ -z "$label" ]; then
-            echo "Error: domain contains empty labels"
+            echo "Error: domain contains empty labels" >&2
             return 1
         fi
         if [ ${#label} -gt 63 ]; then
-            echo "Error: label '$label' exceeds 63 characters"
+            echo "Error: label '$label' exceeds 63 characters" >&2
             return 1
         fi
         if ! [[ "$label" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
-            echo "Error: label '$label' contains invalid characters"
+            echo "Error: label '$label' contains invalid characters" >&2
             return 1
         fi
     done
@@ -486,49 +544,49 @@ validate_domain() {
 validate_ip() {
     local ip="$1"
     if [[ ! "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-        echo "Error: IPv4 address has invalid format"
+        echo "Error: IPv4 address has invalid format" >&2
         return 1
     fi
     if [ "$ip" = "0.0.0.0" ]; then
-        echo "Error: IPv4 address cannot be 0.0.0.0"
+        echo "Error: IPv4 address cannot be 0.0.0.0" >&2
         return 1
     fi
     if [ "$ip" = "255.255.255.255" ]; then
-        echo "Error: IPv4 address cannot be 255.255.255.255"
+        echo "Error: IPv4 address cannot be 255.255.255.255" >&2
         return 1
     fi
     IFS='.' read -r -a octets <<<"$ip"
     for octet in "${octets[@]}"; do
         if [ "$octet" -lt 0 ] || [ "$octet" -gt 255 ]; then
-            echo "Error: IPv4 octet out of range: $octet"
+            echo "Error: IPv4 octet out of range: $octet" >&2
             return 1
         fi
     done
     if [ "${octets[0]}" -eq 10 ]; then
-        echo "Error: IPv4 address in RFC1918 private range (10.0.0.0/8) not allowed"
+        echo "Error: IPv4 address in RFC1918 private range (10.0.0.0/8) not allowed" >&2
         return 1
     fi
     if [ "${octets[0]}" -eq 172 ] && [ "${octets[1]}" -ge 16 ] && [ "${octets[1]}" -le 31 ]; then
-        echo "Error: IPv4 address in RFC1918 private range (172.16.0.0/12) not allowed"
+        echo "Error: IPv4 address in RFC1918 private range (172.16.0.0/12) not allowed" >&2
         return 1
     fi
     if [ "${octets[0]}" -eq 192 ] && [ "${octets[1]}" -eq 168 ]; then
-        echo "Error: IPv4 address in RFC1918 private range (192.168.0.0/16) not allowed"
+        echo "Error: IPv4 address in RFC1918 private range (192.168.0.0/16) not allowed" >&2
         return 1
     fi
     if [ "${octets[0]}" -eq 169 ] && [ "${octets[1]}" -eq 254 ]; then
-        echo "Error: IPv4 address in link-local range (169.254.0.0/16) not allowed"
+        echo "Error: IPv4 address in link-local range (169.254.0.0/16) not allowed" >&2
         return 1
     fi
     if [ "${octets[0]}" -eq 127 ]; then
-        echo "Error: IPv4 address in loopback range (127.0.0.0/8) not allowed"
+        echo "Error: IPv4 address in loopback range (127.0.0.0/8) not allowed" >&2
         return 1
     fi
     if [ "${octets[3]}" -eq 0 ] || [ "${octets[3]}" -eq 255 ]; then
         warn "IPv4 address ends in .0 or .255; verify it is not a network or broadcast address"
     fi
     if [ "${octets[0]}" -ge 224 ]; then
-        echo "Error: IPv4 address in multicast/experimental range not allowed"
+        echo "Error: IPv4 address in multicast/experimental range not allowed" >&2
         return 1
     fi
     return 0

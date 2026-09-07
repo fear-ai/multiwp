@@ -120,7 +120,11 @@ backup_domain() {
             fi
         fi
     }
-    trap cleanup RETURN
+    # RETURN alone does not fire when set -e aborts the function, which would
+    # leave the site in maintenance mode with DISALLOW_FILE_MODS set - an
+    # outage lasting until someone clears it by hand. EXIT covers the abort and
+    # the signals cover an interrupted backup.
+    trap cleanup RETURN EXIT INT TERM
 
     section "BACKUP" "Freeze"
     kv "DOMAIN" "$domain"
@@ -128,7 +132,9 @@ backup_domain() {
     kv "BACKUP_DIR" "$backup_dir"
     kv "RUN_ID" "$run_id"
 
-    priv mkdir -p "$backup_dir"
+    # 0750: the dump holds the full site database, including user tables. A
+    # default-umask directory (0755) exposes it to every local user.
+    priv install -d -m 750 "$backup_dir"
     wp_config="$wp_root/wp-config.php"
     mods_value=$(priv -u www-data wp --path="$wp_root" config get DISALLOW_FILE_MODS 2>/dev/null || true)
     case "$mods_value" in
@@ -156,6 +162,9 @@ backup_domain() {
 
     priv -u www-data wp --path="$wp_root" db export "$db_file"
     priv tar -czf "$content_file" -C "$wp_root" wp-content
+    # wp/tar create these at the process umask (commonly 0644). Restrict them:
+    # the dump contains the whole database, the archive the whole content tree.
+    priv chmod 640 "$db_file" "$content_file"
 
     priv -u www-data wp --path="$wp_root" maintenance-mode deactivate
     maintenance_on=false

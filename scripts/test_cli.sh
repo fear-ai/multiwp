@@ -285,8 +285,8 @@ assert_status 1 $? "cli_cf_auth_opt returns 1 for unknown option"
 SUDO_BIN="$SAVED_SUDO_BIN"
 
 if [ "$failures" -gt 0 ]; then
-    echo "\n$failures test(s) failed." >&2
+    printf "\n%s test(s) failed.\n" "$failures" >&2
     exit 1
 fi
 
-echo "\nAll tests passed."
+printf "\nAll tests passed.\n"

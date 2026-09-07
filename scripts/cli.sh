@@ -248,7 +248,7 @@ cli_cf_auth_opt() {
             OPTIND=$((OPTIND+1))
             return 0
             ;;
-        account|account-name|token|email|key|ca-key|auth)
+        account|account-name|token|email|key|ca-key|auth|token-file|key-file|ca-key-file)
             cf_auth_opt "$opt" "$next"
             OPTIND=$((OPTIND+1))
             return 0
