@@ -12,7 +12,16 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/cli.sh"
 
 DOMAINS=()
-DEFAULT_IP="104.238.140.248"
+# Redirect-only zones answer at the edge; Cloudflare never contacts an origin for
+# them, so the A record exists only to make the hostname resolve and engage the
+# proxy. Pointing them at the real origin publishes its address through DNS
+# history, an API read, or a momentary grey-cloud toggle, defeating the
+# Cloudflare-only UFW allowlist. 192.0.2.1 is IANA TEST-NET-1, never routable.
+# See Operations.md section 3.7.2.
+REDIRECT_IP="${REDIRECT_IP:-192.0.2.1}"
+# The origin address is deliberately not hardcoded here. Supply it with --ip, the
+# IP environment variable, or the `ip` column in the inventory.
+DEFAULT_IP="${DEFAULT_IP-}"
 IP="${IP-}"
 DOMAINS_FILE="${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
 DATASTORE_DATE="${DATASTORE_DATE-}"
@@ -37,7 +46,7 @@ Example: onboard-zone.sh --domain example.com --ip 203.0.113.10
 
 Options:
   --domain NAME  Domain to provision (repeatable; positional also accepted)
-  --ip IP [IP]  IPv4 address for the apex A record (default: 104.238.140.248)
+  --ip IP [IP]  IPv4 address for the apex A record (redirect zones default to 192.0.2.1)
   --site-type TYPE  Inventory site_type (singlesite, multisite, redirect, worker, ignore, none; default: none)
   --multisite-domain NAME  Inventory multisite domain (used when site_type=multisite)
   --redirect-url URL  Inventory redirect target (used when site_type=redirect)
@@ -62,7 +71,8 @@ Auth options (choose one):
 
 Notes:
   - This script wraps cloud-dns.sh and then records zone details back into domains.csv.
-  - If IP is not supplied, the script uses ip from domains.csv; if still empty, it defaults to 104.238.140.248.
+  - If IP is not supplied, the script uses ip from domains.csv. If still empty, redirect-only
+    zones use 192.0.2.1 (non-routable); other site types require an explicit address.
   - Zone creation requires a Global API Key; the script defaults to --auth key unless you override it.
   - Domains with site_type none, ignore, or worker are skipped entirely.
 EOF
@@ -244,9 +254,15 @@ for domain in "${DOMAINS[@]}"; do
         ip_addr="$csv_ip"
     fi
     if [ -z "$ip_addr" ]; then
-        ip_addr="$DEFAULT_IP"
+        # A redirect-only zone needs no origin, so default it to the
+        # non-routable address rather than inheriting one.
+        if [ "$(normalize_site_type "$SITE_TYPE")" = "redirect" ]; then
+            ip_addr="$REDIRECT_IP"
+        else
+            ip_addr="$DEFAULT_IP"
+        fi
     fi
-    [ -n "$ip_addr" ] || err "IPv4 required via --ip, IP env, domains.csv, or default"
+    [ -n "$ip_addr" ] || err "IPv4 required via --ip, IP env, or the ip column in $DOMAINS_FILE"
     validate_ip "$ip_addr" || exit 1
 
     site_type="$SITE_TYPE"

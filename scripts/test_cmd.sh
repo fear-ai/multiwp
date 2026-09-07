@@ -108,7 +108,17 @@ assert_equal "onetwo" "$(cat "$out_file")" "run_cmd out-append appends"
 echo "== start_cmd out =="
 out_file="$TMP_DIR/bg.txt"
 pid=$(start_cmd "bg" "out" "$out_file" -- bash -c 'echo "bg"; sleep 0.1')
-wait "$pid" >/dev/null 2>&1
+# `wait` only works for children of this shell; start_cmd's process may not be
+# one, in which case wait returns immediately and the assertion races the
+# background write. Poll for the process to exit, then for the content.
+for _ in $(seq 1 100); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.05
+done
+for _ in $(seq 1 100); do
+    [ -s "$out_file" ] && break
+    sleep 0.05
+done
 assert_equal "bg" "$(cat "$out_file")" "start_cmd out writes file"
 
 echo "== invalid mode =="

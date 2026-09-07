@@ -250,10 +250,17 @@ DATASTORE_BACKUP_DONE=false
 DATASTORE_DATE="20260116_120000"
 record_backup_datastore "$backup_csv" >/dev/null 2>&1
 expected_backup="$backup_dir/datastore_20260116_120000.csv"
-if [ -f "$expected_backup" ] && [ ! -f "$backup_csv" ]; then
+# The live datastore must still exist: the backup is a copy, not a move. A move
+# leaves no inventory if the rewrite that follows fails.
+if [ -f "$expected_backup" ] && [ -f "$backup_csv" ]; then
     pass "record_backup_datastore uses DATASTORE_DATE override"
 else
     fail "record_backup_datastore did not create expected backup"
+fi
+if [ -f "$expected_backup" ] && cmp -s "$expected_backup" "$backup_csv"; then
+    pass "record_backup_datastore preserves the live datastore"
+else
+    fail "record_backup_datastore did not preserve the live datastore"
 fi
 DATASTORE_DATE=""
 DATASTORE_BACKUP_DONE=false
@@ -284,8 +291,8 @@ assert_equal "hello" "$output" "priv runs command directly when sudo disabled"
 SUDO_BIN="$SAVED_SUDO_BIN"
 
 if [ "$failures" -gt 0 ]; then
-    echo "\n$failures test(s) failed." >&2
+    printf "\n%s test(s) failed.\n" "$failures" >&2
     exit 1
 fi
 
-echo "\nAll tests passed."
+printf "\nAll tests passed.\n"

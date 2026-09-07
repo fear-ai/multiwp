@@ -1,8 +1,95 @@
 # Performance and Caching
-Date: January 21, 2026
+Date: September 7, 2026
 
-## Introduction
-This document consolidates our caching strategy, performance tooling, and benchmarking workflow for WordPress multisite and single-site installs on Ubuntu 24 behind Cloudflare. It is written for operations work and follows the dependency order in `Operations.md` sections 3–5 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`): edge first, then origin services, then WordPress. The intent is to make decisions explicit, avoid overlapping caches, and keep a repeatable test plan with commands and validation criteria.
+Caching strategy, tuning, and benchmarking for WordPress multisite and single-site
+installs on Ubuntu 24 behind Cloudflare. Written for operations work, following the
+dependency order in `Operations.md` sections 3–5: edge first, then origin services,
+then WordPress.
+
+## Contents
+
+- [What this document does not cover](#what-this-document-does-not-cover)
+- [Use-case profiles](#use-case-profiles) — pick one; it selects what to tune.
+- [Approach](#approach) — challenges, methodology, scope, dependencies.
+- [Tunable layers](#tunable-layers) — edge, Apache, PHP, MySQL, object cache, WordPress.
+- [Execution](#execution) — configuration steps and Redis deployment.
+- [Measurement](#measurement) — baseline, load generation, telemetry, diagnostics.
+- [Plan](#plan) — staged workflow.
+- [Priorities](#priorities) — measurement-sourced work queue.
+- [Decisions and postponed items](#decisions-and-postponed-items)
+- [Related documents](#related-documents) · [External references](#external-references)
+
+## What this document does not cover
+
+The OS and network layers belong wholly to `HardenUbuntu.md` and are not restated
+here, even where they affect throughput:
+
+| Layer | Owner | Why not here |
+|-------|-------|--------------|
+| Kernel, sysctl, TCP tuning | `HardenUbuntu.md#kernel-tcp-tuning-note` | Baseline is set once and verified, not tuned per workload |
+| Firewall, UFW, Cloudflare allowlist | `HardenUbuntu.md#firewall-baseline` | A security control; its performance cost is fixed |
+| IPv6, netplan, listeners | `HardenUbuntu.md#disabled-ipv6` | Configuration, not a tuning surface |
+| SSH, users, sudo | `HardenUbuntu.md#ssh-hardening` | No request-path impact |
+| Logging and retention | `HardenUbuntu.md#logging-and-retention` | Disk and IO baseline, set once |
+
+This document begins at Apache and works up. Where a tuning change would alter a
+hardening baseline, `HardenUbuntu.md` wins and the change is recorded there.
+
+Edge security rules are owned by `conf/README.md` (the ruleset change log) and
+`RulesCf.md` (the tool). They appear here only where a rule measurably changed
+origin load — see [Priorities](#priorities).
+
+## Use-case profiles
+
+The estate runs two workloads with different bottlenecks. Tuning that helps one
+can be irrelevant or harmful to the other, so pick the profile first.
+
+### Profile A — a few static-ish WordPress sites
+
+Four low-traffic zones on one shared origin, mostly anonymous readers. Content
+changes rarely; the same pages are requested repeatedly by unrelated visitors.
+
+- **Bottleneck**: origin reach. Low traffic means edge caches expire between
+  visitors, so a large share of requests hit PHP for content that never changed.
+- **Tune**: edge TTL and cache eligibility first; PHP-FPM worker count second.
+  Object caching matters only for logged-in paths.
+- **Ignore**: MySQL buffer pool sizing at this request volume.
+- **Measured evidence**: raising `edge_ttl` 7200 → 86400 on the four protected
+  zones; origin shielding then measured 84.2 percent (recomp.top), 64.4 percent
+  (avtranscript.com), 58.5 percent (alphaeos.net), 39.6 percent (talkdao.org).
+  See `conf/README.md`, 2026-09-05 later entry.
+
+### Profile B — a Zero node
+
+A long-running process with a working set that does not fit comfortably in RAM
+alongside the web stack.
+
+- **Bottleneck**: memory. The node holds roughly 2.8 GB; available memory falls to
+  about 300 MB, at which point `apache2`, `mysqld` and `php-fpm` all appear in the
+  kernel OOM victim table.
+- **Tune**: memory ceilings and process counts, not cache hit rates.
+- **First check when sites are slow or unreachable**:
+  `journalctl -k | grep -i oom-kill` and `free -m`, before touching any web
+  configuration.
+- **Ignore**: edge caching. It does not address a memory-bound origin.
+
+### Per-install maturity
+
+The two WordPress installs sit at different stages within Profile A, and are
+tuned to different risk appetites:
+
+| | Multisite (`/var/www/html/wordpress`) | zero.directory (single-site) |
+|---|---|---|
+| Edge cache | Prioritize stability for anonymous traffic | Conservative HTML eligibility; asset caching first |
+| Object cache | Validate Redis for dynamic paths | Defer until plugin behavior stabilizes |
+| Edge TTL | Lengthen only after purge behavior is proven | Held at 7200 pending review |
+| Posture | Tune for reach | Favor correctness over aggressive caching |
+
+Profiles A and B contend for the same host. A change that helps A by adding PHP
+workers directly worsens B's memory headroom; state which profile a change targets
+before making it.
+
+## Approach
 
 ### Challenges
 Performance work must reconcile two competing realities: the origin must remain secure and stable, while the user experience depends on latency and cache efficiency that are largely driven by Cloudflare. The problem to solve is not merely “make it faster,” but “make it measurably faster without violating the operational constraints of a shared multisite origin.” This requires a disciplined approach that prevents overlapping caches, preserves correctness under CDN behavior, and produces reproducible measurements that can be compared over time.
@@ -14,7 +101,7 @@ Key challenges include:
 - **Edge vs origin visibility**: Cloudflare absorbs a large portion of requests; origin metrics can mislead if they do not distinguish cached from uncached traffic.
 
 ### Methodology
-We follow a single-change-at-a-time workflow with explicit measurement targets. Each test or adjustment records both the user-facing effects (latency percentiles, throughput, error rate) and origin pressure (CPU, memory, IO, DB latency). This aligns with `Operations.md` sections 3–5 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`) and prevents “tuning in the dark.”
+We follow a single-change-at-a-time workflow with explicit measurement targets. Each test or adjustment records both the user-facing effects (latency percentiles, throughput, error rate) and origin pressure (CPU, memory, IO, DB latency). This prevents “tuning in the dark.”
 
 Methodology steps:
 1) **Define baseline**: Capture edge headers, OPcache values, MySQL variables, and any object cache state.
@@ -22,33 +109,28 @@ Methodology steps:
 3) **Measure and compare**: Use identical test parameters before and after the change.
 4) **Decide and record**: Keep a decision record with explicit rollback triggers.
 
-### Layered architecture and references
-Performance decisions must follow the same dependency chain as operational setup. The architecture below is conceptual and links to the canonical operational runbook for exact settings and procedures.
+### Related documents
 
-Layered model:
-- **Edge** (Cloudflare): HTTPS enforcement, security headers, and edge caching behavior. See `Operations.md` section 3 (`Operations.md#3-cloudflare-edge`) for authoritative settings and the Cloudflare baseline.
-- **Origin** (Apache/PHP/MySQL): vhosts, TLS, OPcache, and DB buffers; these are operationally configured before tuning.
-- **WordPress**: application-level caching and object caching strategy, especially for logged-in paths.
+- Operations runbook: `Operations.md` sections 3–5 — edge settings, origin TLS, Apache, WordPress structure.
+- Multisite architecture: `MULTI.md` sections 2–5 — architectural rationale and tradeoffs.
+- DNS and TLS terms: `DNSTerms.md`.
 
-Canonical references:
-- Operations runbook: `Operations.md` sections 3–5 (`Operations.md#3-cloudflare-edge`, `Operations.md#4-origin-tls`, `Operations.md#5-multisite-ops`) for edge settings, origin TLS, Apache, and WordPress structure.
-- Multisite architecture: `MULTI.md` sections 2–5 (`MULTI.md#2-architecture--design-decisions`, `MULTI.md#3-network--domain-model`, `MULTI.md#4-infrastructure-layers`, `MULTI.md#5-operational-tradeoffs`) for architectural rationale and tradeoffs.
-- DNS and TLS terms: `DNSTerms.md` (terminology and vendor references).
+Layer ownership is in [What this document does not cover](#what-this-document-does-not-cover); tuning surfaces are in [Tunable layers](#tunable-layers).
 
-## Scope
+### Scope
 This applies to:
 - Cloudflare proxy on all public zones, with Full (strict), Always Use HTTPS, and managed security headers enabled.
 - Multisite root at `/var/www/html/wordpress`.
 - Single-site root at `/var/www/html/zero.directory`.
 
-## Dependencies
+### Dependencies
 Before changing caching or running performance tests, confirm:
 - DNS is proxied through Cloudflare and is pointing at the origin IP.
 - Origin certificates are installed and Apache vhosts are healthy.
 - The cache baseline and security settings in `Operations.md` section 3 (`Operations.md#3-cloudflare-edge`) are applied.
 - You have a defined test window, a rollback plan, and a place to store raw outputs.
 
-## Performance metrics
+### Performance metrics
 We care about both origin resource pressure and external experience. For each test, record latency percentiles (p50/p95/p99), throughput (requests/sec), and error rate alongside CPU, memory, and IO. That combination tells us whether a change improves actual user experience or simply shifts load around.
 
 ### Memory utilization and interpretation
@@ -85,7 +167,7 @@ Telemetry alignment for tests:
 - If `MemAvailable` stays flat and swap is idle, memory is not the bottleneck.
 - If `MemAvailable` steadily declines or swap activity appears, re‑check Apache worker counts, MySQL buffer size, and OPcache sizing before tuning application code.
 
-## Caching strategy
+## Tunable layers
 We use a layered strategy that avoids overlapping page caches and keeps invalidation paths clear. The primary cache is Cloudflare edge caching for anonymous traffic, with Redis object cache for dynamic requests. Apache is used for headers and PHP dispatch, not page caching. This keeps cache responsibility simple and reduces purge complexity.
 
 ### Edge reach and POP impact
@@ -229,10 +311,8 @@ Apache does not cache pages in this design. Keep `mod_cache` disabled. Use Apach
 ### PHP OPcache
 OPcache is required to reduce PHP parse/compile overhead. Validate that it is enabled and sized appropriately for the current plugin and theme set.
 
-Check OPcache:
-```bash
-php -i | rg -n "opcache.enable|opcache.memory_consumption|opcache.max_accelerated_files|opcache.revalidate_freq"
-```
+Read the current values with the baseline check in
+`HardenUbuntu.md#php-runtime-and-opcache`; it is not repeated here.
 
 Recommended baseline (adjust after measurement):
 - `opcache.memory_consumption`: 128-256
@@ -462,6 +542,12 @@ define( 'WP_CACHE_KEY_SALT', '{{WP_CACHE_KEY_SALT}}' );
 #### 7) Record the chosen values
 Record the selected Redis DB and prefix per site in your operational notes so future operators do not reuse values accidentally. If you track these values in `domains.csv`, treat them as configuration hints, not secrets.
 
+## Measurement
+
+Everything below is about producing comparable numbers: how to test, what to
+capture, and which tools to use. Configuration changes live in
+[Execution](#execution) above.
+
 ### Test methodology
 We use a single-change-at-a-time workflow with explicit safety and decision recording so results can be attributed to specific configuration changes.
 
@@ -638,7 +724,6 @@ Use consistent parameters across runs and record them in the results.
 - `threads`, `connections` for `wrk2`.
 - `rate` sets the fixed request rate for `wrk2` (`-R`). `wrk2` is always used; mode defaults are init `threads=1`, `connections=1`, `rate=10` and load `threads=2`, `connections=4`, `rate=20`.
 - `run-id` identifier for file naming (defaults to `YYYYmmdd_HHMMSS`).
-- `out-dir` output directory (defaults to `/var/tmp/multiwp/perf_<run-id>`).
 - `cache-bust` query parameter name (defaults to `cache_bust`).
 - `interval` telemetry sampling interval (seconds).
 - `mysql-interval` MySQL perf sampling interval (seconds, default 5).
@@ -1008,18 +1093,6 @@ WP-CLI profile capabilities:
 - `profile hook` to identify slow hooks and plugin entry points.
 - `profile eval` to profile a specific code path or function call.
 
-## Stage-specific guidance
-Multisite and zero.directory are at different stages of caching maturity and should be treated separately.
-
-Multisite:
-- Prioritize edge cache stability for anonymous traffic.
-- Validate Redis object cache for dynamic paths.
-- Lengthen edge TTL only after purge behavior is proven.
-
-zero.directory:
-- Favor correctness over aggressive caching until plugins and cache behavior stabilize.
-- Start with conservative edge cache eligibility for HTML and focus on asset caching first.
-
 ## Plan
 This plan consolidates the methodology and tooling into a single, ordered workflow so each test produces comparable data and a clear decision. It is intentionally staged so that you can stop after any phase with a usable outcome.
 
@@ -1063,6 +1136,113 @@ Use this list as a repeatable checklist for each test window:
 5) Review results, compare against baseline, and log the decision.
 6) Apply a single change and re-run the same test matrix.
 7) Record the final outcome and either proceed to the next phase or stop.
+
+## Priorities
+
+A work queue ordered by measured impact, not estimate. Every prevalence figure
+cites the log slice or ruleset entry it came from, so a stale row is visible as
+soon as its source is superseded. Rows are grouped by subsystem; within a
+subsystem, urgency decides order.
+
+Sources: `conf/README.md` (ruleset change log, 2026-09-05 and the later entry),
+origin logs 22 Aug – 5 Sep 2026 (199,208 requests), and the ten-hour window after
+the first rule set was applied.
+
+### P1 — Acute, measured, unresolved
+
+| # | Subsystem | Issue | Measured prevalence | Impact | Action |
+|---|-----------|-------|---------------------|--------|--------|
+| 1 | Edge rules | zero.directory carries no protective ruleset | **All 991 origin 503s** in the ten-hour window; 1,097 of 1,248 wp-login origin hits | Only zone exhausting PHP-FPM; the four protected zones recorded none | Apply the five-rule set. Rollback baseline already captured in `conf/rollback/` |
+| 2 | PHP-FPM | `pm.max_children = 5` for four WordPress sites | wp-login POSTs returned 503 rather than WordPress login errors — workers exhausted before the app answered | Any traffic spike becomes an outage, not a slowdown | Raise after confirming memory headroom against Profile B. See [Use-case profiles](#use-case-profiles) — this directly contends with the Zero node |
+
+### P2 — Measured, self-inflicted load
+
+| # | Subsystem | Issue | Measured prevalence | Impact | Action |
+|---|-----------|-------|---------------------|--------|--------|
+| 3 | WordPress | Wordfence loopback self-requests | 5,111 requests to `/?wordfence_syncAttackData=` (alphaeos.net 2,674, zero.directory 1,482, avtranscript.com 955) | Each leaves the host and returns through Cloudflare: one edge request plus one PHP worker. Not wp-cron — `DISABLE_WP_CRON` is already set on both installs | Map each domain to `127.0.0.1` in `/etc/hosts` so the loopback stays local, or reduce Wordfence sync frequency |
+| 4 | Edge cache | Low-traffic zones expire between visitors | Origin shielding 39.6 percent (talkdao.org) to 84.2 percent (recomp.top) after `edge_ttl` 7200 → 86400 | talkdao.org still sends ~60 percent of requests to origin | Investigate why talkdao.org shields far worse than recomp.top at comparable TTL |
+| 5 | Edge cache | zero.directory still at `edge_ttl` 7200 | Held back pending review | Shields 94.3 percent already, so raising TTL is lower value here than item 1 | Raise with item 1, not before |
+
+### P3 — Holding, verify periodically
+
+| # | Subsystem | Issue | Measured prevalence | Status |
+|---|-----------|-------|---------------------|--------|
+| 6 | Edge rules | xmlrpc block | **0 origin hits** | Rule is holding. Zero hits means working, not unnecessary — removing it restores the attack surface |
+| 7 | Edge rules | Exploit-scanner consolidation | ~1,600 requests (ALFA TEAM webshell kit, CVE-2017-9841 phpunit RCE) | No exploit path ever returned 200. Each previously cost 10 internal redirects and a PHP worker via the `.htaccess` rewrite loop — since fixed |
+| 8 | Origin | `.htaccess` rewrite recursion | Both normalization rules looped | Fixed in the live multisite file and `templates/htaccess-multisite`. Verify after any template change |
+
+### Prevalence by attack type
+
+Ranked by origin requests over the 15-day window. This is the evidence base for
+rule-slot allocation, which is limited per account.
+
+| Attack type | Requests | Distinct IPs | Disposition |
+|-------------|----------|--------------|-------------|
+| wp-login POST brute force | 27,138 | 4,384 | `managed_challenge` — an IP blocklist cannot hold 4,384 sources; GET deliberately unmatched so the login page still renders |
+| wp-admin / installer probes | 10,970 | 156 (146 also hit wp-login) | `block`. `upgrade.php` and `maint/repair.php` were returning 200 to anonymous requests on all four zones before this |
+| Comment spam POST | 6,572 (6,247 against zero.directory) | — | Rate limit. Spam filter already held everything (655 spam, 0 approved), but each POST still committed a PHP worker |
+| Exploit scanners | ~1,600 | — | Consolidated into one rule slot |
+| `.env` probes | 174 (5 matched the literal path) | — | `.htaccess` `FilesMatch "^\."` already blocks every variant |
+| xmlrpc | 0 | — | Blocked at edge, holding |
+
+### Bot Fight Mode — assessed, not enabled
+
+Cloudflare reports "Bot Fight Mode not enabled" on every domain in every account.
+That notice is a product prompt, not a finding against this estate, and the
+default should not be changed without weighing it against what is already in
+place.
+
+Current state: not enabled anywhere. It is mentioned once in
+`Operations.md#53-security-hardening-future` as an item to investigate, and no
+script reads or sets it — `cloud-settings.sh` covers `ssl`, `always_use_https`,
+`min_tls_version` and `add_security_headers` only. Enabling it would be the first
+setting applied outside the tooling, so `check-cf.sh` would not detect drift.
+
+Arguments for enabling:
+
+- It is free on the current plan and needs no rule slot, which matters because
+  slots are limited per account and already allocated.
+- It catches definitionally-automated traffic across the whole zone, whereas the
+  present rules are path-scoped to `wp-login.php`, `/wp-admin/` and `xmlrpc.php`.
+
+Arguments against, specific to this estate:
+
+- **The measured attack surface is already covered.** The wp-login POST flood
+  (27,138 requests from 4,384 IPs) and the wp-admin probes (10,970) are handled
+  by `managed_challenge` rules, and xmlrpc has recorded 0 origin hits since being
+  blocked. Bot Fight Mode would act after those rules, on traffic they already
+  stopped.
+- **It would challenge our own loopback traffic.** Wordfence issues 5,111
+  self-requests to `/?wordfence_syncAttackData=` with user agent
+  `WordPress/6.9; https://<site>`. These leave the host and return through
+  Cloudflare, so Bot Fight Mode sees them as automated requests from the origin
+  IP. Challenging them breaks Wordfence sync while leaving the wasted PHP worker
+  cost in place — the opposite of the fix in [P2 item 3](#priorities).
+- **It issues JavaScript challenges to unauthenticated traffic**, which affects
+  legitimate crawlers. On zones whose purpose is to be found, that is a
+  visibility cost paid against an attack surface already closed.
+- **It cannot be scoped.** Bot Fight Mode is zone-wide with no path or rule
+  exclusions on the free plan; Super Bot Fight Mode, which can be scoped, is a
+  paid feature.
+
+Recommendation: **leave disabled** until the P2 item 3 loopback fix is applied
+and verified. Enabling it before then would challenge our own traffic. After the
+loopback is contained, revisit per zone, starting with a redirect-only zone where
+there is no application traffic to disturb, and measure origin requests before and
+after rather than assuming benefit.
+
+If it is enabled later, add it to `cloud-settings.sh` and `check-cf.sh` first, so
+the setting is applied and drift-checked by the same tooling as every other zone
+setting. Note it is not part of the `/zones/<id>/settings` collection those
+scripts already read; it lives under the Bot Management API and needs a separate
+call.
+
+### How to update this section
+
+When a rule set changes or a new log slice is taken, update the prevalence
+figures and re-sort. A row whose source entry in `conf/README.md` has been
+superseded is stale and must be re-measured or removed — do not carry forward a
+number whose origin can no longer be checked.
 
 ## Decisions and postponed items
 This section consolidates decision records, postponed work, future improvements, and tooling alternatives so the execution sections can stay focused on commands and repeatable steps.
@@ -1129,7 +1309,7 @@ Service-style or heavier alternatives (use only if you want long-running daemons
 - `dstat` for combined CPU/memory/network views.
 - `netdata` or `collectd` for continuous dashboards and long-term retention.
 
-## References
+## External references
 These references provide background on the tools and features used above:
 - Cloudflare cache response headers: https://developers.cloudflare.com/cache/concepts/cache-responses/
 - Cloudflare cache analytics: https://developers.cloudflare.com/cache/analytics/

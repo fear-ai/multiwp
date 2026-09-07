@@ -106,6 +106,9 @@ load_cloudflare_auth() {
         return 0
     fi
 
+    # An auth file that sets CF_API_BASE="" (the shipped example did) would
+    # otherwise leave every request pointed at a bare path.
+    CF_API_BASE="${CF_API_BASE:-https://api.cloudflare.com/client/v4}"
     if [ -n "$prev_account_id" ]; then
         CF_ACCOUNT_ID="$prev_account_id"
     fi
@@ -321,10 +324,18 @@ sys.exit(1)
 PY
 )
     case "$?" in
-        0) printf '%s' "$zone_id"; return 0 ;;
+        0)
+            # A status-0 result with no zone id means the parser produced nothing
+            # useful; treat it as a miss so the CSV and API fallbacks still run.
+            [ -n "$zone_id" ] || return 1
+            printf '%s' "$zone_id"; return 0 ;;
         1) return 1 ;;
         2) return 2 ;;
         3) return 3 ;;
+        # Without this arm a case with no match returns 0, so python3 missing
+        # (127), an IO error (2) or SIGINT (130) looked like success with an
+        # empty zone id, and the caller skipped its fallbacks.
+        *) return 1 ;;
     esac
 }
 
@@ -513,9 +524,16 @@ cf_auth_opt() {
             CF_ACCOUNT_NAME_CLI="$val"
             return 0
             ;;
-        token=*) CF_API_TOKEN_CLI="${opt#*=}"; return 0 ;;
+        token-file=*) CF_API_TOKEN_CLI=$(cf_read_secret_file "${opt#*=}" "API token"); return 0 ;;
+        token-file)
+            [ -n "$val" ] || err "token-file requires a path"
+            CF_API_TOKEN_CLI=$(cf_read_secret_file "$val" "API token")
+            return 0
+            ;;
+        token=*) cf_warn_secret_on_argv "token"; CF_API_TOKEN_CLI="${opt#*=}"; return 0 ;;
         token)
             [ -n "$val" ] || err "token requires a value"
+            cf_warn_secret_on_argv "token"
             CF_API_TOKEN_CLI="$val"
             return 0
             ;;
@@ -525,15 +543,29 @@ cf_auth_opt() {
             CF_API_EMAIL_CLI="$val"
             return 0
             ;;
-        key=*) CF_API_KEY_CLI="${opt#*=}"; return 0 ;;
+        key-file=*) CF_API_KEY_CLI=$(cf_read_secret_file "${opt#*=}" "API key"); return 0 ;;
+        key-file)
+            [ -n "$val" ] || err "key-file requires a path"
+            CF_API_KEY_CLI=$(cf_read_secret_file "$val" "API key")
+            return 0
+            ;;
+        key=*) cf_warn_secret_on_argv "key"; CF_API_KEY_CLI="${opt#*=}"; return 0 ;;
         key)
             [ -n "$val" ] || err "key requires a value"
+            cf_warn_secret_on_argv "key"
             CF_API_KEY_CLI="$val"
             return 0
             ;;
-        ca-key=*) CF_CA_KEY_CLI="${opt#*=}"; return 0 ;;
+        ca-key-file=*) CF_CA_KEY_CLI=$(cf_read_secret_file "${opt#*=}" "Origin CA key"); return 0 ;;
+        ca-key-file)
+            [ -n "$val" ] || err "ca-key-file requires a path"
+            CF_CA_KEY_CLI=$(cf_read_secret_file "$val" "Origin CA key")
+            return 0
+            ;;
+        ca-key=*) cf_warn_secret_on_argv "ca-key"; CF_CA_KEY_CLI="${opt#*=}"; return 0 ;;
         ca-key)
             [ -n "$val" ] || err "ca-key requires a value"
+            cf_warn_secret_on_argv "ca-key"
             CF_CA_KEY_CLI="$val"
             return 0
             ;;
@@ -569,17 +601,67 @@ cf_init_auth() {
     return 0
 }
 
+# Credentials are passed to curl through a -K config file, never on the command
+# line. Anything in argv is readable by any local user via `ps auxww` for the
+# lifetime of the request. The file is created under umask 077 and removed by the
+# caller's trap.
+#
+# CF_API_CONFIG holds the path; CF_API_HEADERS carries only non-secret headers.
+CF_API_CONFIG="${CF_API_CONFIG:-}"
+
+cf_api_config_cleanup() {
+    if [ -n "${CF_API_CONFIG:-}" ] && [ -f "$CF_API_CONFIG" ]; then
+        rm -f "$CF_API_CONFIG"
+    fi
+    CF_API_CONFIG=""
+}
+
+# Read a secret from a file instead of the command line. A value passed as an
+# option lands in the invoking script's argv (readable via `ps auxww`) and in
+# shell history; a file does neither. The mode check refuses anything group- or
+# world-readable.
+cf_read_secret_file() {
+    local path="$1"
+    local label="$2"
+    [ -f "$path" ] || err "${label} file not found: $path"
+    local mode
+    mode=$(stat -c '%a' "$path" 2>/dev/null) || err "Cannot stat ${label} file: $path"
+    case "$mode" in
+        600|400) ;;
+        *) err "${label} file $path is mode ${mode}; use 600 so it is not readable by other users" ;;
+    esac
+    tr -d '\r\n' < "$path"
+}
+
+# Warn once per run when a secret is supplied as an option value.
+CF_SECRET_ARGV_WARNED="${CF_SECRET_ARGV_WARNED:-false}"
+cf_warn_secret_on_argv() {
+    [ "$CF_SECRET_ARGV_WARNED" = true ] && return 0
+    CF_SECRET_ARGV_WARNED=true
+    warn "--$1 puts a secret in this process's argv (visible to other users via ps) and in shell history. Prefer --$1-file PATH, an auth file, or the environment. If you must type it, start the command with a leading space so it is kept out of history."
+}
+
 cf_api_headers_mode() {
     local mode="$1"
     CF_API_HEADERS=("-H" "Content-Type: application/json")
+
+    cf_api_config_cleanup
+    local old_umask
+    old_umask=$(umask)
+    umask 077
+    CF_API_CONFIG=$(mktemp "${TMPDIR:-/tmp}/cf-api.XXXXXXXX") || err "Cannot create curl config"
+    umask "$old_umask"
+    trap cf_api_config_cleanup EXIT INT TERM
+
     if [ "$mode" = "token" ]; then
         cf_require_token "for token auth"
-        CF_API_HEADERS+=("-H" "Authorization: Bearer $CF_API_TOKEN")
+        printf 'header = "Authorization: Bearer %s"\n' "$CF_API_TOKEN" >"$CF_API_CONFIG"
         return 0
     fi
     if [ "$mode" = "key" ]; then
         cf_require_key "for key auth"
-        CF_API_HEADERS+=("-H" "X-Auth-Key: $CF_API_KEY" "-H" "X-Auth-Email: $CF_API_EMAIL")
+        printf 'header = "X-Auth-Key: %s"\nheader = "X-Auth-Email: %s"\n' \
+            "$CF_API_KEY" "$CF_API_EMAIL" >"$CF_API_CONFIG"
         return 0
     fi
     err "Unknown auth mode: $mode"
@@ -592,10 +674,10 @@ cf_api_request_mode() {
     local data="${4-}"
     cf_api_headers_mode "$mode"
     if [ -n "$data" ]; then
-        curl -sS -X "$method" "${CF_API_HEADERS[@]}" --data "$data" "$CF_API_BASE$path"
+        curl -sS -K "$CF_API_CONFIG" -X "$method" "${CF_API_HEADERS[@]}" --data "$data" "$CF_API_BASE$path"
         return
     fi
-    curl -sS -X "$method" "${CF_API_HEADERS[@]}" "$CF_API_BASE$path"
+    curl -sS -K "$CF_API_CONFIG" -X "$method" "${CF_API_HEADERS[@]}" "$CF_API_BASE$path"
 }
 
 cf_api_request_mode_checked() {
@@ -605,13 +687,19 @@ cf_api_request_mode_checked() {
     local data="${4-}"
     local tmp status curl_status=0
     cf_api_headers_mode "$mode"
-    tmp=$(mktemp)
+    # Response bodies can carry account data; do not leave them in TMPDIR if the
+    # request is interrupted.
+    local old_umask
+    old_umask=$(umask); umask 077
+    tmp=$(mktemp) || err "Cannot create temp file for API response"
+    umask "$old_umask"
+    trap 'rm -f "${tmp:-}"' INT TERM
     if [ -n "$data" ]; then
-        if ! status=$(curl -sS -o "$tmp" -w '%{http_code}' -X "$method" "${CF_API_HEADERS[@]}" --data "$data" "$CF_API_BASE$path"); then
+        if ! status=$(curl -sS -K "$CF_API_CONFIG" -o "$tmp" -w '%{http_code}' -X "$method" "${CF_API_HEADERS[@]}" --data "$data" "$CF_API_BASE$path"); then
             curl_status=$?
         fi
     else
-        if ! status=$(curl -sS -o "$tmp" -w '%{http_code}' -X "$method" "${CF_API_HEADERS[@]}" "$CF_API_BASE$path"); then
+        if ! status=$(curl -sS -K "$CF_API_CONFIG" -o "$tmp" -w '%{http_code}' -X "$method" "${CF_API_HEADERS[@]}" "$CF_API_BASE$path"); then
             curl_status=$?
         fi
     fi
@@ -631,31 +719,50 @@ cf_api_request_mode_checked() {
     return 0
 }
 
+# Every request now goes through the status-checked path, so a transport error
+# or a non-2xx response is recorded in CF_API_LAST_STATUS / CF_API_LAST_BODY and
+# reported instead of vanishing. Previously the unchecked path ran curl with no
+# --fail and no status capture: a 429, 502 or HTML error body produced empty
+# stdout, cf_api_success("") returned "", and the caller printed an error with no
+# message and no status code.
+#
+# Return semantics are deliberately unchanged for the default caller. Callers
+# test the body with cf_api_success themselves, and some treat a failed GET as a
+# normal branch (cloud-redirect.sh: "no ruleset yet, create one"). Returning
+# non-zero here would abort those callers under `set -e` before their own
+# handling runs, so the default still returns 0 and lets the body speak.
+#
+# Pass "checked" as the 4th argument to also get a non-zero return, for callers
+# that want the failure to propagate (check-edge.sh does this).
 cf_api_request() {
     local method="$1"
     local path="$2"
     local data="${3-}"
     local checked="${4-}"
     cf_auth_mode || err "Account API token (CF_API_TOKEN) or Global API Key + email (CF_API_KEY+CF_API_EMAIL) required"
-    if [ "$checked" = "checked" ]; then
-        local body
-        if ! cf_api_request_mode_checked "$CF_AUTH_MODE" "$method" "$path" "$data"; then
-            body="${CF_API_LAST_BODY-}"
-            local errors
-            errors=$(cf_api_error_messages "$body")
-            if [ -n "$errors" ]; then
-                fail "Cloudflare API request failed: $errors"
-            else
-                fail "Cloudflare API request failed (status ${CF_API_LAST_STATUS:-unknown})"
-            fi
-            echo "$body"
-            return 1
+
+    local body rc=0
+    cf_api_request_mode_checked "$CF_AUTH_MODE" "$method" "$path" "$data" || rc=$?
+    body="${CF_API_LAST_BODY-}"
+
+    if [ "$rc" -ne 0 ]; then
+        # Surface the transport/status detail the body alone cannot carry: an
+        # empty body from a 502 or a connection failure otherwise reaches the
+        # caller as a silent empty string.
+        local errors
+        errors=$(cf_api_error_messages "$body")
+        if [ -n "$errors" ]; then
+            fail "Cloudflare API ${method} ${path} failed (status ${CF_API_LAST_STATUS:-unknown}): $errors"
+        else
+            fail "Cloudflare API ${method} ${path} failed (status ${CF_API_LAST_STATUS:-unknown})"
         fi
-        body="${CF_API_LAST_BODY-}"
-        echo "$body"
-        return 0
     fi
-    cf_api_request_mode "$CF_AUTH_MODE" "$method" "$path" "$data"
+
+    echo "$body"
+    if [ "$checked" = "checked" ]; then
+        return "$rc"
+    fi
+    return 0
 }
 
 cf_origin_ca_request() {
@@ -664,18 +771,30 @@ cf_origin_ca_request() {
     local data="${3-}"
     CF_API_HEADERS=("-H" "Content-Type: application/json")
     cf_require_ca_key "for Origin CA requests"
-    CF_API_HEADERS+=("-H" "X-Auth-User-Service-Key: $CF_CA_KEY")
+
+    # Same rule as cf_api_headers_mode: the Origin CA key goes in the -K config
+    # file, not in argv.
+    cf_api_config_cleanup
+    local old_umask
+    old_umask=$(umask)
+    umask 077
+    CF_API_CONFIG=$(mktemp "${TMPDIR:-/tmp}/cf-api.XXXXXXXX") || err "Cannot create curl config"
+    umask "$old_umask"
+    trap cf_api_config_cleanup EXIT INT TERM
+    printf 'header = "X-Auth-User-Service-Key: %s"\n' "$CF_CA_KEY" >"$CF_API_CONFIG"
     if [ -n "$data" ]; then
-        curl -sS -X "$method" "${CF_API_HEADERS[@]}" --data "$data" "$CF_API_BASE$path"
+        curl -sS -K "$CF_API_CONFIG" -X "$method" "${CF_API_HEADERS[@]}" --data "$data" "$CF_API_BASE$path"
         return
     fi
-    curl -sS -X "$method" "${CF_API_HEADERS[@]}" "$CF_API_BASE$path"
+    curl -sS -K "$CF_API_CONFIG" -X "$method" "${CF_API_HEADERS[@]}" "$CF_API_BASE$path"
 }
 
 cf_api_success() {
     local response="$1"
     if command -v jq >/dev/null 2>&1; then
-        echo "$response" | jq -r 'if .success == true then "true" elif .success == false then "false" else "" end'
+        # A non-JSON body (an HTML 502 page, an empty transport failure) must
+        # yield "" rather than spraying jq parse errors onto stderr.
+        echo "$response" | jq -r 'if .success == true then "true" elif .success == false then "false" else "" end' 2>/dev/null
         return
     fi
     echo "$response" | tr -d '\n' | sed -n 's/.*"success":\(true\|false\).*/\1/p'
@@ -684,7 +803,7 @@ cf_api_success() {
 cf_api_error_messages() {
     local response="$1"
     if command -v jq >/dev/null 2>&1; then
-        echo "$response" | jq -r '.errors[].message // empty' | tr '\n' ' '
+        echo "$response" | jq -r '.errors[].message // empty' 2>/dev/null | tr '\n' ' '
         return
     fi
     echo ""

@@ -290,9 +290,9 @@ for domain in "${DOMAINS[@]}"; do
     section "ORIGIN" "Vhosts"
     kv "DOMAIN" "$domain"
     if process_domain "$domain"; then
-        ((processed_count++))
+        processed_count=$((processed_count+1))
     else
-        ((failed_count++))
+        failed_count=$((failed_count+1))
     fi
     echo
 done

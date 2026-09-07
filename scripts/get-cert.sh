@@ -117,6 +117,9 @@ issue_cert() {
 
     tmp_key=$(mktemp)
     tmp_csr=$(mktemp)
+    # The key is unencrypted; an abort anywhere below (a failed API call under
+    # set -e, or SIGINT) must not leave it in TMPDIR.
+    trap 'rm -f "$tmp_key" "$tmp_csr"' RETURN INT TERM
 
     log "Generating private key and CSR for: $domain"
     if ! (umask 077 && openssl req -new -newkey rsa:2048 -nodes -keyout "$tmp_key" -out "$tmp_csr" -subj "/CN=$domain" >/dev/null 2>&1); then
@@ -172,6 +175,8 @@ install_manual() {
     local tmp_cert tmp_key
     tmp_cert=$(mktemp)
     tmp_key=$(mktemp)
+    # Ctrl-C at either prompt would otherwise leave pasted key material in TMPDIR.
+    trap 'rm -f "$tmp_cert" "$tmp_key"' RETURN INT TERM
 
     echo "Enter certificate block (terminate with Ctrl+D):"
     cat > "$tmp_cert"

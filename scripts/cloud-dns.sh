@@ -65,7 +65,6 @@ while getopts ":-:" opt; do
             usage; exit 1
           fi
           ;;
-        *) usage; exit 1 ;;
       esac
       ;;
     \?) usage; exit 1 ;;

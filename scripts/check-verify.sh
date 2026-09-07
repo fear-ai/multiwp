@@ -38,7 +38,7 @@ Example: check-verify.sh syn unit
 
 Commands:
   syn   Run bash -n on scripts
-  unit  Run unit tests (test_common, test_cli, test_cf, test_mcp)
+  unit  Run unit tests (test_common, test_cli, test_cmd, test_cf, test_mcp)
   auth  Compare auth file domains with domains.csv (check-auth.sh)
   edge  Run edge checks (HTTP/DNS) for selected domains
   dns   Run Cloudflare settings/DNS checks for selected domains
@@ -301,6 +301,7 @@ run_syn() {
 run_unit() {
     "$SCRIPTS_DIR/test_common.sh"
     "$SCRIPTS_DIR/test_cli.sh"
+    "$SCRIPTS_DIR/test_cmd.sh"
     "$SCRIPTS_DIR/test_cf.sh"
     "$SCRIPTS_DIR/test_mcp.sh"
 }
@@ -318,34 +319,41 @@ run_auth() {
 }
 
 run_server() {
-    "$SCRIPTS_DIR/check-server.sh" || true
+    "$SCRIPTS_DIR/check-server.sh"
 }
 
 run_edge() {
     local domains
-    read -r -a domains <<<"$(select_domains)"
+    local domains_out
+    domains_out=$(select_domains) || return 1
+    read -r -a domains <<<"$domains_out"
     local domain key auth_file zone_id
+    local ok=true
     for domain in "${domains[@]}"; do
         key=$(normalize_domain "$domain")
         auth_file="${AUTH_FILE_OVERRIDE:-${DOMAIN_AUTH_FILE[$key]-}}"
         zone_id="${DOMAIN_ZONE_ID[$key]-}"
         if [ "$USE_API" = true ] && [ -n "$zone_id" ]; then
             if [ -n "$auth_file" ]; then
-                CF_ZONE_ID="$zone_id" "$SCRIPTS_DIR/check-edge.sh" --api --auth-file "$auth_file" "$domain" || true
+                CF_ZONE_ID="$zone_id" "$SCRIPTS_DIR/check-edge.sh" --api --auth-file "$auth_file" "$domain" || ok=false
             else
                 warn "Missing auth_file for $domain; running edge checks without --api"
-                "$SCRIPTS_DIR/check-edge.sh" "$domain" || true
+                "$SCRIPTS_DIR/check-edge.sh" "$domain" || ok=false
             fi
         else
-            "$SCRIPTS_DIR/check-edge.sh" "$domain" || true
+            "$SCRIPTS_DIR/check-edge.sh" "$domain" || ok=false
         fi
     done
+    [ "$ok" = true ]
 }
 
 run_dns() {
     local domains
-    read -r -a domains <<<"$(select_domains)"
+    local domains_out
+    domains_out=$(select_domains) || return 1
+    read -r -a domains <<<"$domains_out"
     local domain key auth_file zone_id
+    local ok=true
     for domain in "${domains[@]}"; do
         key=$(normalize_domain "$domain")
         auth_file="${AUTH_FILE_OVERRIDE:-${DOMAIN_AUTH_FILE[$key]-}}"
@@ -355,11 +363,12 @@ run_dns() {
             continue
         fi
         if [ -n "$auth_file" ]; then
-            "$SCRIPTS_DIR/check-cf.sh" --auth-file "$auth_file" --zone-id "$zone_id" "$domain" || true
+            "$SCRIPTS_DIR/check-cf.sh" --auth-file "$auth_file" --zone-id "$zone_id" "$domain" || ok=false
         else
             warn "Missing auth_file for $domain; skipping"
         fi
     done
+    [ "$ok" = true ]
 }
 
 resolve_wp_root() {
@@ -407,22 +416,29 @@ wp_mode_flag_for() {
 
 run_origin() {
     local domains
-    read -r -a domains <<<"$(select_domains)"
+    local domains_out
+    domains_out=$(select_domains) || return 1
+    read -r -a domains <<<"$domains_out"
     local domain key site_type root
+    local ok=true
     for domain in "${domains[@]}"; do
         key=$(normalize_domain "$domain")
         site_type=$(normalize_site_type "${DOMAIN_SITE_TYPE[$key]-}")
         if ! root=$(resolve_wp_root "$domain" "$site_type"); then
             continue
         fi
-        "$SCRIPTS_DIR/check-origin.sh" --wp-root "$root" --apache-dir "$APACHE_DIR_LOCAL" --ssl-dir "$SSL_DIR_LOCAL" "$domain" || true
+        "$SCRIPTS_DIR/check-origin.sh" --wp-root "$root" --apache-dir "$APACHE_DIR_LOCAL" --ssl-dir "$SSL_DIR_LOCAL" "$domain" || ok=false
     done
+    [ "$ok" = true ]
 }
 
 run_wp() {
     local domains
-    read -r -a domains <<<"$(select_domains)"
+    local domains_out
+    domains_out=$(select_domains) || return 1
+    read -r -a domains <<<"$domains_out"
     local domain key site_type root mode_flag
+    local ok=true
     for domain in "${domains[@]}"; do
         key=$(normalize_domain "$domain")
         site_type=$(normalize_site_type "${DOMAIN_SITE_TYPE[$key]-}")
@@ -430,8 +446,9 @@ run_wp() {
             continue
         fi
         mode_flag=$(wp_mode_flag_for "$site_type")
-        "$SCRIPTS_DIR/check-wp.sh" "$mode_flag" --wp-root "$root" "$domain" || true
+        "$SCRIPTS_DIR/check-wp.sh" "$mode_flag" --wp-root "$root" "$domain" || ok=false
     done
+    [ "$ok" = true ]
 }
 
 overall_ok=true
@@ -442,11 +459,11 @@ for cmd in "${COMMANDS[@]}"; do
         syn) run_syn || overall_ok=false ;;
         unit) run_unit || overall_ok=false ;;
         auth) run_auth || overall_ok=false ;;
-        edge) run_edge ;;
-        dns) run_dns ;;
-        server) run_server ;;
-        origin) run_origin ;;
-        wp) run_wp ;;
+        edge) run_edge || overall_ok=false ;;
+        dns) run_dns || overall_ok=false ;;
+        server) run_server || overall_ok=false ;;
+        origin) run_origin || overall_ok=false ;;
+        wp) run_wp || overall_ok=false ;;
         *) err "Unknown command: $cmd" ;;
     esac
 done

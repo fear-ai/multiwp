@@ -98,8 +98,11 @@ check_file_perms() {
     local actual
     actual=$(priv stat -c "%U:%G %a" "$path" 2>/dev/null || true)
     if [ -z "$actual" ]; then
-        warn "Unable to read permissions for $path"
-        return 0
+        # Unverifiable is not the same as correct. Returning 0 here let an
+        # unreadable cert or key count as a pass, and test-record.sh then wrote
+        # status_origin=apache for the domain.
+        fail "Unable to read permissions for $path"
+        return 1
     fi
     if [ "$actual" != "$expected" ]; then
         fail "$path permissions are $actual (expected $expected)"
