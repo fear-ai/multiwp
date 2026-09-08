@@ -1152,8 +1152,7 @@ the first rule set was applied.
 
 | # | Subsystem | Issue | Measured prevalence | Impact | Action |
 |---|-----------|-------|---------------------|--------|--------|
-| 1 | Edge rules | zero.directory carries no protective ruleset | **All 991 origin 503s** in the ten-hour window; 1,097 of 1,248 wp-login origin hits | Only zone exhausting PHP-FPM; the four protected zones recorded none | Apply the five-rule set. Rollback baseline already captured in `conf/rollback/` |
-| 2 | PHP-FPM | `pm.max_children = 5` for four WordPress sites | wp-login POSTs returned 503 rather than WordPress login errors — workers exhausted before the app answered | Any traffic spike becomes an outage, not a slowdown | Raise after confirming memory headroom against Profile B. See [Use-case profiles](#use-case-profiles) — this directly contends with the Zero node |
+| 1 | PHP-FPM | `pm.max_children = 5` for four WordPress sites | wp-login POSTs returned 503 rather than WordPress login errors — workers exhausted before the app answered | Any traffic spike becomes an outage, not a slowdown | Raise after confirming memory headroom against Profile B. See [Use-case profiles](#use-case-profiles) — this directly contends with the Zero node |
 
 ### P2 — Measured, self-inflicted load
 
@@ -1167,9 +1166,10 @@ the first rule set was applied.
 
 | # | Subsystem | Issue | Measured prevalence | Status |
 |---|-----------|-------|---------------------|--------|
-| 6 | Edge rules | xmlrpc block | **0 origin hits** | Rule is holding. Zero hits means working, not unnecessary — removing it restores the attack surface |
-| 7 | Edge rules | Exploit-scanner consolidation | ~1,600 requests (ALFA TEAM webshell kit, CVE-2017-9841 phpunit RCE) | No exploit path ever returned 200. Each previously cost 10 internal redirects and a PHP worker via the `.htaccess` rewrite loop — since fixed |
-| 8 | Origin | `.htaccess` rewrite recursion | Both normalization rules looped | Fixed in the live multisite file and `templates/htaccess-multisite`. Verify after any template change |
+| 6 | Edge rules | zero.directory ruleset | Was the source of **all 991 origin 503s** and 1,097 of 1,248 wp-login origin hits while unprotected | **Resolved 2026-09-05.** Four rules applied (CVE-2026-63030 batch endpoint, wp-login POST challenge, wp-admin unauthenticated challenge, exploit kit paths). Live-verified 2026-09-07: `POST /wp-login.php` → 403, `GET /wp-admin/` → 403, `GET /` → 200. `conf/README.md` text still reads "deliberately unchanged pending review" and is stale against `conf/zero.directory_http_request_firewall_custom.json` |
+| 7 | Edge rules | xmlrpc block | **0 origin hits** | Rule is holding. Zero hits means working, not unnecessary — removing it restores the attack surface |
+| 8 | Edge rules | Exploit-scanner consolidation | ~1,600 requests (ALFA TEAM webshell kit, CVE-2017-9841 phpunit RCE) | No exploit path ever returned 200. Each previously cost 10 internal redirects and a PHP worker via the `.htaccess` rewrite loop — since fixed |
+| 9 | Origin | `.htaccess` rewrite recursion | Both normalization rules looped | Fixed in the live multisite file and `templates/htaccess-multisite`. Verify after any template change |
 
 ### Prevalence by attack type
 
@@ -1236,6 +1236,39 @@ the setting is applied and drift-checked by the same tooling as every other zone
 setting. Note it is not part of the `/zones/<id>/settings` collection those
 scripts already read; it lives under the Bot Management API and needs a separate
 call.
+
+### Open work items
+
+Tracked here rather than in a separate tracker, so the measurement that
+justifies each one stays next to it.
+
+**PERF-FPM-CHILDREN — raise `pm.max_children`** (P1)
+
+`pm.max_children = 5` across four WordPress sites. Evidence: wp-login POSTs
+returned 503 rather than WordPress login errors, meaning workers were exhausted
+before the application answered; Wordfence rate-limits at the PHP layer, after a
+worker is already committed. Blocked on a memory-headroom check against Profile
+B — the Zero node holds ~2.8 GB and available memory falls to ~300 MB, at which
+point `apache2`, `mysqld` and `php-fpm` all appear in the OOM victim table.
+Raising workers without that check trades a web outage for an OOM.
+Do: measure peak RSS per `php-fpm` worker, compute headroom with the node
+running, then raise in a single step and re-measure. Record before/after in
+`perf_runs.csv`.
+
+**PERF-WF-LOOPBACK — contain the Wordfence self-requests** (P2)
+
+5,111 requests to `/?wordfence_syncAttackData=<timestamp>` with user agent
+`WordPress/6.9`, split alphaeos.net 2,674, zero.directory 1,482,
+avtranscript.com 955. Each leaves the host and returns through Cloudflare,
+costing one edge request and one PHP worker. Not wp-cron: `DISABLE_WP_CRON` is
+set on both installs with system cron every 10 minutes.
+Do: map each site domain to `127.0.0.1` in `/etc/hosts` so the loopback stays
+local, or reduce Wordfence's sync frequency. The `/etc/hosts` route changes
+name resolution for every process on the host, so verify that no script or
+health check depends on resolving these names externally before applying.
+This must land before Bot Fight Mode is reconsidered — see
+[Bot Fight Mode](#bot-fight-mode--assessed-not-enabled), which would challenge
+exactly this traffic.
 
 ### How to update this section
 

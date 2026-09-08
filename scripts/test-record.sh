@@ -304,7 +304,7 @@ select_domains() {
         for domain in "${DOMAIN_ORDER[@]}"; do
             status=$(tolower "${DOMAIN_STATUS[$domain]-}")
             site_type=$(normalize_site_type "${DOMAIN_SITE_TYPE[$domain]-}")
-            if [ "$INCLUDE_IGNORE" != true ] && [ "$status" = "ignore" -o "$status" = "worker" ]; then
+            if [ "$INCLUDE_IGNORE" != true ] && { [ "$status" = "ignore" ] || [ "$status" = "worker" ]; }; then
                 continue
             fi
             if [ -n "$state_filter" ] && [ "$status" != "$state_filter" ]; then

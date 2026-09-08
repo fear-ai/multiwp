@@ -27,6 +27,7 @@ Options:
   --api  Enable Cloudflare API checks in check-edge.sh
 $(cli_usage_hsts)
 $(cli_usage_domain)
+  --domains-file PATH [DOMAINS_FILE] (default: ./domains.csv)  Domain metadata source
 $(cli_usage_apache_dir)
 $(cli_usage_http_timeout)
 $(cli_usage_wp_root)
@@ -42,6 +43,12 @@ while getopts ":-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 api) EDGE_ARGS+=("--api") ;;
+                domains-file=*) DOMAINS_FILE="${OPTARG#*=}"; export DOMAINS_FILE ;;
+                domains-file)
+                    [ -n "${!OPTIND-}" ] || err "--domains-file requires a path"
+                    DOMAINS_FILE="${!OPTIND}"; export DOMAINS_FILE
+                    OPTIND=$((OPTIND+1))
+                    ;;
                 hsts|hsts=*)
                     if cli_hsts_opt "${OPTARG}" HSTS_CLI "${!OPTIND-}"; then
                         EDGE_ARGS+=("--hsts=${HSTS_CLI}")

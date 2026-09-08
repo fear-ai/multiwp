@@ -48,7 +48,8 @@ EOF
 # Function to check SSL certificates
 check_certificates() {
     local domain="$1"
-    local safe_name=$(safe_name "$domain")
+    local safe_name
+    safe_name=$(safe_name "$domain")
     # Expect Cloudflare Origin cert/key named after the domain (apex + www)
     # Origin certs are used between Cloudflare and the origin, not publicly.
     local cert_file="$SSL_CERT_DIR/${safe_name}.crt"
@@ -73,7 +74,8 @@ check_certificates() {
 process_domain() {
     local domain="$1"
     domain=$(tolower "$domain")
-    local safe_name=$(safe_name "$domain")
+    local safe_name
+    safe_name=$(safe_name "$domain")
     local http_done=false
     local ssl_done=false
     local success=true

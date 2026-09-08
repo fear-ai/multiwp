@@ -32,6 +32,20 @@ The canonical mapping used throughout this repository is:
 
 The inventory is split one file per Cloudflare account. No script hardcodes a path: every reference resolves through `${DOMAINS_FILE:-$ROOT_DIR/domains.csv}`, and the scripts listed in `scripts/Scripts.md` also accept `--domains-file`.
 
+**`domains.csv` is superseded and must not be used.** It is the pre-split
+combined inventory and has drifted: as of 2026-09-07 it holds 44 rows against 53
+across the three per-account files, missing 11 domains (`alexandraleonidova.com`,
+`appsawareness.com`, `appspresence.com`, `appstally.com`, `bitfwd.net`,
+`dltec.org`, `karshat.com`, `leonidova.org`, `scholarsnook.org`,
+`zerocurrency.io`, `zeromachine.io`) and still listing two retired ones
+(`zknow.site`, `zwap.one`). It is also the only inventory still recording a
+routable origin address on redirect-only rows.
+
+Because it remains the default when `DOMAINS_FILE` is unset, always pass
+`--domains-file` or set `DOMAINS_FILE` explicitly. Retiring the default — either
+by removing the file or by making the scripts require an explicit inventory — is
+open work; until then the default silently selects stale data.
+
 | File | Account | Auth file |
 |------|---------|-----------|
 | `domains-alpha.csv` | AlphaEOS | `~/.config/cloudflare/alphaeosnet.auth` |

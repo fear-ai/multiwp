@@ -18,7 +18,7 @@ AUTH_MODE=""
 DOMAINS=()
 HSTS_REQUIRED="${HSTS_REQUIRED-}"
 HSTS_REQUIRED_CLI=""
-AUTH_LOADED=false
+EDGE_AUTH_READY=false
 CF_AUTH_CLI=""
 
 usage() {
@@ -111,7 +111,7 @@ if [ -n "${HSTS_REQUIRED_CLI-}" ]; then
     HSTS_REQUIRED="$HSTS_REQUIRED_CLI"
 elif [ -z "${HSTS_REQUIRED-}" ] && [ -n "${CF_AUTH_FILE-}" ]; then
     cf_init_auth "$CF_AUTH_FILE"
-    AUTH_LOADED=true
+    EDGE_AUTH_READY=true
 fi
 
 if [ -n "${HSTS_REQUIRED-}" ]; then
@@ -126,13 +126,13 @@ require_cmds curl dig
 load_dns_redirects || { usage; exit 1; }
 
 if [ "$API_CHECKS" = true ]; then
-    if [ "$AUTH_LOADED" = false ]; then
+    if [ "$EDGE_AUTH_READY" = false ]; then
         if [ -n "${CF_AUTH_FILE-}" ]; then
             cf_init_auth "$CF_AUTH_FILE"
         else
             cf_init_auth
         fi
-        AUTH_LOADED=true
+        EDGE_AUTH_READY=true
     fi
     cf_require_auth "for --api"
     require_cmds jq

@@ -96,6 +96,7 @@ Program scripts (entrypoints, alphabetical):
 | `get-cert.sh` | Issue or install Cloudflare Origin cert/key (API or manual) | Not exercised |
 | `install-site.sh` | Add site to WordPress multisite, map to apex domain | Exercised |
 | `mcp-cf.sh` | Validate Cloudflare MCP portal access | Exercised |
+| `onboard-site.sh` | Run onboard-zone.sh then cloud-redirect.sh for a redirect domain | Not exercised |
 | `onboard-zone.sh` | Create or ensure Cloudflare zone + DNS and update domains.csv | Not exercised |
 | `perf-load.sh` | Run load tests and capture telemetry for a WordPress site | Exercised |
 | `rules-cf.sh` | Get, put, or copy Cloudflare rulesets (firewall, cache, rate) | Exercised |
@@ -116,7 +117,9 @@ Helper and library scripts:
 | `common.sh` | Shared library functions (sourced by other scripts) | Library |
 | `auth.sh` | Cloudflare auth helpers and API request utilities | Library |
 | `cli.sh` | Shared option parsing helpers | Library |
+| `cmd.sh` | Command execution and background process helpers | Library |
 | `orch.sh` | Orchestration helper functions for check runners | Library |
+| `gen-crossref.sh` | Regenerate `scripts/Generated.md` from the scripts | Maintenance |
 | `mcp.sh` | MCP helper functions | Library |
 
 Unit test scripts:
@@ -124,6 +127,7 @@ Unit test scripts:
 |--------|---------|--------|
 | `test_common.sh` | Unit tests for shared helpers | Test |
 | `test_cf.sh` | Unit tests for Cloudflare helpers | Test |
+| `test_cmd.sh` | Unit tests for command execution helpers | Test |
 | `test_cli.sh` | Unit tests for CLI helpers | Test |
 | `test_mcp.sh` | Unit tests for MCP helpers | Test |
 
