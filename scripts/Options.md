@@ -208,7 +208,20 @@ Commentary:
 - `CF_API_TOKEN`, `CF_API_KEY`, and `CF_CA_KEY` are secrets. They should only exist in local auth files or environment variables and must never be committed.
 - `CF_ACCOUNT_ID`, `CF_ACCOUNT_NAME`, `CF_DOMAINS`, and `CF_ZONE` are metadata rather than secrets, but they still represent account structure and are sensitive operational data.
 
-Common auth arguments: --auth, --auth-file, --account, --account-name, --token, --key, --email, --ca-key.
+Common auth arguments: --auth, --auth-file, --account, --account-name, --token, --key, --email, --ca-key, --token-file, --key-file, --ca-key-file.
+
+Secret handling:
+- `--token-file PATH`, `--key-file PATH` and `--ca-key-file PATH` read the secret
+  from a file and are the preferred form. The file must be mode 600 or 400; any
+  other mode is refused.
+- `--token`, `--key` and `--ca-key` take the secret as an option value. They
+  still work, but the value lands in the process's argv (readable by other local
+  users through `ps auxww`) and in shell history, so each use emits a warning
+  once per run. If one must be used interactively, type the command with a
+  leading space so it is kept out of history — this relies on `HISTCONTROL`
+  containing `ignorespace`, which is Ubuntu's `~/.bashrc` default.
+- Credentials are never passed to `curl` on the command line: `auth.sh` writes
+  them to a `curl -K` config file created under `umask 077` and removed by a trap.
 
 Cloudflare zone selection:
 - `--zone name [CF_ZONE]` sets the target zone name (used by `check-cf.sh`, `check-edge.sh`).
@@ -666,7 +679,7 @@ Options (script-specific):
  - `--downgrade`
  - `--multisite`, `--singlesite`, `--autosite` control WordPress mode selection.
 
-Common arguments: --auth-file, --http-timeout, --hsts, --wp-root, --apache-dir, --ssl-dir, --allow-root, --no-sudo, --help.
+Common arguments: --auth-file, --domains-file, --http-timeout, --hsts, --wp-root, --apache-dir, --ssl-dir, --allow-root, --no-sudo, --help.
 
 Environment variables:
 `DOMAINS_FILE`, `HTTP_TIMEOUT`, `WORDPRESS_ROOT`, `APACHE_DIR`, `SSL_DIR`.

@@ -44,6 +44,9 @@ for f in *.sh; do
     awk -v file="$f" '
         # Track whether we are inside a case block dispatching on OPTARG or "$1"/"$opt".
         /case[[:space:]]+"?\$\{?OPTARG/ { inopt=1 }
+        # auth.sh/cli.sh parse shared long options in helpers that dispatch on
+        # $opt rather than $OPTARG; those arms are real CLI options too.
+        /case[[:space:]]+"\$opt"/           { inopt=1 }
         /^[[:space:]]*esac/            { inopt=0 }
         inopt && match($0, /^[[:space:]]*(--)?[a-zA-Z][a-zA-Z0-9-]*(=\*)?\)/) {
             arm = substr($0, RSTART, RLENGTH)
