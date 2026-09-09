@@ -50,6 +50,16 @@ Read in this order to keep operational dependencies clear:
 - `MULTI.md` (optional): Strategic architecture decisions, tradeoffs, and future work (see sections 2–8: `MULTI.md#2-architecture--design-decisions`, `MULTI.md#3-network--domain-model`, `MULTI.md#4-infrastructure-layers`, `MULTI.md#5-operational-tradeoffs`, `MULTI.md#6-implementation-issues--lessons`, `MULTI.md#7-abandoned-approaches`, `MULTI.md#8-future-investigation`).
 - `DNSTerms.md` (optional): DNS and Cloudflare terminology reference and vendor links.
 
+**Operator configuration** (not in this repository):
+
+- `~/.config/cloudflare/<account>.auth` — API credentials, mode 600.
+- `~/.config/multiwp/site.conf` — operator settings that are not secrets but are
+  not public either: contact addresses, the origin address, inventory and auth
+  paths. Loaded by `common.sh`; see `scripts/Shell.md` for the precedence rules.
+Nothing in those files may be reproduced in a committed document: no account
+identifiers, contact addresses, origin addresses, or database and admin
+usernames.
+
 **Inclusion rules** (what belongs in this map):
 
 - Listed here: documents that are committed, describe how to run or extend the
@@ -76,13 +86,17 @@ WordPress security settings live in `Operations.md` section 4.7 (`Operations.md#
 
 ## Scripts
 
-Scripts are grouped by role so entrypoints, orchestration runners, and shared libraries stay clear. Status is a best-effort indicator of whether a script has been exercised in this repo; update it as scripts are run.
+Scripts are grouped by role so entrypoints, orchestration runners, and shared libraries stay clear. Status is a best-effort indicator of whether a script has been exercised in this
+repo; update it as scripts are run. **Partly exercised** means the argument
+parsing, validation and error/cleanup paths have been run against real input, but
+the mutating path — one that writes DNS, certificates or backups — has not, so a
+first live run should still be watched.
 
 Program scripts (entrypoints, alphabetical):
 | Script | Purpose | Status |
 |--------|---------|--------|
 | `apache-vhost.sh` | Create Apache HTTP + SSL vhosts for domain | Exercised |
-| `back-wp.sh` | Freeze and back up a WordPress site | Not exercised |
+| `back-wp.sh` | Freeze and back up a WordPress site | Exercised (blocked: PHP exec disabled) |
 | `check-auth.sh` | Compare CF_DOMAINS in auth files to domains.csv | Not exercised |
 | `check-cf.sh` | Inspect Cloudflare zone settings via API | Exercised |
 | `check-edge.sh` | Validate Cloudflare edge behavior and headers | Exercised |
@@ -93,11 +107,11 @@ Program scripts (entrypoints, alphabetical):
 | `cloud-redirect.sh` | Ensure Cloudflare Redirect Rules for redirect-only domains | Exercised |
 | `cloud-settings.sh` | Apply Cloudflare HTTPS/security settings | Not exercised |
 | `cloudflare-ips.sh` | Generate Cloudflare allowlist rules for UFW | Not exercised |
-| `get-cert.sh` | Issue or install Cloudflare Origin cert/key (API or manual) | Not exercised |
+| `get-cert.sh` | Issue or install Cloudflare Origin cert/key (API or manual) | Exercised |
 | `install-site.sh` | Add site to WordPress multisite, map to apex domain | Exercised |
 | `mcp-cf.sh` | Validate Cloudflare MCP portal access | Exercised |
 | `onboard-site.sh` | Run onboard-zone.sh then cloud-redirect.sh for a redirect domain | Not exercised |
-| `onboard-zone.sh` | Create or ensure Cloudflare zone + DNS and update domains.csv | Not exercised |
+| `onboard-zone.sh` | Create or ensure Cloudflare zone + DNS and update domains.csv | Partly exercised |
 | `perf-load.sh` | Run load tests and capture telemetry for a WordPress site | Exercised |
 | `rules-cf.sh` | Get, put, or copy Cloudflare rulesets (firewall, cache, rate) | Exercised |
 | `setup-wp.sh` | Bootstrap WordPress multisite base configuration | Not exercised |

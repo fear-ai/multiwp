@@ -2,7 +2,7 @@
 # onboard-zone.sh - Create or ensure a Cloudflare zone, add baseline DNS, and update domains.csv.
 # For options, environment variables, defaults see usage().
 #
-# Example: onboard-zone.sh --domain example.com --ip 203.0.113.10
+# Example: onboard-zone.sh --domain example.com --ip 192.0.2.1
 
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,8 +20,10 @@ DOMAINS=()
 # See Operations.md section 3.7.2.
 REDIRECT_IP="${REDIRECT_IP:-192.0.2.1}"
 # The origin address is deliberately not hardcoded here. Supply it with --ip, the
-# IP environment variable, or the `ip` column in the inventory.
-DEFAULT_IP="${DEFAULT_IP-}"
+# IP environment variable, the ORIGIN_IP key in the operator config
+# (~/.config/multiwp/site.conf, loaded by common.sh), or the `ip` column in the
+# inventory.
+DEFAULT_IP="${DEFAULT_IP-${ORIGIN_IP-}}"
 IP="${IP-}"
 DOMAINS_FILE="${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
 DATASTORE_DATE="${DATASTORE_DATE-}"
@@ -42,7 +44,7 @@ DNS_PROVIDER_SET=false
 usage() {
     cat <<'EOF'
 onboard-zone.sh - Create or ensure a Cloudflare zone, add baseline DNS, and update domains.csv.
-Example: onboard-zone.sh --domain example.com --ip 203.0.113.10
+Example: onboard-zone.sh --domain example.com --ip 192.0.2.1
 
 Options:
   --domain NAME  Domain to provision (repeatable; positional also accepted)

@@ -18,7 +18,18 @@ This section defines DNS naming and delegation concepts and maps them to authori
 
 ### Addressing
 These terms describe how DNS records map names to addresses and aliases.
-- **A record**: Maps a hostname to an IPv4 address (e.g., `example.com -> 203.0.113.10`). Use at the apex; in Cloudflare, apex records use `@` as the record name; proxy if using Cloudflare. [13](#ref-13)
+
+- **`192.0.2.0/24` (TEST-NET-1)**: Reserved by RFC 5737 for documentation and
+  examples, and **non-routable on the public internet** — no operator may
+  announce it in BGP, so packets sent there are discarded rather than delivered
+  to any host. This repository uses `192.0.2.1` as its example address
+  throughout, and as the live A record for redirect-only zones: Cloudflare
+  answers those redirects at the edge and never contacts an origin, so the record
+  exists only to make the hostname resolve and engage the proxy. Because the
+  address goes nowhere, a redirect zone fails closed if its rule is ever removed,
+  instead of reaching a real server. See `Operations.md` section 3.7.2.
+
+- **A record**: Maps a hostname to an IPv4 address (e.g., `example.com -> 192.0.2.1`). Use at the apex; in Cloudflare, apex records use `@` as the record name; proxy if using Cloudflare. [13](#ref-13)
 - **AAAA record**: Maps a hostname to an IPv6 address. Optional; add if you serve IPv6. [13](#ref-13)
 - **CNAME**: Alias from one hostname to another (e.g., `www.example.com -> example.com`). Use for `www` pointing to apex; not allowed at the apex under standard DNS rules. [2](#ref-2) [13](#ref-13)
 - **CNAME flattening (Cloudflare)**: Cloudflare can accept a CNAME at the zone apex and return the final IP address instead of a CNAME, which avoids the no-CNAME-at-apex limitation while remaining DNS-compatible at the resolver level. [14](#ref-14)
@@ -72,7 +83,7 @@ This section provides short definitions and reminders for frequent DNS and URL c
 - **TLD and SLD variants**: The top-level domain (TLD) is the rightmost label (`.com`, `.org`, country codes like `.uk`). Many ccTLDs use a second-level structure (e.g., `.co.uk`, `.com.au`, `.gov.uk`), so the registrable name might be `example.co.uk` where `example` is the SLD beneath that second-level TLD. Internationalized domain names (IDNs) allow non-English characters; in DNS they appear in Punycode (e.g., `xn--mnchen-3ya.de` for `muenchen.de`).
 - **Registered domain vs host**: The registrable domain (`example.com`, `example.co.uk`) is what you buy. Hosts (subdomains you publish) live under it: `www.example.com`, `api.example.com`, `blog.eu.example.co.uk`.
 - **Subdomain and host**: Any label to the left of the registrable domain (`app.example.com`, `stage.api.example.com`). Subdomain names the label; the host is the service answering that name.
-- **Direct IP vs name**: You can reach an origin by IP (`https://203.0.113.10`), but names are needed for virtual hosting and TLS SNI; most browsers require the host header and SNI to serve the correct site.
+- **Direct IP vs name**: You can reach an origin by IP (`https://192.0.2.1`), but names are needed for virtual hosting and TLS SNI; most browsers require the host header and SNI to serve the correct site.
 - **Ports and schemes**: A URL may specify a port (`:8080`). Defaults are 80 for `http` and 443 for `https`.
 - **HTTP vs HTTPS; SSL vs TLS**: `http` is cleartext; `https` is HTTP over TLS. SSL is the legacy predecessor; modern traffic should use TLS 1.2+ with valid certificates. Browsers and UIs may still say SSL, but configure TLS options. [8](#ref-8) [9](#ref-9)
 - **FQDN (fully-qualified domain name)**: A complete domain ending at the TLD, optionally with a trailing dot (`www.example.com.`) to signal an absolute DNS name.

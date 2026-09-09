@@ -124,8 +124,100 @@ parse_bool() {
     esac
 }
 
+# Resolve the inventory file. Priority:
+#   1. DOMAINS_FILE (explicit, from --domains-file or the environment)
+#   2. the single domains-*.csv that is non-empty, when exactly one exists
+#   3. $ROOT_DIR/domains.csv (legacy default; superseded, see Record.md)
+#
+# Rule 2 exists because the inventory is split one file per Cloudflare account
+# and each domains-*.csv holds exactly one account_id. Falling back to the
+# legacy combined file silently selects stale data, so when the split files are
+# unambiguous we prefer them.
+# Operator settings: non-public but not secrets — account names, contact
+# addresses, the origin address, inventory and auth paths. These must not be
+# committed, so they live in a config file outside the repository.
+#
+# Precedence: environment > config file > built-in default. An already-set
+# environment variable always wins, so --option and one-off overrides work.
+#
+# Path: $MULTIWP_CONF, else ~/.config/multiwp/site.conf (XDG_CONFIG_HOME aware).
+# Search order: MULTIWP_CONF, then a repo-local .config/multiwp/site.conf (so a
+# checkout can carry its own settings), then the per-user XDG location. The
+# repo-local path is gitignored; it must never be committed.
+if [ -z "${MULTIWP_CONF:-}" ]; then
+    if [ -f "$ROOT_DIR/.config/multiwp/site.conf" ]; then
+        MULTIWP_CONF="$ROOT_DIR/.config/multiwp/site.conf"
+    else
+        MULTIWP_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/multiwp/site.conf"
+    fi
+fi
+
+# shellcheck disable=SC2120  # optional path argument, used by tests
+load_operator_conf() {
+    local path="${1:-$MULTIWP_CONF}"
+    [ -f "$path" ] || return 0
+    local mode
+    mode=$(stat -c '%a' "$path" 2>/dev/null) || return 0
+    case "$mode" in
+        600|400) ;;
+        *) warn "operator config $path is mode ${mode}; expected 600" ;;
+    esac
+    local key
+    for key in WP_ADMIN_EMAIL ORIGIN_IP INVENTORY_DIR AUTH_DIR; do
+        # Environment wins; only fill what is unset or empty.
+        [ -n "${!key:-}" ] && continue
+        local val
+        val=$(kv_file_var "$path" "$key") || true
+        [ -n "$val" ] && printf -v "$key" '%s' "$val" && export "${key?}"
+    done
+    return 0
+}
+
 domains_csv_path() {
-    echo "${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
+    if [ -n "${DOMAINS_FILE:-}" ]; then
+        echo "$DOMAINS_FILE"
+        return 0
+    fi
+    local -a candidates=()
+    local f
+    for f in "$ROOT_DIR"/domains-*.csv; do
+        [ -f "$f" ] && [ -s "$f" ] && candidates+=("$f")
+    done
+    if [ "${#candidates[@]}" -eq 1 ]; then
+        echo "${candidates[0]}"
+        return 0
+    fi
+    echo "$ROOT_DIR/domains.csv"
+}
+
+# Report which inventory an account's auth file maps to, by matching
+# account_id. Returns 1 when the mapping is not unique.
+domains_csv_for_auth() {
+    local auth_file="$1"
+    [ -f "$auth_file" ] || return 1
+    local acct
+    acct=$(kv_file_var "$auth_file" "CF_ACCOUNT_ID")
+    [ -n "$acct" ] || return 1
+    require_cmd python3
+    local f match=""
+    for f in "$ROOT_DIR"/domains-*.csv; do
+        [ -f "$f" ] && [ -s "$f" ] || continue
+        if ACCT="$acct" python3 - "$f" <<'EOF'
+import csv, os, sys
+acct = os.environ["ACCT"].strip()
+with open(sys.argv[1], newline="") as fh:
+    for row in csv.DictReader(fh):
+        if (row.get("account_id") or "").strip() == acct:
+            sys.exit(0)
+sys.exit(1)
+EOF
+        then
+            [ -z "$match" ] || return 1   # ambiguous: more than one file matches
+            match="$f"
+        fi
+    done
+    [ -n "$match" ] || return 1
+    echo "$match"
 }
 
 csv_get_domain_fields() {
@@ -617,3 +709,6 @@ finalize_domains() {
         warn "duplicate domains ignored: ${dupes[*]}"
     fi
 }
+
+# Load operator settings last: it uses kv_file_var, defined above.
+load_operator_conf

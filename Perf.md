@@ -608,7 +608,7 @@ Run read-only validations for the test targets.
 ./scripts/check-verify.sh server
 ./scripts/check-verify.sh --api --domain zero.directory --wp-root /var/www/html/zero.directory edge dns origin wp
 ./scripts/check-verify.sh --api --wp-root /var/www/html/wordpress --multisite edge dns origin wp \
-  alphaeos.net avtranscript.com recomp.one talkdao.org
+  alphaeos.net avtranscript.com recomp.top talkdao.org
 ```
 
 ### Baseline capture and verification
@@ -623,7 +623,7 @@ mkdir -p "$OUT"
 
 Capture edge headers:
 ```bash
-for d in zero.directory alphaeos.net avtranscript.com recomp.one talkdao.org; do
+for d in zero.directory alphaeos.net avtranscript.com recomp.top talkdao.org; do
   curl -I "https://$d/" > "$OUT/headers_${d}.txt"
 done
 ```
@@ -964,7 +964,7 @@ wrk2 -t4 -c64 -d<duration> -R<rate> "https://zero.directory/?cache_bust=${RUN_ID
 ```
 
 ```bash
-for d in alphaeos.net avtranscript.com recomp.one talkdao.org; do
+for d in alphaeos.net avtranscript.com recomp.top talkdao.org; do
   wrk2 -t4 -c64 -d<duration> -R<rate> "https://$d/"
   wrk2 -t4 -c64 -d<duration> -R<rate> "https://$d/?cache_bust=${RUN_ID}"
 done
@@ -1152,7 +1152,7 @@ the first rule set was applied.
 
 | # | Subsystem | Issue | Measured prevalence | Impact | Action |
 |---|-----------|-------|---------------------|--------|--------|
-| 1 | PHP-FPM | `pm.max_children = 5` for four WordPress sites | wp-login POSTs returned 503 rather than WordPress login errors — workers exhausted before the app answered | Any traffic spike becomes an outage, not a slowdown | Raise after confirming memory headroom against Profile B. See [Use-case profiles](#use-case-profiles) — this directly contends with the Zero node |
+| 1 | Apache / PHP-FPM | Concurrency ceiling: Apache **prefork `MaxRequestWorkers 6`**, PHP-FPM `pm.max_children = 5` | wp-login POSTs returned 503 rather than WordPress login errors — the request queue filled at the Apache layer | Any traffic spike becomes an outage, not a slowdown | Move to `mpm_event` (already set to 150) then size `pm.max_children` from measured RSS — workers average **3 MB**, so memory is not the constraint |
 
 ### P2 — Measured, self-inflicted load
 
@@ -1225,11 +1225,33 @@ Arguments against, specific to this estate:
   exclusions on the free plan; Super Bot Fight Mode, which can be scoped, is a
   paid feature.
 
-Recommendation: **leave disabled** until the P2 item 3 loopback fix is applied
-and verified. Enabling it before then would challenge our own traffic. After the
-loopback is contained, revisit per zone, starting with a redirect-only zone where
-there is no application traffic to disturb, and measure origin requests before and
-after rather than assuming benefit.
+**Resolution.** Leave disabled, and record the decision so the dashboard prompt
+is answered once rather than re-argued. The three conditions that would change
+the answer, in order:
+
+1. **Contain the loopback first** (PERF-WF-LOOPBACK). Bot Fight Mode would
+   challenge Wordfence's own self-requests — currently ~73/day arriving from
+   Cloudflare edge addresses — breaking its sync while leaving the wasted PHP
+   worker in place. This is a hard blocker, not a preference.
+2. **Then trial on one redirect-only zone.** Those serve no application traffic
+   and answer entirely at the edge, so a JavaScript challenge there costs
+   nothing and cannot break a login or an API path. Measure origin-bound
+   requests before and after with the GraphQL query above; the metric is
+   `requests` minus `cachedRequests` for that zone.
+3. **Only then consider a content zone**, and only if step 2 showed a measurable
+   reduction. The measured attack surface — 27,138 wp-login POSTs, 10,970
+   wp-admin probes — is already handled by `managed_challenge` rules that act
+   *before* Bot Fight Mode would, so the expected marginal gain is small.
+
+If step 2 shows no measurable reduction, the answer is settled: decline it
+permanently and note the measurement here, so the dashboard prompt can be
+dismissed on evidence rather than re-assessed each time it appears.
+
+Two constraints worth stating with the decision. It cannot be scoped — Bot Fight
+Mode is zone-wide with no path exclusions on the free plan; Super Bot Fight Mode,
+which can be scoped, is paid. And it issues JavaScript challenges to
+unauthenticated traffic, which affects legitimate crawlers on zones whose purpose
+is to be found.
 
 If it is enabled later, add it to `cloud-settings.sh` and `check-cf.sh` first, so
 the setting is applied and drift-checked by the same tooling as every other zone
@@ -1242,33 +1264,256 @@ call.
 Tracked here rather than in a separate tracker, so the measurement that
 justifies each one stays next to it.
 
-**PERF-FPM-CHILDREN — raise `pm.max_children`** (P1)
+**PERF-MPM-CONCURRENCY — raise the request ceiling, Apache first** (P1)
 
-`pm.max_children = 5` across four WordPress sites. Evidence: wp-login POSTs
-returned 503 rather than WordPress login errors, meaning workers were exhausted
-before the application answered; Wordfence rate-limits at the PHP layer, after a
-worker is already committed. Blocked on a memory-headroom check against Profile
-B — the Zero node holds ~2.8 GB and available memory falls to ~300 MB, at which
-point `apache2`, `mysqld` and `php-fpm` all appear in the OOM victim table.
-Raising workers without that check trades a web outage for an OOM.
-Do: measure peak RSS per `php-fpm` worker, compute headroom with the node
-running, then raise in a single step and re-measure. Record before/after in
-`perf_runs.csv`.
+Corrected 2026-09-08. The earlier framing ("raise `pm.max_children` from 5") was
+wrong about where the limit is. Measured on the host:
+
+| Setting | Value |
+|---|---|
+| Apache MPM | **prefork**, `MaxRequestWorkers 6` |
+| PHP-FPM | `pm = dynamic`, `pm.max_children = 5` |
+| Live PHP workers | 3, **~3 MB RSS each (9 MB total)** |
+| Host memory | 3910 MB total, 2698 MB available |
+
+Apache prefork admits at most **6** concurrent requests, so PHP-FPM's 5 is not
+the binding constraint — raising it alone changes nothing. The 503s under the
+wp-login flood were the request queue filling at the Apache layer.
+
+Memory is not the obstacle either: workers average 3 MB, so even 30 of them is
+~90 MB against 2.7 GB available. The Profile B contention I previously flagged
+is real for the Zero node's 2.8 GB, but it does not bear on a change of this
+size.
+
+Do, in order:
+
+1. Switch Apache to `mpm_event` (already configured at `MaxRequestWorkers 150`)
+   with PHP-FPM over a socket, or raise prefork's `MaxRequestWorkers` if staying
+   on prefork. Prefork is the historical default for `mod_php`; with PHP-FPM
+   there is no reason to keep it.
+2. Then raise `pm.max_children` to match the new Apache ceiling, sized from
+   measured RSS rather than a guess.
+3. Re-measure with `perf-load.sh` before and after, recording both in
+   `perf_runs.csv`.
+
+Note this is concurrency headroom, not throughput: it changes how many requests
+can be served at once, not how fast any one of them completes.
 
 **PERF-WF-LOOPBACK — contain the Wordfence self-requests** (P2)
 
-5,111 requests to `/?wordfence_syncAttackData=<timestamp>` with user agent
-`WordPress/6.9`, split alphaeos.net 2,674, zero.directory 1,482,
-avtranscript.com 955. Each leaves the host and returns through Cloudflare,
-costing one edge request and one PHP worker. Not wp-cron: `DISABLE_WP_CRON` is
-set on both installs with system cron every 10 minutes.
-Do: map each site domain to `127.0.0.1` in `/etc/hosts` so the loopback stays
-local, or reduce Wordfence's sync frequency. The `/etc/hosts` route changes
-name resolution for every process on the host, so verify that no script or
-health check depends on resolving these names externally before applying.
-This must land before Bot Fight Mode is reconsidered — see
+*What the name means:* a **loopback** request is one the server sends to itself.
+Wordfence periodically POSTs to its own site to hand collected attack data to
+its scanner — a design that assumes the request stays inside the host.
+
+*Why it costs anything here:* the site's hostname resolves to Cloudflare, not to
+`127.0.0.1`. So the request leaves the origin, crosses the network to a
+Cloudflare edge node, and comes back in as ordinary inbound traffic. One
+self-request therefore consumes an outbound connection, an edge request, an
+Apache slot and a PHP-FPM worker — the last of which matters directly given the
+concurrency ceiling in PERF-MPM-CONCURRENCY above.
+
+*Confirmed source.* The parameter is Wordfence's own: it is defined in
+`wordfence/waf/wfWAFIPBlocksController.php` and `wordfence/lib/wordfenceClass.php`,
+and the plugin is installed at the multisite root. The request is issued by
+
+```php
+wp_remote_post(add_query_arg('wordfence_syncAttackData', microtime(true),
+                             home_url('/')), array('timeout' => 0.01,
+                                                   'blocking' => false, ...));
+```
+
+so it targets `home_url('/')` — `https://alphaeos.net` — resolved through normal
+DNS, which points at Cloudflare. The access-log user agent is
+`WordPress/7.1; https://<site>`, i.e. the WordPress HTTP API naming the calling
+site. That is the round trip, from the plugin source rather than inference.
+
+*Volume, measured 2026-09-08* (current log, ~20 h from 00:48 to 20:59):
+
+| vhost | POSTs |
+|---|---|
+| alphaeos.net | 24 |
+| talkdao.org | 19 |
+| zero.directory | 18 |
+| avtranscript.com | 9 |
+| recomp.top | 3 |
+| **total** | **73** |
+
+The earlier 5,111 figure is the 15-day window from `conf/README.md`; ~73/day is
+consistent with it.
+
+*Can the fix use 127.0.0.1?* Yes. Because the URL is built from `home_url()` and
+resolved by the system resolver, an `/etc/hosts` entry mapping each site
+hostname to `127.0.0.1` keeps the request on the loopback interface: WordPress
+still requests `https://alphaeos.net/`, but it never leaves the host. Two
+consequences to handle first:
+
+- **TLS.** The request is `https://`, so the local Apache must answer for that
+  hostname on 127.0.0.1 with a certificate the origin trusts. Wordfence passes
+  `'sslverify' => apply_filters('https_local_ssl_verify', false)`, so
+  verification is off by default for this call, but any other loopback caller
+  may not be so forgiving.
+- **Everything else on the host resolves the same way.** `check-edge.sh` and
+  `perf-load.sh` deliberately request the public hostnames to measure the edge;
+  with hosts entries in place, running them *on the origin* would silently
+  bypass Cloudflare and measure the origin instead. Either exclude those tools,
+  or run them from elsewhere.
+
+A narrower alternative, if the resolver change is unwelcome: Wordfence falls back
+to an admin-side AJAX sync after 10 failed self-requests
+(`wordfence_syncAttackDataAttempts > 10`), so blocking the loopback path is not
+silently fatal — but that path only fires on page loads, which changes when data
+is synced rather than removing the cost.
+
+Must land before Bot Fight Mode is reconsidered — see
 [Bot Fight Mode](#bot-fight-mode--assessed-not-enabled), which would challenge
 exactly this traffic.
+
+### Traffic assessment: scope and feasibility
+
+Assessed 2026-09-08. Comparing origin traffic against what Cloudflare reports —
+what was cached, what was blocked, what reached the origin and whether that
+matches expectation — is worth automating, but the two sides do not currently
+produce comparable data.
+
+**What the origin can answer today.** Seven per-vhost access logs in `combined`
+format: client IP, path, status, bytes, referer, user agent. That answers "what
+reached the origin, from which Cloudflare edge address" and nothing more.
+`slice-logs.sh` windows them by time.
+
+**Which Cloudflare headers actually reach the origin.** Verified 2026-09-08 with
+a one-off probe echoing `HTTP_CF*`:
+
+| Header | Reaches origin | Notes |
+|---|---|---|
+| `CF-Connecting-IP` | yes | the real client address |
+| `CF-Ray` | yes | request id, joins to Cloudflare's own logs |
+| `CF-IPCountry` | yes | |
+| `CF-Visitor` | yes | `{"scheme":"https"}` |
+| **`CF-Cache-Status`** | **no** | a *response* header, set after the origin replies |
+
+That last row matters: cache status can never be logged at the origin, because
+the origin only sees requests that missed cache. Origin logs therefore measure
+misses; the hit ratio has to come from Cloudflare.
+
+**Prototype log format.** Adds the headers that do arrive, plus `%D` (microseconds
+to serve) for latency work. Validated with `apache2ctl configtest` — Syntax OK:
+
+```apache
+LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" \
+%{CF-Connecting-IP}i %{CF-Ray}i %{CF-IPCountry}i %D" cf_combined
+```
+
+Then per vhost, in `templates/apache-ssl.conf` and the deployed vhosts:
+
+```apache
+CustomLog ${APACHE_LOG_DIR}/{{SAFE_NAME}}_ssl_access.log cf_combined
+```
+
+`CF-Ray` is the join key: the same id appears in Cloudflare's logs, so a request
+can be followed across both sides. `CF-Connecting-IP` restores the real client,
+which the current logs lose entirely — every entry shows a Cloudflare address.
+
+**Disposition: adopt.** The compatibility concern was checked rather than
+assumed. `slice-logs.sh` parses Apache lines by the bracketed timestamp and the
+quoted request field, not by trailing field positions, so appending columns does
+not disturb it — verified by running its parser against both the old and extended
+formats, which yield identical timestamp, request and status. Take it in two
+steps: change `templates/apache-ssl.conf` so new vhosts get it, then reissue
+existing vhosts through `apache-vhost.sh` at the next convenient reload. Nothing
+downstream needs to change first.
+
+**How the header set was established.** Not from documentation — a probe was
+placed at the origin that echoed every `HTTP_*` variable, then requested through
+Cloudflare. The complete set arriving is `CF-Connecting-IP`, `CF-Ray`,
+`CF-IPCountry`, `CF-Visitor`, plus `CDN-Loop`, `X-Forwarded-For` and
+`X-Forwarded-Proto`. `CF-Cache-Status` is absent, and the same request's
+*response* carries `cf-cache-status: MISS` — so it exists, but only on the way
+back. The reason is structural: the edge decides cache status by consulting its
+cache, and only forwards to the origin when it misses. A hit never reaches the
+origin at all, so an origin log could only ever record misses. Repeat the probe
+the same way if Cloudflare's header set changes.
+
+**Cache status comes from the API instead, per request.** Verified 2026-09-08:
+`httpRequestsAdaptiveGroups` exposes `cacheStatus` as a dimension, alongside
+`edgeResponseStatus` and `clientRequestHTTPHost`, so the breakdown the origin
+cannot see is available without touching Apache at all. A six-hour sample:
+
+| cacheStatus | requests |
+|---|---|
+| hit | 178 |
+| miss | 168 |
+| none | 53 |
+| bypass | 41 |
+| dynamic | 2 |
+| revalidated | 1 |
+| expired | 1 |
+
+```
+query($zone:String!,$since:Time!,$until:Time!){viewer{zones(filter:{zoneTag:$zone})
+ {httpRequestsAdaptiveGroups(limit:20,filter:{datetime_geq:$since,datetime_lt:$until})
+  {count dimensions{cacheStatus edgeResponseStatus clientRequestHTTPHost}}}}}
+```
+
+`bypass` and `none` are worth watching — 94 of 444 requests in that sample, both
+meaning the edge served nothing from cache. The distinction between `miss`
+(cacheable, not yet cached) and `bypass` (a rule or header said not to cache) is
+exactly what an origin log cannot tell you.
+
+This narrows the case for the log-format change: cache analysis no longer needs
+it. What the extra fields still buy is the **real client address**
+(`CF-Connecting-IP`, currently lost entirely) and the **`CF-Ray` join key** for
+following a single request across both sides. Both are worth having, but the
+change is now a convenience rather than a prerequisite.
+
+**Cloudflare side: the REST endpoint is gone.** `/zones/<id>/analytics/dashboard`
+now returns **error 1015, "Zone Analytics API is sunset and replaced by GraphQL
+API"** (confirmed against the live API, 2026-09-08). Anything built on it will
+fail. The replacement is the GraphQL Analytics API at
+`https://api.cloudflare.com/client/v4/graphql`, POST, with the same bearer token.
+
+Working query, verified against a live zone:
+
+```bash
+q=$(jq -n --arg z "$ZONE_ID" --arg s "$SINCE" --arg u "$UNTIL" '{
+  query: "query($zone:String!,$since:Time!,$until:Time!){viewer{zones(filter:{zoneTag:$zone})
+          {httpRequests1hGroups(limit:100,filter:{datetime_geq:$since,datetime_lt:$until})
+          {sum{requests bytes cachedRequests cachedBytes threats}}}}}",
+  variables: {zone:$z, since:$s, until:$u}}')
+curl -sS -K "$cfg" -H "Content-Type: application/json" --data "$q" \
+  https://api.cloudflare.com/client/v4/graphql
+```
+
+Returned for one zone over 24 h: `requests 19778, cachedRequests 12377,
+threats 1758` — a **62.6 percent** hit ratio and ~7,401 origin-bound requests.
+Timestamps are RFC 3339 (`date -u -d '1 day ago' +%Y-%m-%dT%H:%M:%SZ`).
+`httpRequests1hGroups` buckets hourly; `httpRequestsAdaptiveGroups` gives
+per-request sampling where the plan allows.
+
+**The reconciliation, and why it needs the log change.** Edge reported ~7,401
+origin-bound requests for that zone in 24 h; the origin log showed 2,172 for a
+partial day. Those are not yet comparable — different windows, and no shared key.
+With `CF-Ray` logged, they join per request instead of being compared in
+aggregate. Do the log-format change first; analysis tooling built before it is
+guessing.
+
+**Then, in order of value:**
+
+1. **Expected versus actual origin load.** Per zone, origin requests against
+   Cloudflare's origin-bound count. Divergence means a cache rule is not doing
+   what it appears to.
+2. **Blocked at edge versus attempted at origin.** `conf/README.md` records what
+   each rule should stop; the origin logs show what still arrives. Zero origin
+   hits means the rule is holding — xmlrpc is the worked example.
+3. **Destination and expectation.** Redirect-only zones should show no origin
+   traffic at all; any is a misconfiguration worth alerting on.
+
+**On the dashboard's own security recommendations.** Cloudflare surfaces
+suggestions that are not scoped to this estate — the Bot Fight Mode prompt is the
+documented example, assessed and declined for concrete reasons in
+[Bot Fight Mode](#bot-fight-mode--assessed-not-enabled). Treat them as prompts to
+evaluate, not findings. Record each decision with its reason, so a recurring
+prompt is answered once rather than re-argued; a suggestion that has been
+explicitly declined is not drift.
 
 ### How to update this section
 

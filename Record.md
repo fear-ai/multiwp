@@ -32,40 +32,50 @@ The canonical mapping used throughout this repository is:
 
 The inventory is split one file per Cloudflare account. No script hardcodes a path: every reference resolves through `${DOMAINS_FILE:-$ROOT_DIR/domains.csv}`, and the scripts listed in `scripts/Scripts.md` also accept `--domains-file`.
 
-**`domains.csv` is superseded and must not be used.** It is the pre-split
-combined inventory and has drifted: as of 2026-09-07 it holds 44 rows against 53
-across the three per-account files, missing 11 domains (`alexandraleonidova.com`,
-`appsawareness.com`, `appspresence.com`, `appstally.com`, `bitfwd.net`,
-`dltec.org`, `karshat.com`, `leonidova.org`, `scholarsnook.org`,
-`zerocurrency.io`, `zeromachine.io`) and still listing two retired ones
-(`zknow.site`, `zwap.one`). It is also the only inventory still recording a
-routable origin address on redirect-only rows.
+**`domains.csv` is superseded.** It is the pre-split combined inventory and has
+drifted from the per-account files; the repo-root copy is now an empty
+placeholder, and the historical one is kept outside the repository. Use the
+per-account files, and see the note on stale inventories at the end of this
+section.
 
-Because it remains the default when `DOMAINS_FILE` is unset, always pass
-`--domains-file` or set `DOMAINS_FILE` explicitly. Retiring the default — either
-by removing the file or by making the scripts require an explicit inventory — is
-open work; until then the default silently selects stale data.
+### Inventory resolution
 
-| File | Account | Auth file |
-|------|---------|-----------|
-| `domains-alpha.csv` | AlphaEOS | `~/.config/cloudflare/alphaeosnet.auth` |
-| `domains-zero.csv` | Zero | `~/.config/cloudflare/zerocurrencyio.auth` |
-| `domains-zknow.csv` | zknow@protonmail.com | `~/.config/cloudflare/zknow.auth` |
+`domains_csv_path` in `common.sh` resolves the inventory in this order:
 
-Usage:
+1. `DOMAINS_FILE` — set by `--domains-file` or the environment.
+2. The single non-empty `domains-*.csv`, when exactly one exists.
+3. `$ROOT_DIR/domains.csv` — the legacy default.
 
-```
-DOMAINS_FILE=domains-zero.csv ./scripts/check-domain.sh <domain>
-./scripts/check-auth.sh --domains-file domains-zknow.csv --auth-file ~/.config/cloudflare/zknow.auth
-```
+Rule 2 means a checkout carrying one account's inventory needs no flag. With
+several present, as here, the resolution stays ambiguous and falls through to
+rule 3, so an explicit selection is still required.
 
-Keep one account per file. `check-auth.sh` refuses to run against a file containing multiple `auth_file` values unless `--auth-file` selects one, so mixing accounts makes that check require a manual flag on every invocation.
+`domains_csv_for_auth <auth-file>` maps an auth file to its inventory by
+matching `CF_ACCOUNT_ID` against the `account_id` column, and fails rather than
+guessing when the match is not unique.
 
-All inventory files are mode 600 and matched by `domains-*.csv` in `.gitignore`. They hold the origin IP, zone and account identifiers, database and admin usernames, and filesystem paths; none of that authenticates, but together it maps the estate.
+It keys on the account identifier rather than the auth-file name because the
+relationship is many-to-one: one Cloudflare account can have several auth files
+(different tokens or scopes), and those must resolve to the same inventory.
+Verified against every auth file present on the host.
 
-Reconcile against the API rather than trusting the file. A zone deleted at Cloudflare leaves a stale row that breaks `check-cf.sh` with "Invalid or missing zone", and a zone added outside the tooling never appears. Retired domains are tracked out-of-band by the operator so their absence is not read as drift.
+Account identifiers, emails and auth-file names are operational data. They are
+read from the auth files at runtime and must not be written into this or any
+other committed document.
 
-Note that `site_type` gates several scripts: `cloud-settings.sh` skips rows typed `none`, `ignore` or `worker`, so a row left at `none` is silently excluded from baseline application.
+### Datastore backups
+
+`csv_put_fields` writes a timestamped `datastore_<ts>.csv` beside the inventory
+before each update. These accumulate with no retention policy; a rule — keep the
+newest N, or prune by age — is open work.
+
+### Stale inventories and retired domains
+
+Superseded inventories and datastore backups still name domains that have since
+expired and been deleted. Before trusting any older copy, reconcile it against
+the Cloudflare API rather than reading it directly; a domain absent from the
+current per-account files is either retired or was never onboarded. Retirements
+are recorded out-of-band by the operator.
 
 ## Intent Signals per Site Type
 The `site_type` column is the primary intent flag, but it is not the only signal. Additional fields determine the intended behavior for each site type and prevent ambiguity during recording.

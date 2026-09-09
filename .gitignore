@@ -419,3 +419,6 @@ desktop.ini
 .Trashes
 
 domains-*.csv
+
+# operator settings, never committed
+.config/

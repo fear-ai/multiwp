@@ -114,7 +114,7 @@ finalize_domains DOMAINS >/dev/null 2>&1
 assert_status 1 $? "finalize_domains fails on invalid domain"
 
 echo "== validate_ip =="
-validate_ip "192.0.2.10"
+validate_ip "192.0.2.1"
 assert_status 0 $? "validate_ip accepts valid IPv4"
 validate_ip "1.1.1.1"
 assert_status 0 $? "validate_ip accepts public IPv4"
@@ -289,6 +289,80 @@ assert_equal "hi" "$output" "priv drops -u when sudo disabled"
 output=$(priv echo "hello")
 assert_equal "hello" "$output" "priv runs command directly when sudo disabled"
 SUDO_BIN="$SAVED_SUDO_BIN"
+
+echo "== load_operator_conf =="
+# Each case re-sources common.sh in a subshell with a clean environment, so the
+# loader runs from scratch the way a real script invocation does.
+CONF_DIR="$TMP_DIR/conf"
+mkdir -p "$CONF_DIR"
+CONF_FILE="$CONF_DIR/site.conf"
+cat >"$CONF_FILE" <<'CONF'
+WP_ADMIN_EMAIL=ops@example.net
+ORIGIN_IP=198.51.100.7
+CONF
+chmod 600 "$CONF_FILE"
+
+load_conf_case() {
+    env -u WP_ADMIN_EMAIL -u ORIGIN_IP "$@" \
+        MULTIWP_CONF="$CONF_FILE" \
+        bash -c '. "$0"; printf "%s|%s" "${WP_ADMIN_EMAIL-}" "${ORIGIN_IP-}"' \
+        "$SCRIPTS_DIR/common.sh" 2>/dev/null
+}
+
+assert_equal "ops@example.net|198.51.100.7" "$(load_conf_case)" \
+    "load_operator_conf reads keys from the config file"
+assert_equal "env@wins.test|198.51.100.7" "$(load_conf_case WP_ADMIN_EMAIL=env@wins.test)" \
+    "load_operator_conf lets the environment win over the config file"
+
+chmod 644 "$CONF_FILE"
+output=$(env -u WP_ADMIN_EMAIL MULTIWP_CONF="$CONF_FILE" \
+    bash -c '. "$0"' "$SCRIPTS_DIR/common.sh" 2>&1)
+assert_contains "$output" "expected 600" "load_operator_conf warns on loose permissions"
+chmod 600 "$CONF_FILE"
+
+output=$(env -u WP_ADMIN_EMAIL MULTIWP_CONF="$CONF_DIR/absent.conf" \
+    bash -c '. "$0"; echo "ok"' "$SCRIPTS_DIR/common.sh" 2>&1)
+assert_equal "ok" "$output" "load_operator_conf ignores a missing config file"
+
+echo "== domains_csv_path =="
+# domains_csv_path resolves against ROOT_DIR, so give each case its own tree
+# rather than the checkout's real inventory.
+INV_ROOT="$TMP_DIR/inv"
+mkdir -p "$INV_ROOT"
+csv_path_case() {
+    env -u DOMAINS_FILE "$@" bash -c '
+        ROOT_DIR="$1"; . "$0"; domains_csv_path' \
+        "$SCRIPTS_DIR/common.sh" "$INV_ROOT" 2>/dev/null
+}
+printf 'domain,account_id,ip\na.com,ACCT111,192.0.2.1\n' >"$INV_ROOT/domains-alpha.csv"
+assert_equal "$INV_ROOT/domains-alpha.csv" "$(csv_path_case)" \
+    "domains_csv_path prefers the only non-empty split inventory"
+
+printf 'domain,account_id,ip\nb.com,ACCT222,192.0.2.2\n' >"$INV_ROOT/domains-beta.csv"
+assert_equal "$INV_ROOT/domains.csv" "$(csv_path_case)" \
+    "domains_csv_path falls back to the legacy file when ambiguous"
+
+: >"$INV_ROOT/domains-beta.csv"
+assert_equal "$INV_ROOT/domains-alpha.csv" "$(csv_path_case)" \
+    "domains_csv_path ignores an empty split inventory"
+
+assert_equal "/explicit/path.csv" "$(csv_path_case DOMAINS_FILE=/explicit/path.csv)" \
+    "domains_csv_path honours an explicit DOMAINS_FILE"
+
+echo "== domains_csv_for_auth =="
+printf 'domain,account_id,ip\nb.com,ACCT222,192.0.2.2\n' >"$INV_ROOT/domains-beta.csv"
+printf 'CF_ACCOUNT_ID=ACCT222\n' >"$TMP_DIR/auth-beta.env"
+printf 'CF_ACCOUNT_ID=NOSUCH\n' >"$TMP_DIR/auth-missing.env"
+auth_case() {
+    bash -c 'ROOT_DIR="$1"; . "$0"; domains_csv_for_auth "$2"' \
+        "$SCRIPTS_DIR/common.sh" "$INV_ROOT" "$1" 2>/dev/null
+}
+assert_equal "$INV_ROOT/domains-beta.csv" "$(auth_case "$TMP_DIR/auth-beta.env")" \
+    "domains_csv_for_auth maps an account to its inventory"
+auth_case "$TMP_DIR/auth-missing.env" >/dev/null 2>&1
+assert_status 1 $? "domains_csv_for_auth fails on an unknown account"
+auth_case "$TMP_DIR/absent.env" >/dev/null 2>&1
+assert_status 1 $? "domains_csv_for_auth fails on a missing auth file"
 
 if [ "$failures" -gt 0 ]; then
     printf "\n%s test(s) failed.\n" "$failures" >&2

@@ -119,7 +119,7 @@ Rules:
 Key/value lines:
 ```
 DOMAIN=example.com
-ZONE_ID=5e8ac20272ea8909c5d9be6e6f4fb7ac
+ZONE_ID=0123456789abcdef0123456789abcdef
 ```
 
 Status lines (planned):

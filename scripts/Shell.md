@@ -104,6 +104,31 @@ Key helpers:
 
 ## Security and Operational Discipline
 
+### Operator settings versus secrets
+
+Three tiers, with different homes:
+
+| Tier | Examples | Where |
+|---|---|---|
+| **Secrets** | API tokens, global keys, Origin CA keys | `~/.config/cloudflare/<account>.auth`, mode 600 |
+| **Operator settings** | account names, contact addresses, origin address, inventory and auth paths | `~/.config/multiwp/site.conf`, mode 600 |
+| **Public** | script logic, runbooks, option definitions | this repository |
+
+The middle tier is the one that is easy to get wrong: it does not authenticate
+anything, so it feels harmless, but together it maps the estate — which accounts
+exist, who administers them, and where the origin is. It must not be committed.
+
+`common.sh` reads `site.conf` through `load_operator_conf`, honouring
+`MULTIWP_CONF` and `XDG_CONFIG_HOME`. Precedence is **environment > config file >
+built-in default**, so `--option` and one-off overrides still win. Keys currently
+read: `WP_ADMIN_EMAIL`, `ORIGIN_IP`, `INVENTORY_DIR`, `AUTH_DIR`. A file that is
+not mode 600 or 400 is still read but warns.
+
+When adding a script, put anything estate-specific in `site.conf` and reference
+the variable; never write a real address, account name or origin IP into a
+committed file. `scripts/example.auth` shows the secrets format with empty
+placeholders and is the model to follow.
+
 Credentials are never passed on a command line. `auth.sh` writes them to a
 `curl -K` config file created under `umask 077` and removed by a trap; anything in
 argv is readable by any local user through `ps auxww` for the life of the request.

@@ -98,21 +98,29 @@ resolve_wp_root_for_domain() {
 }
 
 backup_domain() {
-    local domain="$1"
-    local wp_root="$2"
+    # Not local: the EXIT trap below runs at script scope, where function locals
+    # are already gone. A local here made cleanup fail with "unbound variable"
+    # and left DISALLOW_FILE_MODS set on the site. wp_root and domain are read
+    # by cleanup too, so they must outlive the function for the same reason.
+    domain="$1"
+    wp_root="$2"
+    maintenance_on=false
+    mods_modified=false
+    mods_value=""
+    wp_config=""
     local backup_dir="$3"
     local run_id="$4"
-    local maintenance_on=false
-    local mods_modified=false
-    local mods_value=""
-    local wp_config=""
-    local mods_set=false
+    local needs_mods=false
 
+    # Both RETURN and EXIT fire on an aborted backup, so cleanup runs twice.
+    # Each branch clears its own flag, making the second pass a no-op.
     cleanup() {
-        if [ "$maintenance_on" = true ]; then
+        if [ "${maintenance_on:-false}" = true ]; then
+            maintenance_on=false
             priv -u www-data wp --path="$wp_root" maintenance-mode deactivate >/dev/null 2>&1 || true
         fi
-        if [ "$mods_modified" = true ]; then
+        if [ "${mods_modified:-false}" = true ]; then
+            mods_modified=false
             if priv -u www-data wp --path="$wp_root" config set DISALLOW_FILE_MODS false --raw >/dev/null 2>&1; then
                 :
             else
@@ -137,20 +145,20 @@ backup_domain() {
     priv install -d -m 750 "$backup_dir"
     wp_config="$wp_root/wp-config.php"
     mods_value=$(priv -u www-data wp --path="$wp_root" config get DISALLOW_FILE_MODS 2>/dev/null || true)
+    # mods_modified drives the cleanup that resets DISALLOW_FILE_MODS to false,
+    # so it must mean "this run set it", not "this run intends to set it". Were
+    # it set before the config write, a failed write would abort under set -e
+    # and cleanup would clear the flag on a site that already had it true.
     case "$mods_value" in
-        true|TRUE|1) mods_modified=false ;;
-        *) mods_modified=true ;;
+        true|TRUE|1) needs_mods=false ;;
+        *) needs_mods=true ;;
     esac
-    if [ "$mods_modified" = true ]; then
-        if priv -u www-data wp --path="$wp_root" config set DISALLOW_FILE_MODS true --raw; then
-            mods_set=true
-        else
+    if [ "$needs_mods" = true ]; then
+        if ! priv -u www-data wp --path="$wp_root" config set DISALLOW_FILE_MODS true --raw; then
             warn "wp-config.php not writable by www-data; using sudo to update $wp_config"
             priv wp --allow-root --path="$wp_root" config set DISALLOW_FILE_MODS true --raw
-            mods_set=true
         fi
-    else
-        mods_set=false
+        mods_modified=true
     fi
 
     section "BACKUP" "Archive"

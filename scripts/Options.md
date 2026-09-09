@@ -129,7 +129,7 @@ Next steps:
 
 Examples:
 - `check-edge.sh example.com www.example.com`
-- `cloud-dns.sh example.com 203.0.113.10`
+- `cloud-dns.sh example.com 192.0.2.1`
 
 Status columns:
 The `status_*` columns in `domains.csv` record the latest confirmed stage for each layer. The value `none` means no tests for that layer have passed yet, and `status_cf=added` means the zone exists but is not yet active. These values are for filtering and reporting, not authoritative configuration, and `status_cf=worker` is skipped by default filters unless explicitly included. In practice, `status_cf=https` confirms the standard edge checks for a full HTTPS site, while `status_cf=redirect` confirms redirect-only edge behavior. For the origin layer, the implemented check group maps to `status_origin=apache` when `check-origin.sh` succeeds. For WordPress, `check-wp.sh` validates installation and configuration; a separate load test is required before recording `status_wp=load`, so that value should remain unused until such a test exists.
@@ -549,6 +549,36 @@ Options (script-specific):
 `--help`.
 
 Common arguments: --allow-root, --no-sudo.
+
+**Scope on multisite.** `back-wp.sh` takes a domain but acts on the whole
+WordPress install that domain resolves to. All four multisite domains share
+`wp_root=/var/www/html/wordpress`, so backing up any one of them exports the
+entire network database and the shared `wp-content` tree, and puts **every site
+in the network** into maintenance mode for the duration. There is no
+secondary-site-only mode. `zero.directory` is the exception: it is a separate
+single-site install at its own root, so backing it up affects only that site.
+
+Test it there, not on a network member.
+
+**Validation, 2026-09-08.** Run against `zero.directory` with
+`--backup-directory` pointing at a temp directory. Two findings:
+
+- **Cleanup left the site altered.** The trap's state variables were declared
+  `local`, but the `EXIT` trap runs at script scope where locals are gone, so
+  cleanup aborted with `maintenance_on: unbound variable` before reaching the
+  branch that reverts `DISALLOW_FILE_MODS`. The site kept serving 200 and
+  maintenance mode was off, but the constant was left set. Fixed by making the
+  state script-scoped and defaulting the trap's tests. Re-run confirms cleanup
+  now completes and the site is unchanged afterwards.
+- **`wp db export` cannot run on this host.** PHP CLI sets
+  `disable_functions=exec,system,passthru,shell_exec,pcntl_exec`, and the command
+  shells out to `mysqldump`, so it fails with *"Call to undefined function
+  exec()"*. This is an environment policy, not a script defect. Either allow
+  `exec` for the CLI SAPI only, or replace the export step with a direct
+  `mysqldump` invocation that does not go through wp-cli.
+
+Until the second point is resolved, `back-wp.sh` cannot complete a backup on this
+host. The freeze and restore halves are verified working.
 
 Notes:
 - The script is read-only and reports the current state only.

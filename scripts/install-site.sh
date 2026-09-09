@@ -23,7 +23,7 @@ Example: install-site.sh [OPTIONS] <domain> [title] [email]
 Arguments: <domain> [title] [email]
   - domain is the apex domain (for example, example.com). Use --domain to supply it via an option.
   - title defaults to the domain name with the first letter capitalized.
-  - email defaults to alphaeosnet@gmail.com.
+  - email defaults to WP_ADMIN_EMAIL, or admin@<domain> when that is unset.
 
 Options:
   --domain NAME  Domain to add
@@ -87,7 +87,9 @@ if [ ${#DOMAINS[@]} -ne 1 ]; then
 fi
 DOMAIN="${DOMAINS[0]}"
 TITLE="${1:-$(echo "$DOMAIN" | sed 's/\..*//' | sed 's/^./\U&/')}"
-EMAIL="${2:-alphaeosnet@gmail.com}"
+# Do not hardcode a personal address in a committed script. Set WP_ADMIN_EMAIL
+# in the environment, or pass the address as the second argument.
+EMAIL="${2:-${WP_ADMIN_EMAIL:-admin@$DOMAIN}}"
 if [ $# -gt 2 ]; then
     err "Too many arguments. Provide [title] [email] only."
 fi
