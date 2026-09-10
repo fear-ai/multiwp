@@ -83,7 +83,7 @@ resolve_wp_root_for_domain() {
     local wp_root=""
     local row
     if row=$(csv_get_domain_fields "$domain" site_type wp_root 2>/dev/null || true); then
-        IFS=$'\t' read -r site_type wp_root <<<"$row"
+        csv_split_row "$row" site_type wp_root
     fi
     site_type=$(normalize_site_type "$site_type")
     if [ -n "$wp_root" ]; then

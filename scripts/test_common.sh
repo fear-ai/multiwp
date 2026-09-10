@@ -364,6 +364,43 @@ assert_status 1 $? "domains_csv_for_auth fails on an unknown account"
 auth_case "$TMP_DIR/absent.env" >/dev/null 2>&1
 assert_status 1 $? "domains_csv_for_auth fails on a missing auth file"
 
+echo "== csv_split_row =="
+# The bug this guards: `IFS=$'\t' read` collapses runs of tab (tab is IFS
+# whitespace), so a blank field silently shifts every later value one position
+# left. The blank-middle and blank-run cases below both failed that way.
+csv_split_row "$(printf 'a\tb\tc')" one two three
+assert_equal "a" "$one" "csv_split_row assigns first field"
+assert_equal "c" "$three" "csv_split_row assigns last field"
+
+csv_split_row "$(printf 'a\tb\t\tc\td')" f1 f2 f3 f4 f5
+assert_equal "" "$f3" "csv_split_row keeps a blank middle field empty"
+assert_equal "c" "$f4" "csv_split_row does not shift after a blank field"
+assert_equal "d" "$f5" "csv_split_row keeps trailing field aligned"
+
+csv_split_row "$(printf '\t\tz')" g1 g2 g3
+assert_equal "" "$g1" "csv_split_row keeps a leading blank field empty"
+assert_equal "" "$g2" "csv_split_row keeps consecutive blank fields"
+assert_equal "z" "$g3" "csv_split_row aligns after a run of blanks"
+
+csv_split_row "$(printf 'only')" h1 h2 h3
+assert_equal "only" "$h1" "csv_split_row assigns the single present field"
+assert_equal "" "$h2" "csv_split_row blanks variables past the row"
+
+# Callers pass arbitrary names; internals must not collide with them.
+csv_split_row "$(printf 'p\tq')" name row
+assert_equal "p" "$name" "csv_split_row tolerates a target named 'name'"
+assert_equal "q" "$row" "csv_split_row tolerates a target named 'row'"
+
+echo "== expected_cloudflare_ns =="
+assert_equal "addyson.ns.cloudflare.com kanye.ns.cloudflare.com" \
+    "$(expected_cloudflare_ns "addyson kanye")" \
+    "expected_cloudflare_ns expands short inventory labels"
+assert_equal "josephine.ns.cloudflare.com" \
+    "$(expected_cloudflare_ns "josephine.ns.cloudflare.com")" \
+    "expected_cloudflare_ns leaves an FQDN unchanged"
+expected_cloudflare_ns "" >/dev/null 2>&1
+assert_status 1 $? "expected_cloudflare_ns fails on empty input"
+
 if [ "$failures" -gt 0 ]; then
     printf "\n%s test(s) failed.\n" "$failures" >&2
     exit 1

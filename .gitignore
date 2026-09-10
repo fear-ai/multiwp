@@ -422,3 +422,6 @@ domains-*.csv
 
 # operator settings, never committed
 .config/
+
+# datastore flock mutex sentinels (see common.sh record_update_datastore)
+*.csv.lock

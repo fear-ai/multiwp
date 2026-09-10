@@ -229,7 +229,7 @@ for domain in "${DOMAINS[@]}"; do
 
     if csv_row=$(csv_get_domain_fields "$domain" auth_file account_id ip site_type multisite_domain redirect_url registrar dns_provider account_email); then
         csv_found=true
-        IFS=$'\t' read -r csv_auth_file csv_account_id csv_ip csv_site_type csv_multisite_domain csv_redirect_url csv_registrar csv_dns_provider csv_account_email <<<"$csv_row"
+        csv_split_row "$csv_row" csv_auth_file csv_account_id csv_ip csv_site_type csv_multisite_domain csv_redirect_url csv_registrar csv_dns_provider csv_account_email
     fi
 
     auth_file="${CF_AUTH_FILE:-}"
@@ -377,5 +377,26 @@ for domain in "${DOMAINS[@]}"; do
     log "Zone ready: $domain ($zone_id, status=$zone_status)"
     if [ -n "$name_servers_full" ]; then
         log "Nameservers: $name_servers_full"
+    fi
+
+    # A newly created zone stays "pending" until the registrar delegates it, and
+    # nothing resolves publicly in the meantime. Say so explicitly here: the
+    # delegation is a manual step at the registrar that this tooling cannot
+    # perform, and leaving it implicit is what makes later checks look broken.
+    section "ZONE" "Delegation"
+    kv "ZONE_STATUS" "$zone_status"
+    if delegated_ns=$(domain_delegated_ns "$domain"); then
+        kv "DNS_DELEGATED" "true"
+        kv "DNS_NS" "$delegated_ns"
+    else
+        kv "DNS_DELEGATED" "false"
+        status_info "delegation=pending domain=$domain"
+        log "ACTION REQUIRED: set these nameservers at the registrar ($registrar) for $domain:"
+        if [ -n "$name_servers_full" ]; then
+            for ns in $name_servers_full; do
+                log "    $ns"
+            done
+        fi
+        log "Until then $domain does not resolve publicly and edge checks will report it as undelegated."
     fi
 done

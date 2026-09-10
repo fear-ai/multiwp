@@ -443,6 +443,18 @@ assert_equal "false" "$(cf_api_success "$json_err")" "cf_api_success parses fail
 assert_equal "denied missing " "$(cf_api_error_messages "$json_err")" "cf_api_error_messages joins errors"
 
 
+echo "== cf_zone_delegation_state =="
+# Drive the delegation probe through a stubbed resolver rather than real DNS so
+# the test does not depend on network state or on a live zone's delegation.
+delegation_case() {
+    local stub_rc="$1"
+    ( domain_delegated_ns() { return "$stub_rc"; }
+      cf_zone_delegation_state example.test )
+}
+assert_equal "delegated" "$(delegation_case 0)" "cf_zone_delegation_state reports delegated"
+assert_equal "pending"   "$(delegation_case 1)" "cf_zone_delegation_state reports pending"
+assert_equal "unknown"   "$(delegation_case 2)" "cf_zone_delegation_state reports unknown without dig"
+
 if [ "$failures" -gt 0 ]; then
     printf "\n%s test(s) failed.\n" "$failures" >&2
     exit 1

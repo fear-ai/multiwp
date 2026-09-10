@@ -228,7 +228,7 @@ for domain in "${DOMAINS[@]}"; do
     status_cf=""
 
     if [ -n "$meta" ]; then
-        IFS=$'\t' read -r auth_file redirect_csv site_type status_cf <<<"$meta"
+        csv_split_row "$meta" auth_file redirect_csv site_type status_cf
     fi
 
     site_type_norm=$(normalize_site_type "$site_type")

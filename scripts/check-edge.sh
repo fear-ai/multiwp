@@ -177,6 +177,34 @@ check_domain() {
     section "EDGE" "Dns"
     kv "DOMAIN" "$canonical_domain"
     kv "HOST" "$domain"
+
+    # Check delegation before any record-level lookup. An undelegated zone makes
+    # every A/CNAME/HTTP check below fail for a single upstream reason, and
+    # reporting those individually buries the actual cause: the registrar still
+    # has to point at Cloudflare's nameservers.
+    local delegated_ns=""
+    local delegation_rc=0
+    delegated_ns=$(domain_delegated_ns "$canonical_domain") || delegation_rc=$?
+    if [ "$delegation_rc" -eq 2 ]; then
+        warn "dig not available; skipping delegation check for $canonical_domain"
+    elif [ "$delegation_rc" -ne 0 ]; then
+        local expected_ns=""
+        expected_ns=$(expected_cloudflare_ns "$(csv_get_domain_field "$canonical_domain" name_servers 2>/dev/null || true)" || true)
+        kv "DNS_DELEGATED" "false"
+        fail "Registrar delegation missing for $canonical_domain; zone is not delegated to Cloudflare"
+        if [ -n "$expected_ns" ]; then
+            kv "DNS_NS_EXPECTED" "$expected_ns"
+            log "Set these nameservers at the registrar for $canonical_domain: $expected_ns"
+        else
+            log "Set the zone's Cloudflare-assigned nameservers at the registrar for $canonical_domain"
+        fi
+        log "Record and HTTP checks skipped for $canonical_domain until delegation completes"
+        status_error "DOMAIN=$domain"
+        return 1
+    else
+        kv "DNS_DELEGATED" "true"
+        kv "DNS_NS" "$delegated_ns"
+    fi
     if [ "$redirect_only" = true ]; then
         log "Redirect-only domain; skipping HTTPS and Cloudflare API checks"
         redirect_target=$(redirect_target "$domain")

@@ -260,7 +260,7 @@ for domain in "${DOMAINS[@]}"; do
     site_type=""
     meta=$(csv_get_domain_fields "$domain" auth_file site_type || true)
     if [ -n "$meta" ]; then
-        IFS=$'\t' read -r auth_file site_type <<<"$meta"
+        csv_split_row "$meta" auth_file site_type
     fi
 
     site_type_norm=$(normalize_site_type "$site_type")

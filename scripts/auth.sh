@@ -253,7 +253,7 @@ cf_auth_from_csv() {
         row=$(csv_get_domain_fields "${normalized#www.}" auth_file zone_id account_id 2>/dev/null || true)
     fi
     [ -n "$row" ] || return 1
-    IFS=$'\t' read -r csv_auth_file csv_zone_id csv_account_id <<<"$row"
+    csv_split_row "$row" csv_auth_file csv_zone_id csv_account_id
     if [ -z "${CF_AUTH_FILE-}" ] && [ -n "$csv_auth_file" ]; then
         CF_AUTH_FILE="$csv_auth_file"
     fi
@@ -437,24 +437,93 @@ cf_require_account_id() {
     fi
 }
 
+# Look up a zone once and publish everything callers need about it.
+#
+# Four call sites each ran their own /zones?name= query and pulled different
+# fields out of the response; two of them filtered status=active, which silently
+# hides a zone that exists but is not yet delegated. A freshly created zone is
+# "pending" until the registrar points at Cloudflare, so those callers reported a
+# real zone as missing. This queries without a status filter and lets the caller
+# decide what a non-active status means.
+#
+# Sets CF_LOOKUP_ZONE_ID, CF_LOOKUP_ZONE_NAME, CF_LOOKUP_ZONE_STATUS,
+# CF_LOOKUP_ZONE_NS (space-separated FQDNs), and CF_LOOKUP_ZONE_ERROR.
+#
+# Returns 0 on a match, 1 when the zone does not exist, and 2 when the API call
+# itself failed. Diagnostic callers need to tell "no such zone" apart from "could
+# not ask", and must not be killed by one domain's transient API error, so this
+# reports the failure instead of calling err.
+CF_LOOKUP_ZONE_ID=""
+CF_LOOKUP_ZONE_NAME=""
+CF_LOOKUP_ZONE_STATUS=""
+CF_LOOKUP_ZONE_NS=""
+CF_LOOKUP_ZONE_ERROR=""
+
+cf_lookup_zone() {
+    local name="$1"
+    [ -n "$name" ] || err "zone name is empty"
+    cf_require_auth "to look up zone"
+
+    CF_LOOKUP_ZONE_ID=""
+    CF_LOOKUP_ZONE_NAME=""
+    CF_LOOKUP_ZONE_STATUS=""
+    CF_LOOKUP_ZONE_NS=""
+    CF_LOOKUP_ZONE_ERROR=""
+
+    local resp
+    resp=$(cf_api_request GET "/zones?name=${name}")
+    if [ "$(cf_api_success "$resp")" != "true" ]; then
+        CF_LOOKUP_ZONE_ERROR=$(cf_api_error_messages "$resp")
+        return 2
+    fi
+
+    CF_LOOKUP_ZONE_ID=$(echo "$resp" | jq -r '.result[0].id // empty')
+    [ -n "$CF_LOOKUP_ZONE_ID" ] || return 1
+    CF_LOOKUP_ZONE_NAME=$(echo "$resp" | jq -r '.result[0].name // empty')
+    CF_LOOKUP_ZONE_STATUS=$(echo "$resp" | jq -r '.result[0].status // empty')
+    CF_LOOKUP_ZONE_NS=$(echo "$resp" | jq -r '.result[0].name_servers[]?' | paste -sd ' ' -)
+    return 0
+}
+
+# Report delegation for a zone already looked up by cf_lookup_zone, combining the
+# Cloudflare-side status with what the public DNS actually answers. A zone can be
+# "pending" only because Cloudflare has not rechecked yet, so the parent NS
+# lookup is the authoritative signal.
+#
+# Echoes one of: delegated | pending | unknown
+cf_zone_delegation_state() {
+    local domain="$1"
+    [ -n "$domain" ] || err "domain is required"
+    local rc=0
+    domain_delegated_ns "$domain" >/dev/null || rc=$?
+    case "$rc" in
+        0) echo "delegated" ;;
+        2) echo "unknown" ;;
+        *) echo "pending" ;;
+    esac
+}
+
 cf_resolve_zone_id() {
     local name="$1"
     [ -n "$name" ] || err "zone name is empty"
-    cf_require_auth "to resolve zone name"
-    local resp
-    resp=$(cf_api_request GET "/zones?name=${name}&status=active")
-    if [ "$(cf_api_success "$resp")" != "true" ]; then
-        err "Failed to query zones: $(cf_api_error_messages "$resp")"
+    local __rc=0
+    cf_lookup_zone "$name" || __rc=$?
+    if [ "$__rc" -eq 2 ]; then
+        err "Failed to query zones: $CF_LOOKUP_ZONE_ERROR"
+    elif [ "$__rc" -ne 0 ]; then
+        err "No zone found for name: $name"
     fi
-    local zone_id
-    zone_id=$(echo "$resp" | jq -r '.result[0].id // empty')
-    [ -n "$zone_id" ] || err "No active zone found for name: $name"
-    local zone_name
-    zone_name=$(echo "$resp" | jq -r '.result[0].name // empty')
-    if [ -n "$zone_name" ]; then
-        CF_ZONE="$zone_name"
+    # Callers of this function act on a live zone, so a zone that exists but is
+    # not yet active is still an error here -- but say which case it is. The old
+    # status=active filter made a pending zone indistinguishable from a missing
+    # one, sending operators to look for a zone that was already there.
+    if [ "$CF_LOOKUP_ZONE_STATUS" != "active" ]; then
+        err "Zone $name exists (${CF_LOOKUP_ZONE_ID}) but is ${CF_LOOKUP_ZONE_STATUS}, not active; set its nameservers at the registrar: ${CF_LOOKUP_ZONE_NS:-see Cloudflare dashboard}"
     fi
-    echo "$zone_id"
+    if [ -n "$CF_LOOKUP_ZONE_NAME" ]; then
+        CF_ZONE="$CF_LOOKUP_ZONE_NAME"
+    fi
+    echo "$CF_LOOKUP_ZONE_ID"
 }
 
 cf_require_zone_id() {

@@ -151,6 +151,25 @@ Use the zone/DNS script when onboarding a new domain and you want API-driven pro
 - Fit: onboarding a new domain; uses the Cloudflare API instead of the UI.
 - Does: creates the zone and adds proxied A records for apex+www. Env or options: `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `--token`, `--account`.
 
+#### 3.5.2.1 Registrar Delegation
+Creating a zone in Cloudflare does not make a domain resolve. The zone stays `status=pending` until the registrar points the domain at the two nameservers Cloudflare assigned to it, and that step happens at the registrar — no script in this repo can perform it.
+
+Until delegation completes, the domain resolves nowhere on the public internet, so every record-level and HTTP check fails for that one upstream reason. The tooling reports this as a single condition rather than a list of downstream symptoms:
+
+- `onboard-zone.sh` ends with a `ZONE:Delegation` section: `DNS_DELEGATED=true|false`, and when false, an `ACTION REQUIRED` block listing the exact nameservers to set at the registrar.
+- `check-edge.sh` tests delegation before any record lookup. When a zone is undelegated it emits `DNS_DELEGATED=false`, names the expected nameservers (`DNS_NS_EXPECTED`), and skips the record and HTTP checks instead of reporting each as a separate failure.
+
+Shared helpers (rather than per-script logic):
+
+- `domain_delegated_ns <domain>` (`common.sh`) — authoritative NS from the parent; returns 1 when undelegated, 2 when `dig` is unavailable.
+- `expected_cloudflare_ns <labels>` (`common.sh`) — expands the inventory's short labels to FQDNs.
+- `cf_lookup_zone <name>` (`auth.sh`) — one zone query publishing `CF_LOOKUP_ZONE_ID`, `_NAME`, `_STATUS`, `_NS`, `_ERROR`. Returns 0 found, 1 missing, 2 API error. It applies no status filter, so a `pending` zone is found rather than reported missing.
+- `cf_zone_delegation_state <domain>` (`auth.sh`) — `delegated` / `pending` / `unknown`.
+
+Delegation is detected by querying the parent for authoritative NS records (`dig +short NS <domain> @1.1.1.1`); a delegated zone returns them, an undelegated one returns nothing. Override the resolver with `DELEGATION_RESOLVER` if a public resolver is unreachable.
+
+The nameservers are per-zone: Cloudflare assigns a specific pair when the zone is created, and they are not interchangeable between zones. Read them from the zone itself, or from the `name_servers` column in the inventory, which stores the short labels (`addyson kanye`) that expand to `<label>.ns.cloudflare.com`.
+
 #### 3.5.3 Cert Placement
 Use the unified cert helper so the same command supports manual paste, API issuance, and validation in a single workflow. This keeps the operational steps consistent across environments while preserving the default filesystem layout and permissions documented below.
 
@@ -194,6 +213,51 @@ Optional variables:
 - `CF_CA_SCOPE` (scope hint for the Origin CA key, for example `user`).
 
 When multiple `CF_ZONE`/`CF_ZONE_ID` pairs are listed in an auth file, scripts do not pick a default. For domain-scoped work they look up the matching pair for that domain, and otherwise require an explicit `--zone` or `--zone-id` (or an API lookup) to select a target.
+
+A read-only token fails only on write, and the API reports it as `Authentication error` or `request is not authorized` rather than naming the missing permission. Zone creation, DNS writes, and ruleset writes (`cloud-redirect.sh`) all need write scope, so a token that reads zones perfectly can still fail every provisioning step. To tell a token problem apart from an unrelated failure, attempt the same write with the Global API Key: if the key succeeds where the token fails, the token lacks the permission. Delegation status is not a factor here — writes to a `pending` zone succeed normally. Either grant the token the needed permissions (DNS:Edit, Zone:Edit for rulesets) or set `CF_AUTH="key"` in that account's auth file.
+
+**Diagnosing a token's scope directly.** Rather than inferring permissions from failures, read the token's own policy with the Global API Key:
+
+```
+curl -s "https://api.cloudflare.com/client/v4/user/tokens" \
+  -H "X-Auth-Email: $CF_API_EMAIL" -H "X-Auth-Key: $CF_API_KEY" \
+  | jq '.result[] | {name, status, policies}'
+```
+
+Permission group names ending in `Read` grant no writes. Note that `/user/tokens/verify` returns `Invalid API Token` for an *account-scoped* token even when the token works: it is a user-scoped endpoint, so that response is not evidence of a bad token.
+
+**Permission groups this repo's scripts need** (IDs from `/user/tokens/permission_groups`, stable per account):
+
+| Operation | Script | Permission group |
+| --- | --- | --- |
+| Create zone | `onboard-zone.sh` | `Zone Write` (`e6d2666161e84845a636613608cee8d5`) |
+| DNS records | `cloud-dns.sh`, `onboard-zone.sh` | `DNS Write` (`4755a26eedb94da69e1066d98aa820be`) |
+| Redirect rules | `cloud-redirect.sh` | `Dynamic URL Redirects Write` (`74e1036f577a48528b78d2413b40538d`) |
+| Zone settings | `cloud-settings.sh` | `Zone Settings Write` (`3030687196b94b638145a3953da2b699`) |
+| Origin certs | `get-cert.sh --api` | `SSL and Certificates Write` (`c03055bc037c4ea9afb9a9f104b7b721`) |
+
+The redirect rules use the `http_request_dynamic_redirect` phase, so `Dynamic URL Redirects Write` is the group that governs them — not the generic zone-edit permission.
+
+**Minting a scoped token with the Global API Key.** The key can create tokens, so a correctly scoped token can be generated without the dashboard. Grant the groups at account scope so the token also covers zones created later:
+
+```
+curl -s -X POST "https://api.cloudflare.com/client/v4/user/tokens" \
+  -H "X-Auth-Email: $CF_API_EMAIL" -H "X-Auth-Key: $CF_API_KEY" \
+  -H "Content-Type: application/json" --data '{
+    "name": "multiwp provisioning",
+    "policies": [{
+      "effect": "allow",
+      "resources": { "com.cloudflare.api.account.<ACCOUNT_ID>": "*" },
+      "permission_groups": [
+        {"id": "e6d2666161e84845a636613608cee8d5"},
+        {"id": "4755a26eedb94da69e1066d98aa820be"},
+        {"id": "74e1036f577a48528b78d2413b40538d"}
+      ]
+    }]
+  }'
+```
+
+The plaintext token is returned once, in `result.value`; store it as `CF_API_TOKEN` in the account's auth file. Tokens can also be edited in the dashboard under **My Profile → API Tokens** (user tokens) or **Manage Account → API Tokens** (account tokens).
 
 Environment variables always take precedence over the auth file, so one-off overrides can be provided safely at runtime without editing the file. Account-scoped tokens are verified against the account endpoint rather than the user endpoint. For a quick sanity check, use `scripts/verify-cf-auth.sh`, which validates any available account API token, global API key, and Origin CA key; Origin CA verification requires a `CF_ZONE_ID`.
 

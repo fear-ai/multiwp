@@ -262,16 +262,25 @@ if [ "$CHECK_IDS" = true ]; then
             esac
         fi
 
-        api_resp=$(cf_api_request GET "/zones?name=${normalized}&status=active")
-        if [ "$(cf_api_success "$api_resp")" = "true" ]; then
-            api_id=$(echo "$api_resp" | jq -r '.result[0].id // empty')
-            if [ -n "$api_id" ]; then
+        # Look the zone up without a status filter. Filtering on status=active
+        # reported a zone that exists but is not yet delegated as "missing",
+        # which sends the operator looking for a zone that is already there.
+        api_rc=0
+        cf_lookup_zone "$normalized" || api_rc=$?
+        api_id=""
+        if [ "$api_rc" -eq 0 ]; then
+            api_id="$CF_LOOKUP_ZONE_ID"
+            # A zone that is not active still exists; report its real status
+            # (typically "pending") rather than flattening it to "missing".
+            if [ "$CF_LOOKUP_ZONE_STATUS" = "active" ]; then
                 api_status="ok"
             else
-                api_status="missing"
+                api_status="$CF_LOOKUP_ZONE_STATUS"
             fi
-        else
+        elif [ "$api_rc" -eq 2 ]; then
             api_status="error"
+        else
+            api_status="missing"
         fi
 
         chosen=""
@@ -315,7 +324,7 @@ if [ "$CHECK_IDS" = true ]; then
             warn "domains.csv missing or unreadable for $normalized"
         fi
         if [ "$api_status" = "error" ]; then
-            warn "API lookup failed for $normalized: $(cf_api_error_messages "$api_resp")"
+            warn "API lookup failed for $normalized: $CF_LOOKUP_ZONE_ERROR"
         fi
 
         mismatch=false

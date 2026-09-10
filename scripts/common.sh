@@ -258,6 +258,31 @@ csv_get_domain_field() {
     csv_get_domain_fields "$domain" "$field"
 }
 
+# Split a tab-separated row from csv_get_domain_fields into named variables.
+#
+# `IFS=$'\t' read -r a b c` cannot be used for this: tab is IFS whitespace, so
+# bash collapses runs of it and drops empty fields, silently shifting every later
+# value one position left. A row whose multisite_domain is blank would assign
+# dns_provider into registrar. mapfile -d treats the tab as a plain delimiter and
+# keeps empty fields, so positions stay aligned with the requested field list.
+#
+# Usage: csv_split_row "$row" var1 var2 ...
+csv_split_row() {
+    local __csv_row="$1"
+    shift || true
+    [ "$#" -gt 0 ] || err "csv_split_row requires at least one variable name"
+    local -a __csv_parts=()
+    mapfile -t -d $'\t' __csv_parts < <(printf '%s' "$__csv_row")
+    # Namespaced locals: a caller passing a common name like "i" or "name" as a
+    # target variable would otherwise clobber the loop state mid-split.
+    local __csv_idx=0
+    local __csv_name
+    for __csv_name in "$@"; do
+        printf -v "$__csv_name" '%s' "${__csv_parts[$__csv_idx]-}"
+        __csv_idx=$((__csv_idx + 1))
+    done
+}
+
 DATASTORE_BACKUP_DONE="${DATASTORE_BACKUP_DONE:-false}"
 DATASTORE_BACKUP_PATH="${DATASTORE_BACKUP_PATH:-}"
 
@@ -549,6 +574,43 @@ redirect_target() {
     local domain
     domain=$(normalize_domain "$1")
     echo "${DNS_REDIRECT_TARGETS[$domain]-}"
+}
+
+# A zone that exists in Cloudflare still answers nothing on the public internet
+# until the registrar delegates it. Every downstream DNS and HTTP check then
+# fails for one upstream reason, so callers test delegation first and report that
+# instead of a pile of misleading record-level failures.
+#
+# Authoritative NS at the parent is the signal: a delegated zone returns NS
+# records, an undelegated one returns none. Query a public resolver explicitly so
+# a local stub or split-horizon resolver cannot mask the result.
+DELEGATION_RESOLVER="${DELEGATION_RESOLVER:-1.1.1.1}"
+
+domain_delegated_ns() {
+    local domain
+    domain=$(normalize_domain "$1")
+    [ -n "$domain" ] || return 1
+    command -v dig >/dev/null 2>&1 || return 2
+    local ns
+    ns=$(dig +short NS "$domain" @"$DELEGATION_RESOLVER" 2>/dev/null | sed 's/\.$//' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    [ -n "$ns" ] || return 1
+    echo "$ns"
+    return 0
+}
+
+# Expand the inventory's short nameserver labels ("addyson kanye") into the FQDNs
+# Cloudflare actually assigns. onboard-zone.sh stores only the first label.
+expected_cloudflare_ns() {
+    local raw="${1-}"
+    local out=() label
+    for label in $raw; do
+        case "$label" in
+            *.*) out+=("${label%.}") ;;
+            *)   out+=("${label}.ns.cloudflare.com") ;;
+        esac
+    done
+    [ "${#out[@]}" -gt 0 ] || return 1
+    printf '%s' "$(IFS=' '; printf '%s' "${out[*]}")"
 }
 
 wp_template_list() {
