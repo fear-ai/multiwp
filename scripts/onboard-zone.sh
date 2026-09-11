@@ -17,7 +17,7 @@ DOMAINS=()
 # proxy. Pointing them at the real origin publishes its address through DNS
 # history, an API read, or a momentary grey-cloud toggle, defeating the
 # Cloudflare-only UFW allowlist. 192.0.2.1 is IANA TEST-NET-1, never routable.
-# See Operations.md section 3.7.2.
+# See Operations.md section 3.7.4.
 REDIRECT_IP="${REDIRECT_IP:-192.0.2.1}"
 # The origin address is deliberately not hardcoded here. Supply it with --ip, the
 # IP environment variable, the ORIGIN_IP key in the operator config

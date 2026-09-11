@@ -29,8 +29,10 @@ The dependency chain is explicit: Cloudflare edge behavior depends on correct DN
    6. [3.6 Hybrid Execution](#36-hybrid-execution)
    7. [3.7 Notes](#37-notes)
       1. [3.7.1 Redirect Config](#371-redirect-config)
-      2. [3.7.2 Redirect DNS Target](#372-redirect-dns-target)
-      3. [3.7.3 Redirect Zone Mail Records](#373-redirect-zone-mail-records)
+      2. [3.7.2 Redirect Hub (alternat.info)](#372-redirect-hub-alternatinfo)
+      3. [3.7.3 Advisories Intentionally Not Followed](#373-advisories-intentionally-not-followed)
+      4. [3.7.4 Redirect DNS Target](#374-redirect-dns-target)
+      5. [3.7.5 Redirect Zone Mail Records](#375-redirect-zone-mail-records)
 3. [4. Origin TLS](#4-origin-tls)
    1. [4.1 Host Services](#41-host-services)
    2. [4.2 Host Baseline (HardenUbuntu)](#42-host-baseline-hardenubuntu)
@@ -304,7 +306,33 @@ Operational notes:
 - The baseline security headers now apply on both canonical and redirect zones; this trades a small redirect cost for consistent policy and simpler audits.
 - Validation: confirm HTTP and HTTPS requests for both apex and `www` return 301 to the canonical host, preserve path/query, and do not loop. Use `curl -I` from a client or a browser test, and verify that the origin is not being hit directly (UFW logs should show only Cloudflare IPs if the allowlist is active).
 
-#### 3.7.2 Redirect DNS Target
+#### 3.7.2 Redirect Hub (alternat.info)
+Nearly every redirect-only zone in the fleet targets a single canonical host, `alternat.info`, which serves a minimal "under construction" page. That page is not an origin server: it is a Cloudflare Worker (`broken-fire-1d07`) bound to the apex as a **Workers custom domain**, not a Workers route. The zone's only DNS record is `AAAA @ -> 100::` (the IPv6 discard prefix), which exists solely to make the hostname resolve and engage the proxy; the Worker answers before any origin lookup happens. This mirrors the `192.0.2.1` convention used by redirect zones (see 3.7.1) and keeps the arrangement origin-free end to end.
+
+How to account for it in the inventory:
+- The hub is deliberately **not** a `site_type=redirect` row. It is the redirect *target*, not a redirect source, and giving it a redirect row would make `cloud-redirect.sh` try to build a rule pointing the hub at itself.
+- `site_type=worker` is the correct classification. `load_dns_redirects` selects only rows whose `site_type` starts with `redirect`, and `cloud-redirect.sh` / `cloud-settings.sh` skip `none`, `ignore`, and `worker`, so a worker row is inert for the redirect tooling while still being tracked.
+- Record it in the inventory for the account that owns the zone. `alternat.info` lives in the **alphaeosnet** account (`97268914ae96e741200e074c613bb6d2`), even though a separate `alternatinfo.auth` file exists for it; that auth file points at the same account and is a convenience credential, not a separate tenancy.
+- There is no origin, database, or vhost, so the WordPress columns stay empty and `status_origin` / `status_wp` remain blank.
+
+Operational consequences worth stating explicitly:
+- **The hub is a single point of failure for the whole redirect fleet.** Every alias 301s to it, so if the Worker or the zone breaks, every alias leads to a dead page. The aliases themselves keep working, which makes the failure easy to miss: edge checks on the alias pass while the destination is broken. Verify the hub directly, not only through a redirect.
+- **Traffic concentrates there.** All alias traffic that follows a redirect lands on one zone, so the hub sees the sum of fleet traffic while each alias sees only its own. Capacity and abuse exposure are concentrated accordingly, and the hub is the zone to watch in analytics.
+- `www.alternat.info` has no DNS record. Nothing currently redirects to it (every rule targets the apex), so this is latent rather than broken, but a rule written against `www` would fail.
+
+#### 3.7.3 Advisories Intentionally Not Followed
+Cloudflare Security Center raises configuration suggestions for every account that has not adopted a feature, regardless of whether the feature applies. The following are **deliberately declined** for redirect-only zones and the redirect hub. These are design decisions, not backlog items; re-raise them only if a zone starts serving real content.
+
+| Advisory | Why it is declined |
+| --- | --- |
+| `no_turnstile_enabled` | Turnstile protects **forms**, and requires a widget, HTML embedding, and server-side token validation. Redirect zones serve a 301 and the hub serves one static page; there is no form, no origin, and no HTML to instrument. The advisory fires simply because the account has zero widgets. |
+| `manage_bot_fight_mode` | Bot Fight Mode issues computationally expensive challenges to suspected bots, indiscriminately. On a zone whose entire job is a 301, that spends challenges to protect a redirect and can interfere with search engines and monitors following it — usually the opposite of what a redirect fleet wants. |
+| `no_challenge_ai_bots` (AI Labyrinth) | Designed to waste AI crawlers' time on decoy content. There is no content to protect on a redirect zone, and the hub is a single static page intended to be trivially fetchable. |
+| `security_txt_not_enabled` | `security.txt` publishes a vulnerability-disclosure contact at `/.well-known/security.txt`. These zones have no origin and no code to disclose a vulnerability in, and serving it means answering something other than the 301, which undercuts the redirect-only design. |
+
+Advisories that are **not** in this list — notably `mfa_not_enabled`, `a_record_dangling`, `rdp_server_exposed`, `tls_version_old`, `hsts_not_enabled`, and `dmarc` — are real findings and should be acted on rather than declined.
+
+#### 3.7.4 Redirect DNS Target
 
 A Redirect Rule answers at the edge, so Cloudflare never contacts an origin for these zones. The A record exists only so the hostname resolves and the proxy engages; its value is never used while the rule is in place.
 
@@ -332,7 +360,7 @@ curl -sSI https://<domain>/            # expect 301 to the canonical host
 curl --resolve <domain>:443:192.0.2.1 https://<domain>/   # expect no route
 ```
 
-#### 3.7.3 Redirect Zone Mail Records
+#### 3.7.5 Redirect Zone Mail Records
 
 A redirect-only zone sends and receives no mail. Leaving it with no mail records at all is worse than configuring it explicitly: without SPF and DMARC, the domain can be forged and receiving servers have no policy to consult.
 
