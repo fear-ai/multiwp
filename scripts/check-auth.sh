@@ -13,7 +13,7 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/cli.sh"
 
 AUTH_FILE="${CF_AUTH_FILE:-$HOME/.config/cloudflare/default.auth}"
-DOMAINS_FILE_LOCAL="${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
+DOMAINS_FILE_LOCAL="${DOMAINS_FILE:-$(domains_csv_path)}"
 CHECK_IDS=false
 
 usage() {

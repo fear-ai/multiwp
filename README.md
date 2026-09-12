@@ -123,7 +123,7 @@ Orchestration scripts (entrypoints):
 |--------|---------|--------|
 | `check-verify.sh` | Run syntax/unit tests and read-only edge/DNS/origin/WP checks | Exercised |
 | `check-domain.sh` | End-to-end validation (edge, origin, WP) | Exercised |
-| `test-record.sh` | Run validation checks and record status updates in domains.csv | Not exercised |
+| `record-status.sh` | Run validation checks and record status updates in domains.csv | Not exercised |
 
 Helper and library scripts:
 | Script | Purpose | Status |
@@ -132,7 +132,6 @@ Helper and library scripts:
 | `auth.sh` | Cloudflare auth helpers and API request utilities | Library |
 | `cli.sh` | Shared option parsing helpers | Library |
 | `cmd.sh` | Command execution and background process helpers | Library |
-| `orch.sh` | Orchestration helper functions for check runners | Library |
 | `gen-crossref.sh` | Regenerate `scripts/Generated.md` from the scripts | Maintenance |
 | `mcp.sh` | MCP helper functions | Library |
 

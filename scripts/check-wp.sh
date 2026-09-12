@@ -177,7 +177,7 @@ extract_define_names() {
     local template="$1"
     awk '
         /^[[:space:]]*(\/\/|#|\/\*)/ { next }
-        match($0, /define[[:space:]]*\\([[:space:]]*["'"'"']([A-Z0-9_]+)["'"'"']/, m) {
+        match($0, /define[[:space:]]*\([[:space:]]*["'"'"']([A-Z0-9_]+)["'"'"']/, m) {
             print m[1]
         }
     ' "$template" | sort -u

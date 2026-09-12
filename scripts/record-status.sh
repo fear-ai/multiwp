@@ -1,8 +1,8 @@
 #!/bin/bash
-# test-record.sh - Run validation checks and record status results in domains.csv.
+# record-status.sh - Run validation checks and record status results in domains.csv.
 # For options, environment variables, defaults see usage().
 #
-# Example: test-record.sh edge --domain example.com
+# Example: record-status.sh edge --domain example.com
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ ALL_COMMANDS=(edge origin wp)
 COMMAND_ALL=false
 STATE_FILTER=""
 SITE_TYPE_FILTER=""
-DOMAINS_FILE="${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
+DOMAINS_FILE="${DOMAINS_FILE:-$(domains_csv_path)}"
 AUTH_FILE_OVERRIDE=""
 INCLUDE_IGNORE=false
 USE_API=false
@@ -40,8 +40,8 @@ COMMON_PRIV_OPTS=()
 
 usage() {
     cat <<EOF
-test-record.sh - Run validation checks and record status results in domains.csv.
-Example: test-record.sh edge --domain example.com
+record-status.sh - Run validation checks and record status results in domains.csv.
+Example: record-status.sh edge --domain example.com
 
 Commands:
   edge   Run edge checks (HTTP/DNS) for selected domains

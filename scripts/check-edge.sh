@@ -22,7 +22,7 @@ EDGE_AUTH_READY=false
 CF_AUTH_CLI=""
 
 usage() {
-    cat <<'EOF'
+    cat <<EOF
 check-edge.sh - Validate Cloudflare edge behavior for domains.
 Example: check-edge.sh [OPTIONS] domain1 [domain2...]
 

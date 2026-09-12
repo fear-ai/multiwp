@@ -455,6 +455,33 @@ assert_equal "delegated" "$(delegation_case 0)" "cf_zone_delegation_state report
 assert_equal "pending"   "$(delegation_case 1)" "cf_zone_delegation_state reports pending"
 assert_equal "unknown"   "$(delegation_case 2)" "cf_zone_delegation_state reports unknown without dig"
 
+echo "== cf_setup_zone =="
+# Stub the three calls it composes, so the test covers ordering and state
+# clearing without touching the network.
+setup_zone_case() {
+    ( cf_init_auth() { echo "init:${CF_ZONE-empty}/${CF_ZONE_ID-empty}"; }
+      cf_require_auth() { :; }
+      cf_require_zone_id() { :; }
+      CF_ZONE="stale.example"; CF_ZONE_ID="staleid"
+      cf_setup_zone "new.example" "ctx" >/dev/null
+      echo "$CF_ZONE" )
+}
+assert_equal "new.example" "$(setup_zone_case)" \
+    "cf_setup_zone sets CF_ZONE to the requested domain"
+
+stale_case() {
+    ( cf_init_auth() { printf '%s' "${CF_ZONE-}|${CF_ZONE_ID-}"; }
+      cf_require_auth() { :; }
+      cf_require_zone_id() { :; }
+      CF_ZONE="stale.example"; CF_ZONE_ID="staleid"
+      cf_setup_zone "new.example" "ctx" )
+}
+assert_equal "|" "$(stale_case)" \
+    "cf_setup_zone clears stale zone state before loading auth"
+
+( cf_setup_zone "" >/dev/null 2>&1 )
+assert_status 1 $? "cf_setup_zone rejects an empty domain"
+
 if [ "$failures" -gt 0 ]; then
     printf "\n%s test(s) failed.\n" "$failures" >&2
     exit 1

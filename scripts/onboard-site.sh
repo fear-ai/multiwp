@@ -2,7 +2,7 @@
 # onboard-site.sh - Onboard a domain: create the Cloudflare zone/DNS, then the redirect rule if applicable.
 # For options, environment variables, defaults see usage().
 #
-# Example: onboard-site.sh --domain example.com --site-type redirect --redirect-url https://alternat.info/
+# Example: onboard-site.sh --domain example.com --site-type redirect --redirect-url https://example.net/
 
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,10 +11,16 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/cli.sh"
 
 DEFAULT_SITE_TYPE="redirect"
-DEFAULT_REDIRECT_URL="https://alternat.info/"
-DEFAULT_AUTH_FILE="$HOME/.config/cloudflare/alphaeosnet.auth"
+# Estate-specific values are never hardcoded in a committed file (see Shell.md).
+# They come from the operator config (~/.config/multiwp/site.conf) via
+# load_operator_conf, or from the environment. Empty means "no default": the
+# corresponding flag simply is not forwarded, and the child script applies its
+# own default or reports the missing value.
+DEFAULT_REDIRECT_URL="${REDIRECT_TARGET_URL-}"
+DEFAULT_AUTH_FILE="${DEFAULT_AUTH_FILE-}"
 
 DOMAINS=()
+DRY_RUN=false
 SITE_TYPE=""
 SITE_TYPE_SET=false
 REDIRECT_URL_SET=false
@@ -25,7 +31,7 @@ usage() {
     cat <<EOF
 onboard-site.sh - Onboard a domain: create the Cloudflare zone/DNS, then the redirect rule if applicable.
 Example: onboard-site.sh domain.tld
-Example: onboard-site.sh --domain example.com --site-type redirect --redirect-url https://alternat.info/
+Example: onboard-site.sh --domain example.com --site-type redirect --redirect-url https://example.net/
 
 Options:
   --domain NAME  Domain to onboard (repeatable; positional also accepted)
@@ -44,7 +50,7 @@ Defaults (used only when the corresponding option/env var is not supplied):
   --auth-file $DEFAULT_AUTH_FILE
 
 Notes:
-  - With no options, "onboard-site.sh domain.tld" onboards a redirect-to-alternat.info
+  - With no options, "onboard-site.sh domain.tld" onboards a redirect to REDIRECT_TARGET_URL
     domain using the shared Cloudflare account auth file.
   - Runs onboard-zone.sh first to create/ensure the zone, DNS records, and domains.csv entry.
   - When --site-type redirect is set, also runs cloud-redirect.sh to create the redirect rule.
@@ -89,8 +95,15 @@ while getopts ":-:" opt; do
                     AUTH_FILE_SET=true
                     forward_valued_opt "${OPTARG}"
                     ;;
-                norecord|downgrade|dry-run)
+                norecord|downgrade)
                     PASSTHROUGH_ARGS+=("--${OPTARG}")
+                    ;;
+                # cloud-redirect.sh implements --dry-run; onboard-zone.sh does not.
+                # Forwarding it to both made every --dry-run run abort in the zone
+                # stage, so it is tracked separately and applied only to the
+                # redirect stage, with the zone stage skipped to match intent.
+                dry-run)
+                    DRY_RUN=true
                     ;;
                 *)
                     if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
@@ -138,18 +151,32 @@ REDIRECT_SCRIPT="$SCRIPTS_DIR/cloud-redirect.sh"
 
 section "ZONE" "Create"
 kv "DOMAIN" "$domain"
-[ "$SITE_TYPE_SET" = true ] && kv "SITE_TYPE" "$SITE_TYPE"
+# SITE_TYPE_SET is unconditionally true by this point (set above when the caller
+# omitted --site-type), so it is not re-tested here.
+kv "SITE_TYPE" "$SITE_TYPE"
 
-zone_args=("${PASSTHROUGH_ARGS[@]}")
-[ "$SITE_TYPE_SET" = true ] && zone_args+=("--site-type" "$SITE_TYPE")
-zone_args+=("--domain" "$domain")
+zone_args=("${PASSTHROUGH_ARGS[@]}" "--site-type" "$SITE_TYPE" "--domain" "$domain")
 
-"$ZONE_SCRIPT" "${zone_args[@]}"
+# Report which stage failed. Under `set -e` a bare call aborts the wrapper with
+# no indication of how far onboarding got, leaving the operator unsure whether
+# the zone exists.
+if [ "$DRY_RUN" = true ]; then
+    log "Dry run: would run $ZONE_SCRIPT ${zone_args[*]}"
+elif ! "$ZONE_SCRIPT" "${zone_args[@]}"; then
+    err "Zone provisioning failed for $domain; redirect rule not attempted"
+fi
 
-if [ "$SITE_TYPE" = "redirect" ]; then
+# normalize_site_type so "Redirect" or a decorated value takes the same branch.
+if [ "$(normalize_site_type "$SITE_TYPE")" = "redirect" ]; then
     log "site_type=redirect; creating redirect rule for $domain"
     redirect_args=("${PASSTHROUGH_ARGS[@]}" "--domain" "$domain")
-    "$REDIRECT_SCRIPT" "${redirect_args[@]}"
+    [ "$DRY_RUN" = true ] && redirect_args+=("--dry-run")
+    if ! "$REDIRECT_SCRIPT" "${redirect_args[@]}"; then
+        err "Zone was provisioned for $domain but the redirect rule failed; rerun cloud-redirect.sh"
+    fi
+    section "ZONE" "NextSteps"
+    kv "DOMAIN" "$domain"
+    kv "NEXT" "set the zone nameservers at the registrar, then rerun check-edge.sh"
     status_pass "onboard=done site_type=redirect domain=$domain"
     exit 0
 fi

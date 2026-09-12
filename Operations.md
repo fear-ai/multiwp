@@ -30,6 +30,7 @@ The dependency chain is explicit: Cloudflare edge behavior depends on correct DN
    7. [3.7 Notes](#37-notes)
       1. [3.7.1 Redirect Config](#371-redirect-config)
       2. [3.7.2 Redirect Hub (alternat.info)](#372-redirect-hub-alternatinfo)
+      3. [3.7.2.1 Hub Abuse Controls](#3721-hub-abuse-controls)
       3. [3.7.3 Advisories Intentionally Not Followed](#373-advisories-intentionally-not-followed)
       4. [3.7.4 Redirect DNS Target](#374-redirect-dns-target)
       5. [3.7.5 Redirect Zone Mail Records](#375-redirect-zone-mail-records)
@@ -298,7 +299,8 @@ Some zones exist only to redirect to a canonical domain (for example, short or l
 Recommended approach:
 - Use a Redirect Rule at `Rules` → `Redirect Rules` that matches the alias host and issues a 301 to the canonical host, preserving path and query. This keeps redirects consistent for both HTTP and HTTPS and does not depend on origin behavior.
 - Keep “Always Use HTTPS” enabled even when a Redirect Rule is present. This can introduce an extra hop, but the consistency across domains is preferred and reduces configuration exceptions.
-- Apply the standard security headers (Managed Transforms → “Add security headers”) on redirect-only zones. This includes HSTS, so treat redirects as a long-lived commitment rather than disposable aliases.
+- Apply the standard security headers (Managed Transforms → “Add security headers”) on redirect-only zones.
+- **HSTS is deliberately left disabled.** `cloud-settings.sh` sets `managed_add_security_headers=true`, but the zone-level `security_header` setting stays `enabled: false`, and responses carry no `Strict-Transport-Security` header. HSTS is a long-lived, hard-to-reverse commitment: once a browser caches the policy it refuses plain HTTP for the whole `max-age`, including for subdomains if `includeSubDomains` is set. For alias zones that may be repointed, sold, or retired, that outlives the alias itself. Enabling it is a per-zone decision with extra requirements (confirmed long-term ownership, working HTTPS on every subdomain), not part of the automated baseline. The Security Center `hsts_not_enabled` advisory is therefore expected and is not a finding.
 - Require SSL mode `Full (strict)` for redirect-only zones so the edge-to-origin path remains protected if a rule is removed or misconfigured.
 
 Operational notes:
@@ -311,14 +313,28 @@ Nearly every redirect-only zone in the fleet targets a single canonical host, `a
 
 How to account for it in the inventory:
 - The hub is deliberately **not** a `site_type=redirect` row. It is the redirect *target*, not a redirect source, and giving it a redirect row would make `cloud-redirect.sh` try to build a rule pointing the hub at itself.
-- `site_type=worker` is the correct classification. `load_dns_redirects` selects only rows whose `site_type` starts with `redirect`, and `cloud-redirect.sh` / `cloud-settings.sh` skip `none`, `ignore`, and `worker`, so a worker row is inert for the redirect tooling while still being tracked.
+- `site_type=worker` is the correct classification, and it means the zone has an actual Workers binding or route. Do not use it as a catch-all for "not a normal site": `dltec.org` and `leonidova.org` were labeled `worker` while having no binding and no route at all — they serve a dynamic-redirect rule, and were reclassified to `redirect` on 2026-09-12. Verify a binding exists (`/accounts/{id}/workers/domains`) before using this type. `load_dns_redirects` selects only rows whose `site_type` starts with `redirect`, and `cloud-redirect.sh` / `cloud-settings.sh` skip `none`, `ignore`, and `worker`, so a worker row is inert for the redirect tooling while still being tracked.
 - Record it in the inventory for the account that owns the zone. `alternat.info` lives in the **alphaeosnet** account (`97268914ae96e741200e074c613bb6d2`), even though a separate `alternatinfo.auth` file exists for it; that auth file points at the same account and is a convenience credential, not a separate tenancy.
 - There is no origin, database, or vhost, so the WordPress columns stay empty and `status_origin` / `status_wp` remain blank.
 
 Operational consequences worth stating explicitly:
 - **The hub is a single point of failure for the whole redirect fleet.** Every alias 301s to it, so if the Worker or the zone breaks, every alias leads to a dead page. The aliases themselves keep working, which makes the failure easy to miss: edge checks on the alias pass while the destination is broken. Verify the hub directly, not only through a redirect.
 - **Traffic concentrates there.** All alias traffic that follows a redirect lands on one zone, so the hub sees the sum of fleet traffic while each alias sees only its own. Capacity and abuse exposure are concentrated accordingly, and the hub is the zone to watch in analytics.
-- `www.alternat.info` has no DNS record. Nothing currently redirects to it (every rule targets the apex), so this is latent rather than broken, but a rule written against `www` would fail.
+- `www.alternat.info` carries `AAAA www -> 100::`, proxied, mirroring the apex (added 2026-09-12). DNS alone does not make it serve: the Worker custom domain is bound to the apex only, so `www` answers 522 until a redirect rule sends it to the apex. Nothing currently targets `www`, so this is cosmetic.
+
+#### 3.7.2.1 Hub Abuse Controls
+The hub concentrates fleet traffic and is the zone that gets attacked (see the 2026-09-08 event: 1,179,646 requests, 1,004,329 of them answered 403, 5.47 GB egress). The managed WAF blocked it correctly, but a managed-rule 403 still costs a full request cycle and a response body. Two rules now cut that cost earlier in the pipeline:
+
+- **Rate limiting** (`http_ratelimit`, ref `rl_alternat_apex`): **2 requests per 10s** per `ip.src` + `cf.colo.id`, action `block`. Rate limiting evaluates before the managed ruleset, so a flood is answered with a cheap 429 instead of a WAF-evaluated 403. The threshold is deliberately tight: the hub serves a single self-contained page (inline CSS, no subresources, no favicon), so a genuine page view costs one request and an alias redirect adds one more. Measured effect of tightening 50 → 2: a 120-request concurrent burst went from 51 × 429 to **115 × 429**.
+  - **Known tradeoff:** the third request within 10s from one address is blocked, so multiple users behind a shared NAT egress (office, mobile carrier, household) can collide. Verified: three back-to-back requests give 200, 200, 429. This is accepted for a redirect hub, where a blocked viewer simply retries; do not copy this threshold to a zone serving a real site.
+  - Free-plan limits: `mitigation_timeout` is fixed at 10s, and every challenge action (`managed_challenge`, `js_challenge`, `challenge`) is rejected as "not entitled to use the ... action in ratelimiting". `block` is the only available mitigation, so there is no cheaper "drop" option than the 429.
+- **Custom firewall rules** (`http_request_firewall_custom`, Free allows 5, two used):
+  - `fw_method_not_read` blocks anything that is not GET/HEAD/OPTIONS. The hub serves one static page; a write method is never legitimate.
+  - `fw_probe_paths` blocks `/wp-`, `/.env`, `/.git`, `/xmlrpc`, `/phpmyadmin`, `/admin`. There is no application behind this zone, so these are pure scanner noise.
+
+Verified after deployment: apex GET/HEAD return 200, alias redirect chains (`bitfwd.net`, `backer.games`) still resolve 200 in one hop, while POST and probe paths return 403.
+
+A limit of the Free plan: `firewallEventsAdaptiveGroups` (per-IP/ASN attribution) requires a paid plan, so attacker ranges cannot be identified from analytics. Blocking specific networks is therefore not possible today; rate limiting is the control that works without that visibility.
 
 #### 3.7.3 Advisories Intentionally Not Followed
 Cloudflare Security Center raises configuration suggestions for every account that has not adopted a feature, regardless of whether the feature applies. The following are **deliberately declined** for redirect-only zones and the redirect hub. These are design decisions, not backlog items; re-raise them only if a zone starts serving real content.

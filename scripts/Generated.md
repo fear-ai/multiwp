@@ -27,15 +27,15 @@ what is implemented rather than what is documented.
 - --account-name,auth.sh
 - --all,rules-cf.sh
 - --allow-redirects,rules-cf.sh
-- --allow-root,check-server.sh;cli.sh;test-record.sh
+- --allow-root,check-server.sh;cli.sh;record-status.sh
 - --always-use-https,cloud-settings.sh
 - --apache-dir,cli.sh
-- --api,check-domain.sh;check-edge.sh;check-verify.sh;get-cert.sh;test-record.sh
+- --api,check-domain.sh;check-edge.sh;check-verify.sh;get-cert.sh;record-status.sh
 - --apply,mcp-cf.sh
 - --auth,auth.sh
-- --auth-file,auth.sh;check-auth.sh;check-verify.sh;cli.sh;test-record.sh
+- --auth-file,auth.sh;check-auth.sh;check-verify.sh;cli.sh;record-status.sh
 - --auto,get-cert.sh
-- --autosite,check-verify.sh;check-wp.sh;test-record.sh
+- --autosite,check-verify.sh;check-wp.sh;record-status.sh
 - --backup-directory,back-wp.sh
 - --bearer,mcp-cf.sh
 - --cache,perf-load.sh
@@ -51,9 +51,9 @@ what is implemented rather than what is documented.
 - --dest,rules-cf.sh
 - --dns-provider,onboard-zone.sh
 - --domain,cli.sh;slice-logs.sh
-- --domains-file,check-auth.sh;check-domain.sh;check-verify.sh;cloud-redirect.sh;cloud-settings.sh;onboard-zone.sh;test-record.sh
-- --downgrade,cloud-redirect.sh;onboard-zone.sh;test-record.sh
-- --dry-run,cloud-settings.sh
+- --domains-file,check-auth.sh;check-domain.sh;check-verify.sh;cloud-redirect.sh;cloud-settings.sh;onboard-zone.sh;record-status.sh
+- --downgrade,cloud-redirect.sh;onboard-zone.sh;record-status.sh
+- --dry-run,cloud-redirect.sh;cloud-settings.sh;onboard-site.sh
 - --duration,perf-load.sh;slice-logs.sh
 - --email,auth.sh
 - --err,perf-load.sh
@@ -64,7 +64,7 @@ what is implemented rather than what is documented.
 - --hsts,cli.sh
 - --http,apache-vhost.sh
 - --http-timeout,cli.sh
-- --include-ignore,check-verify.sh;test-record.sh
+- --include-ignore,check-verify.sh;record-status.sh
 - --init,perf-load.sh
 - --interval,perf-load.sh
 - --ip,onboard-zone.sh
@@ -74,13 +74,13 @@ what is implemented rather than what is documented.
 - --managed-add-security-headers,cloud-settings.sh
 - --manual,get-cert.sh
 - --min-tls-version,cloud-settings.sh
-- --multisite,check-verify.sh;check-wp.sh;test-record.sh
+- --multisite,check-verify.sh;check-wp.sh;record-status.sh
 - --multisite-domain,onboard-zone.sh
 - --mysql-interval,perf-load.sh
 - --none,perf-load.sh
-- --norecord,cloud-redirect.sh;onboard-zone.sh;test-record.sh
+- --norecord,cloud-redirect.sh;onboard-zone.sh;record-status.sh
 - --no-report,perf-load.sh;slice-logs.sh
-- --no-sudo,check-server.sh;cli.sh;test-record.sh
+- --no-sudo,check-server.sh;cli.sh;record-status.sh
 - --out-dir,perf-load.sh;slice-logs.sh
 - --output,cloudflare-ips.sh
 - --pad,slice-logs.sh
@@ -93,15 +93,15 @@ what is implemented rather than what is documented.
 - --report,perf-load.sh;slice-logs.sh
 - --run-id,back-wp.sh;perf-load.sh
 - --run-param,slice-logs.sh
-- --singlesite,check-verify.sh;check-wp.sh;test-record.sh
-- --site-type,check-verify.sh;onboard-site.sh;onboard-zone.sh;test-record.sh
+- --singlesite,check-verify.sh;check-wp.sh;record-status.sh
+- --site-type,check-verify.sh;onboard-site.sh;onboard-zone.sh;record-status.sh
 - --site-types,cloud-settings.sh
 - --slice,perf-load.sh
 - --src,rules-cf.sh
 - --ssl,apache-vhost.sh;cloud-settings.sh
 - --ssl-dir,cli.sh
 - --stage,cli.sh
-- --state,check-verify.sh;test-record.sh
+- --state,check-verify.sh;record-status.sh
 - --telemetry,perf-load.sh
 - --template,apache-vhost.sh
 - --template-check,check-wp.sh
@@ -125,9 +125,8 @@ Short options (getopts):
 
 Which program and test scripts source each helper library.
 
-- common.sh: apache-vhost.sh;back-wp.sh;check-auth.sh;check-cf.sh;check-domain.sh;check-edge.sh;check-origin.sh;check-server.sh;check-verify.sh;check-wp.sh;cloud-dns.sh;cloudflare-ips.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-site.sh;onboard-zone.sh;perf-load.sh;rules-cf.sh;setup-wp.sh;slice-logs.sh;test_cf.sh;test_cli.sh;test_cmd.sh;test_common.sh;test_mcp.sh;test-record.sh;verify-cf-auth.sh
-- cli.sh: apache-vhost.sh;back-wp.sh;check-auth.sh;check-cf.sh;check-domain.sh;check-edge.sh;check-origin.sh;check-server.sh;check-verify.sh;check-wp.sh;cloud-dns.sh;cloudflare-ips.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-site.sh;onboard-zone.sh;perf-load.sh;rules-cf.sh;slice-logs.sh;test_cli.sh;test-record.sh;verify-cf-auth.sh
+- common.sh: apache-vhost.sh;back-wp.sh;check-auth.sh;check-cf.sh;check-domain.sh;check-edge.sh;check-origin.sh;check-server.sh;check-verify.sh;check-wp.sh;cloud-dns.sh;cloudflare-ips.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-site.sh;onboard-zone.sh;perf-load.sh;record-status.sh;rules-cf.sh;setup-wp.sh;slice-logs.sh;test_cf.sh;test_cli.sh;test_cmd.sh;test_common.sh;test_mcp.sh;verify-cf-auth.sh
+- cli.sh: apache-vhost.sh;back-wp.sh;check-auth.sh;check-cf.sh;check-domain.sh;check-edge.sh;check-origin.sh;check-server.sh;check-verify.sh;check-wp.sh;cloud-dns.sh;cloudflare-ips.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;install-site.sh;mcp-cf.sh;onboard-site.sh;onboard-zone.sh;perf-load.sh;record-status.sh;rules-cf.sh;slice-logs.sh;test_cli.sh;verify-cf-auth.sh
 - cmd.sh: perf-load.sh;test_cmd.sh
-- auth.sh: check-auth.sh;check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;rules-cf.sh;test_cf.sh;test_cli.sh;test-record.sh;verify-cf-auth.sh
-- orch.sh: check-domain.sh
+- auth.sh: check-auth.sh;check-cf.sh;check-edge.sh;cloud-dns.sh;cloud-redirect.sh;cloud-settings.sh;get-cert.sh;mcp-cf.sh;onboard-zone.sh;record-status.sh;rules-cf.sh;test_cf.sh;test_cli.sh;verify-cf-auth.sh
 - mcp.sh: mcp-cf.sh;test_mcp.sh

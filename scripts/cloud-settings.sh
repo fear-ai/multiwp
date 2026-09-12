@@ -12,7 +12,7 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/cli.sh"
 
 DOMAINS=()
-DOMAINS_FILE="${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
+DOMAINS_FILE="${DOMAINS_FILE:-$(domains_csv_path)}"
 SITE_TYPES_RAW="${SITE_TYPES_RAW:-redirect,multisite}"
 DRY_RUN=false
 
@@ -279,12 +279,7 @@ for domain in "${DOMAINS[@]}"; do
         fi
     fi
 
-    CF_ZONE_ID=""
-    CF_ZONE=""
-    cf_init_auth "${CF_AUTH_FILE-}"
-    CF_ZONE="$domain"
-    cf_require_auth "for Cloudflare settings update"
-    cf_require_zone_id "for Cloudflare settings update" "$domain"
+    cf_setup_zone "$domain" "for Cloudflare settings update"
 
     section "SETTINGS" "ZoneSettings"
     kv "DOMAIN" "$domain"

@@ -11,6 +11,9 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/common.sh"
 . "$SCRIPTS_DIR/cli.sh"
 
+# Warn (not fail) this far ahead of expiry; 30 days by default.
+CERT_EXPIRY_WARN_SECONDS="${CERT_EXPIRY_WARN_SECONDS:-2592000}"
+
 ALLOW_ROOT=false
 
 SSL_DIR_LOCAL="$SSL_DIR"
@@ -99,7 +102,7 @@ check_file_perms() {
     actual=$(priv stat -c "%U:%G %a" "$path" 2>/dev/null || true)
     if [ -z "$actual" ]; then
         # Unverifiable is not the same as correct. Returning 0 here let an
-        # unreadable cert or key count as a pass, and test-record.sh then wrote
+        # unreadable cert or key count as a pass, and record-status.sh then wrote
         # status_origin=apache for the domain.
         fail "Unable to read permissions for $path"
         return 1
@@ -148,6 +151,15 @@ check_domain() {
     if priv test -r "$cert_file"; then
         check_file_perms "$cert_file" "root:ssl-cert 640" || ok=false
         priv openssl x509 -in "$cert_file" -noout -subject -issuer -dates -ext subjectAltName || true
+        # The dates above are printed for the operator but were never checked, so
+        # an expired certificate passed this check silently. Assert them: -checkend
+        # exits non-zero if the cert expires within the given window.
+        if ! priv openssl x509 -in "$cert_file" -noout -checkend 0 >/dev/null 2>&1; then
+            fail "Certificate expired: $cert_file"
+            ok=false
+        elif ! priv openssl x509 -in "$cert_file" -noout -checkend "$CERT_EXPIRY_WARN_SECONDS" >/dev/null 2>&1; then
+            warn "Certificate expires within $((CERT_EXPIRY_WARN_SECONDS / 86400)) days: $cert_file"
+        fi
     fi
 
     if priv test -r "$key_file"; then

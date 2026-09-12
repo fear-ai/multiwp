@@ -135,7 +135,7 @@ Status columns:
 The `status_*` columns in `domains.csv` record the latest confirmed stage for each layer. The value `none` means no tests for that layer have passed yet, and `status_cf=added` means the zone exists but is not yet active. These values are for filtering and reporting, not authoritative configuration, and `status_cf=worker` is skipped by default filters unless explicitly included. In practice, `status_cf=https` confirms the standard edge checks for a full HTTPS site, while `status_cf=redirect` confirms redirect-only edge behavior. For the origin layer, the implemented check group maps to `status_origin=apache` when `check-origin.sh` succeeds. For WordPress, `check-wp.sh` validates installation and configuration; a separate load test is required before recording `status_wp=load`, so that value should remain unused until such a test exists.
 
 Site type handling:
-The `site_type` column captures intent rather than validation. Empty values normalize to `none`, and `site_type=none`, `site_type=ignore`, and `site_type=worker` are explicit skip markers in `check-verify.sh` and `test-record.sh`. If a domain needs validation or provisioning, set `site_type` to an explicit intent such as `--singlesite`, `--multisite`, or `redirect`.
+The `site_type` column captures intent rather than validation. Empty values normalize to `none`, and `site_type=none`, `site_type=ignore`, and `site_type=worker` are explicit skip markers in `check-verify.sh` and `record-status.sh`. If a domain needs validation or provisioning, set `site_type` to an explicit intent such as `--singlesite`, `--multisite`, or `redirect`.
 WordPress mode selection is separate from `site_type` and uses the `--singlesite`, `--multisite`, and `--autosite` options; there is no `site` option.
 
 Alignment between intent and status:
@@ -689,7 +689,7 @@ Environment variables:
 
 ### Orchestration Layer Interfaces
 
-#### test-record.sh (verification + recording)
+#### record-status.sh (verification + recording)
 
 Purpose:
 - Runs selected validation checks (`check-edge.sh`, `check-origin.sh`, `check-wp.sh`) and records status updates back into `domains.csv`.

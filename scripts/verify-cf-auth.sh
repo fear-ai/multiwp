@@ -161,7 +161,10 @@ if cf_has_key && [ "$AUTH_PREF" != "token" ]; then
 fi
 
 if cf_has_ca_key; then
-    ca_checked=true
+    # ca_checked means "verification was actually attempted", not "a CA key
+    # exists". Setting it before the zone id is resolved made a *skipped* check
+    # (no CF_ZONE_ID, so nothing to verify against) fail the whole run with
+    # "verification failed", even when the token and key both verified.
     section "AUTH" "OriginCa"
     if ! cf_has_zone_id; then
         if [ -n "${CF_ZONE:-}" ] && { cf_has_token || cf_has_key; }; then
@@ -172,8 +175,9 @@ if cf_has_ca_key; then
         fi
     fi
     if ! cf_has_zone_id; then
-        :
+        status_info "ca=skipped reason=no-zone-id"
     else
+        ca_checked=true
         log "Verifying Origin CA key against zone $CF_ZONE_ID"
         ca_resp=$(cf_origin_ca_request GET "/certificates?zone_id=${CF_ZONE_ID}")
         ca_success=$(cf_api_success "$ca_resp")

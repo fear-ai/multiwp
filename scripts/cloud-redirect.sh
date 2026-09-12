@@ -13,7 +13,7 @@ SCRIPTS_DIR="$ROOT_DIR/scripts"
 
 DOMAINS=()
 REDIRECT_URL="${REDIRECT_URL-}"
-DOMAINS_FILE="${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
+DOMAINS_FILE="${DOMAINS_FILE:-$(domains_csv_path)}"
 DRY_RUN=false
 DATASTORE_DATE="${DATASTORE_DATE-}"
 RECORD_UPDATES=true
@@ -257,12 +257,7 @@ for domain in "${DOMAINS[@]}"; do
         fi
     fi
 
-    CF_ZONE_ID=""
-    CF_ZONE="$domain"
-
-    cf_init_auth "${CF_AUTH_FILE-}"
-    cf_require_auth
-    cf_require_zone_id "for redirect rule" "$domain"
+    cf_setup_zone "$domain" "for redirect rule"
 
     ensure_redirect_rule "$domain" "$target_url"
     log "Redirect rule ready: $domain -> $target_url"

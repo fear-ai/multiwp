@@ -35,7 +35,7 @@ with that output, the script wins and the document is corrected.
 
 Scripts are grouped into four roles so operators and maintainers can reason about entrypoints and shared behavior:
 
-- **Helper/library scripts** (`common.sh`, `cli.sh`, `cmd.sh`, `auth.sh`, `orch.sh`, `mcp.sh`) are sourced by other scripts and are not intended to be executed directly.
+- **Helper/library scripts** (`common.sh`, `cli.sh`, `cmd.sh`, `auth.sh`, `mcp.sh`) are sourced by other scripts and are not intended to be executed directly.
 - **Program scripts** are user-facing entrypoints with `usage()` output and option parsing. They perform a single operation such as provisioning, validation, or performance measurement.
 - **Orchestration scripts** are program scripts that call other program scripts in a defined order to provide multi-step workflows without duplicating logic.
 - **Test scripts** run standalone unit checks for helper behavior and parsing logic.
@@ -131,7 +131,7 @@ ERROR key=value
 
 `ERROR` is reserved for failures; the distinction between fatal and non-fatal errors is handled by `err()` (exit) versus `fail()` (continue), as described in `scripts/Shell.md`.
 
-Tables below list the **complete** set of `SECTION` values and expected `Topic` values for the current script arsenal. Helper/library scripts (`common.sh`, `cli.sh`, `auth.sh`, `orch.sh`, `mcp.sh`) do not emit section markers.
+Tables below list the **complete** set of `SECTION` values and expected `Topic` values for the current script arsenal. Helper/library scripts (`common.sh`, `cli.sh`, `auth.sh`, `mcp.sh`) do not emit section markers.
 
 #### SECTION values, scripts, and Topics
 
@@ -150,7 +150,7 @@ Tables below list the **complete** set of `SECTION` values and expected `Topic` 
 | `ORIGIN` | `apache-vhost.sh`, `check-origin.sh` | `Vhosts`, `Tls`, `Enable` |
 | `SERVER` | `check-server.sh` | `Os`, `Updates`, `Ssh`, `Network`, `Ufw`, `Apache`, `Mysql`, `Redis`, `Cron` |
 | `WP` | `setup-wp.sh`, `install-site.sh`, `check-wp.sh` | `Install`, `Site`, `Mapping`, `Root`, `Config`, `Routing`, `Security`, `Templates` |
-| `ORCH` | `check-verify.sh`, `test-record.sh`, `check-domain.sh` | `Selection`, `Run`, `Record`, `Results` |
+| `ORCH` | `check-verify.sh`, `record-status.sh`, `check-domain.sh` | `Selection`, `Run`, `Record`, `Results` |
 | `MCP` | `mcp.sh`, `mcp-cf.sh` | `Server`, `Request`, `Response` |
 | `INIT` | `perf-load.sh` | `Run`, `Domain` |
 | `LOAD` | `perf-load.sh` | `Run`, `Domain` |
@@ -183,7 +183,7 @@ Use this mapping when implementing or refactoring output so every script emits t
 | `install-site.sh` | `WP` | `Site`, `Mapping` |
 | `check-wp.sh` | `WP` | `Root`, `Config`, `Routing`, `Security`, `Templates` |
 | `check-verify.sh` | `ORCH` | `Selection`, `Run`, `Results` |
-| `test-record.sh` | `ORCH` | `Selection`, `Record`, `Results` |
+| `record-status.sh` | `ORCH` | `Selection`, `Record`, `Results` |
 | `check-domain.sh` | `ORCH` | `Selection`, `Run`, `Results` |
 | `mcp.sh` | `MCP` | `Server`, `Request`, `Response` |
 | `mcp-cf.sh` | `MCP` | `Server`, `Request`, `Response` |
@@ -242,7 +242,7 @@ WordPress scripts bootstrap or validate multisite configuration and mapping. Pro
 
 Orchestration scripts are program scripts that combine multiple checks in a single run.
 
-- `test-record.sh` — verification + recording
+- `record-status.sh` — verification + recording
 - `check-verify.sh` — verification (read-only)
 - `check-domain.sh` — verification (read-only)
 
@@ -292,7 +292,7 @@ Implementation plan:
 Test scripts and helper libraries are intentionally minimal. They do not parse options and run directly from the `scripts/` directory.
 
 - `test_common.sh`, `test_cli.sh`, `test_cmd.sh`, `test_cf.sh` run unit checks for shared helpers.
-- `common.sh`, `cli.sh`, `cmd.sh`, `auth.sh`, `orch.sh`, `mcp.sh` provide shared logic and should not be executed directly.
+- `common.sh`, `cli.sh`, `cmd.sh`, `auth.sh`, `mcp.sh` provide shared logic and should not be executed directly.
 
 ## Settings
 
@@ -424,5 +424,26 @@ The items below capture small, implementation-focused follow-ups that keep helpe
 - Helper predicates: `cf_has_env` and `cf_has_all` (in `auth.sh`) form the shared pattern for credential checks. `cf_has_env` treats unset and empty as absent, while `cf_has_all` requires every variable in the list to be present and non-empty. Intended usage: gate Cloudflare API calls and auth selection on presence checks (token/key/CA key), and validate required IDs (account/zone) before API requests. These helpers do not validate formats or resolve values; they only confirm presence. All `cf_has_*` helpers should delegate to these two functions so empty-vs-unset semantics stay consistent, and new helpers should follow the same pattern rather than re-implementing checks.
 - Enum parsing: evaluate whether option values with limited sets (for example `--site-type`, `singlesite|multisite|autosite`, or `api|manual|auto`) should accept environment equivalents with explicit enum validation, and if so, keep CLI/env/auth error messaging aligned.
 - Origin cert auth policy: `CF_CA_KEY` is required for Origin CA issuance and does not overlap with the global API key. The policy is to keep CA key usage scoped to Origin CA endpoints, and not to treat the global key as a substitute for CA key. Token vs key selection for non-Origin-CA API calls is documented elsewhere; do not conflate that with CA key usage.
-- Review `test-record.sh` uses and `check-domain.sh` overlap to decide whether to consolidate or keep distinct (postponed).
+- Review `record-status.sh` uses and `check-domain.sh` overlap to decide whether to consolidate or keep distinct (postponed).
 - UFW allowlist verification: decide whether `check-server.sh` should validate by marker comment, by CIDR content, or by both, once the UFW workflow and template placement are finalized (postponed).
+
+## Maintenance Log — 2026-09-12
+
+Defects found by review and fixed. Each was reproduced before the change and re-verified after.
+
+| Area | Defect | Fix |
+| --- | --- | --- |
+| `check-wp.sh:180` | `\\(` in an awk regex made awk **abort** (`Unmatched ( or \(`), so `--template-check` had never worked | single backslash; verified the capture now returns `DB_NAME` |
+| `check-edge.sh`, `check-verify.sh` | `usage()` used a quoted heredoc (`<<'EOF'`) while the body contains `$(cli_usage_*)`, so `--help` printed literal `$(cli_usage_http_timeout)` | unquoted the heredoc; checked both bodies for unintended expansion |
+| `check-verify.sh` | `--domains-file` was set but never exported, so child `check-*.sh` fell back to the default inventory | `export DOMAINS_FILE` on both parse arms |
+| `gen-crossref.sh:50` | any inner `esac` cleared parser state, dropping every option declared after a nested `case`; `Generated.md` omitted `--dry-run` for `cloud-redirect.sh` | added a nesting depth counter; regenerated output differs by exactly the corrected row |
+| `verify-cf-auth.sh` | `ca_checked=true` was set before verification was attempted, so a **skipped** Origin CA check (no zone id) exited 1 as a failure | set `ca_checked` only when the check actually runs; emits `INFO ca=skipped reason=no-zone-id` |
+| 7 scripts | each hardcoded `DOMAINS_FILE` to `$ROOT_DIR/domains.csv`, bypassing `domains_csv_path()` and reading a 0-byte file while real split inventories existed | all now default via `$(domains_csv_path)` |
+| `orch.sh` | 31-line library, one consumer, six caller-set globals, no tests | inlined into `check-domain.sh` as `run_domain_checks`; file removed |
+| `test-record.sh` | not a test — writes inventory CSVs, but a `test*.sh` CI glob would execute it | renamed `record-status.sh`; 10 files updated |
+| `onboard-site.sh` | hardcoded estate values (forbidden by Shell.md); `--dry-run` always failed; dead `SITE_TYPE_SET` conditionals; `ZONE:NextSteps` documented but never emitted | values moved to `site.conf` (`REDIRECT_TARGET_URL`, `DEFAULT_AUTH_FILE`); `--dry-run` routed only to the child that implements it; stage failures now reported; `NextSteps` emitted |
+| `check-origin.sh` | printed certificate `-dates` but never asserted them, so an expired cert passed | `-checkend 0` fails on expiry; `-checkend $CERT_EXPIRY_WARN_SECONDS` (default 30d) warns |
+
+Reuse improvement, same date: `cf_setup_zone <domain> [context]` (`auth.sh`) replaces the `cf_init_auth` → `cf_require_auth` → `cf_require_zone_id` sequence that `cloud-redirect.sh` and `cloud-settings.sh` each open-coded. The two copies had drifted — `cloud-settings.sh` cleared `CF_ZONE`/`CF_ZONE_ID` before loading auth and `cloud-redirect.sh` did not — so the helper adopts the safer ordering: clear stale globals, load auth, then set `CF_ZONE` for apex fallback. This matters in multi-domain loops, where a value left from the previous iteration would otherwise be reused for a domain with no inventory entry. Verified across three domains that each still resolves its own zone. Callers needing only credentials continue to call `cf_init_auth` + `cf_require_auth` directly.
+
+Known remaining, not addressed: the three orchestrators (`check-domain.sh`, `check-verify.sh`, `record-status.sh`) still fan out over the same children in different orders; DNS records are read both via API (`check-cf.sh`) and `dig` (`check-edge.sh`) without reconciliation; several scripts use private logging helpers instead of `common.sh`.

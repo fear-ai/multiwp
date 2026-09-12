@@ -163,7 +163,7 @@ load_operator_conf() {
         *) warn "operator config $path is mode ${mode}; expected 600" ;;
     esac
     local key
-    for key in WP_ADMIN_EMAIL ORIGIN_IP INVENTORY_DIR AUTH_DIR; do
+    for key in WP_ADMIN_EMAIL ORIGIN_IP INVENTORY_DIR AUTH_DIR REDIRECT_TARGET_URL DEFAULT_AUTH_FILE; do
         # Environment wins; only fill what is unset or empty.
         [ -n "${!key:-}" ] && continue
         local val
@@ -514,7 +514,7 @@ auth_file_var() {
 load_dns_redirects() {
     DNS_REDIRECT_LIST=()
     declare -gA DNS_REDIRECT_TARGETS=()
-    local csv="${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
+    local csv="${DOMAINS_FILE:-$(domains_csv_path)}"
     [ -f "$csv" ] || return 0
     local redirect_list=""
     if command -v python3 >/dev/null 2>&1; then

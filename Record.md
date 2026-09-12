@@ -7,14 +7,14 @@ The purpose of recording is to keep the domain inventory (`domains.csv`) aligned
 ## Dependencies and Sources of Truth
 This design depends on the following sources, which define the underlying interfaces and data structures:
 
-- `scripts/Scripts.md` defines the authoritative options and behaviors of `onboard-zone.sh`, `cloud-redirect.sh`, and `test-record.sh`.
+- `scripts/Scripts.md` defines the authoritative options and behaviors of `onboard-zone.sh`, `cloud-redirect.sh`, and `record-status.sh`.
 - The `domains.csv` header defines the inventory schema, and this document defines the meaning of `status_cf`, `status_origin`, and `status_wp` values.
 - `scripts/Shell.md` defines the helper conventions used by `csv_put_fields` in `common.sh`.
 
 This document focuses on the recording policy and workflow and avoids duplicating the full interface details already captured in `scripts/Scripts.md`.
 
 ## Read-Only Counterpart
-The repository now includes a clear separation between read-only validation and recording. `check-verify.sh` runs the broader validation sweep without writing to `domains.csv`, while `test-record.sh` runs a focused subset of validations and records successful outcomes. This split keeps routine checks safe for daily use while reserving state mutation for deliberate recording runs.
+The repository now includes a clear separation between read-only validation and recording. `check-verify.sh` runs the broader validation sweep without writing to `domains.csv`, while `record-status.sh` runs a focused subset of validations and records successful outcomes. This split keeps routine checks safe for daily use while reserving state mutation for deliberate recording runs.
 
 ## Domain and Zone Data Sources
 Recording depends on consistent interpretation of the inventory fields and the Cloudflare auth file. The goal is to keep “domain name” and “zone id” unambiguous so the recording system does not drift across accounts or zones.
@@ -108,7 +108,7 @@ The following controls are shared across scripts that update `domains.csv`:
 - Downgrades are blocked by default. Use `--downgrade` to allow updates that would otherwise be blocked by the monotonic status policy.
 - Use `--date` (or `DATASTORE_DATE`) to override the snapshot timestamp when deterministic backups are needed. The expected format is `YYYYmmdd_HHMMSS`.
 
-These flags are implemented consistently in `onboard-zone.sh`, `cloud-redirect.sh`, and `test-record.sh`.
+These flags are implemented consistently in `onboard-zone.sh`, `cloud-redirect.sh`, and `record-status.sh`.
 
 ## Backup and Write Behavior
 Before writing any update, the existing `domains.csv` file is moved aside so the previous state is preserved. The backup filename is `datastore_YYYYmmdd_HHMMSS.csv`, created in the same directory as `domains.csv`. A single run only creates one backup; subsequent updates during the same process write to the new `domains.csv` without creating additional backups.
@@ -120,7 +120,7 @@ Recording is now split across provisioning and verification steps so intent and 
 
 - `onboard-zone.sh` records zone metadata, nameserver labels, and sets `status_cf=added` when a zone exists but is not yet active.
 - `cloud-redirect.sh` ensures redirect rules exist and records `status_cf=redirect` and `redirect_url` for redirect-only domains when recording is enabled.
-- `test-record.sh` runs validation checks and records success states:
+- `record-status.sh` runs validation checks and records success states:
   - Edge checks -> `status_cf=https` for standard domains, `status_cf=redirect` for redirect-only domains.
   - Origin checks -> `status_origin=apache`.
   - WordPress checks -> `status_wp=config`.
@@ -135,7 +135,7 @@ When a row is found, the update behavior is selective rather than wholesale. Non
 ## Zone ID Resolution and Orchestrator Scope
 Domain-scoped scripts resolve the zone id with an explicit priority order: auth file match (by zone name), then `domains.csv` (`zone_id`), then API lookup. This ensures a domain always maps to the correct zone even when multiple zones exist in the same auth file, while still allowing the CSV to remain the canonical inventory source for recorded values.
 
-The orchestrators (`check-verify.sh` and `test-record.sh`) intentionally handle zone ids more narrowly. They read `zone_id` directly from `domains.csv` and pass it through for API checks, and they skip API-based checks when the zone id is missing. This behavior is deliberate for three reasons:
+The orchestrators (`check-verify.sh` and `record-status.sh`) intentionally handle zone ids more narrowly. They read `zone_id` directly from `domains.csv` and pass it through for API checks, and they skip API-based checks when the zone id is missing. This behavior is deliberate for three reasons:
 
 1) **Deterministic scope:** Orchestrators often run across many domains and should not “discover” zones outside the declared inventory. Relying on `domains.csv` keeps the scope explicit and avoids cross-account drift.
 2) **Operational safety:** API lookups during broad orchestration can mask inventory gaps by silently resolving missing zone ids. That makes the inventory look complete when it is not. Skipping the API instead forces the missing zone id to be recorded explicitly.
@@ -222,7 +222,7 @@ Onboarding domains with account-scoped auth:
 The items below require follow-up to harden the recording system and clarify intent boundaries:
 
 1) Add a write lock around `domains.csv` updates to prevent concurrent runs from clobbering each other. The helper currently includes a TODO for this.
-2) Decide whether `test-record.sh` should support explicit downgrade-on-failure behavior (for example, setting `status_cf=none` when edge checks fail) rather than only updating on success.
+2) Decide whether `record-status.sh` should support explicit downgrade-on-failure behavior (for example, setting `status_cf=none` when edge checks fail) rather than only updating on success.
 3) Clarify the intended handling for domains that intentionally change between `redirect` and `https` without a `site_type` change; the current policy requires `--downgrade` for that transition.
 4) Define how to record `status_wp=install` in a repeatable way, since the current automated checks only confirm configuration (`config`).
 5) Inventory intent is not inferred from `redirect_url` alone when `site_type` is empty; empty values are normalized to `none` and treated as explicit skips until `site_type` is set.

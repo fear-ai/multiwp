@@ -526,6 +526,32 @@ cf_resolve_zone_id() {
     echo "$CF_LOOKUP_ZONE_ID"
 }
 
+# Bootstrap credentials and resolve a zone in one call.
+#
+# Four scripts repeated the same three-step dance (cf_init_auth, cf_require_auth,
+# cf_require_zone_id) with slightly different argument shapes and context
+# strings, which is how cloud-settings.sh ended up setting CF_ZONE by hand while
+# cloud-redirect.sh did not. Callers that need a zone should use this; callers
+# that only need credentials still call cf_init_auth + cf_require_auth directly.
+#
+# Usage: cf_setup_zone <domain> [context]
+cf_setup_zone() {
+    local domain="$1"
+    local context="${2:-for Cloudflare API access}"
+    [ -n "$domain" ] || err "cf_setup_zone requires a domain"
+    # Clear before loading: these are globals, and a value left over from the
+    # previous domain in a multi-domain loop would otherwise be reused by
+    # cf_init_auth when this domain has no inventory entry.
+    CF_ZONE_ID=""
+    CF_ZONE=""
+    cf_init_auth "${CF_AUTH_FILE-}"
+    # Set after loading so cf_require_zone_id can fall back to the zone apex when
+    # the inventory has no zone_id for this domain.
+    CF_ZONE="$domain"
+    cf_require_auth "$context"
+    cf_require_zone_id "$context" "$domain"
+}
+
 cf_require_zone_id() {
     local context="${1:-}"
     local domain="${2:-}"

@@ -43,11 +43,16 @@ HDR
 for f in *.sh; do
     awk -v file="$f" '
         # Track whether we are inside a case block dispatching on OPTARG or "$1"/"$opt".
-        /case[[:space:]]+"?\$\{?OPTARG/ { inopt=1 }
+        /case[[:space:]]+"?\$\{?OPTARG/ { inopt=1; depth=0 }
         # auth.sh/cli.sh parse shared long options in helpers that dispatch on
         # $opt rather than $OPTARG; those arms are real CLI options too.
-        /case[[:space:]]+"\$opt"/           { inopt=1 }
-        /^[[:space:]]*esac/            { inopt=0 }
+        /case[[:space:]]+"\$opt"/           { inopt=1; depth=0 }
+        # Track nesting: several scripts open an inner `case` to split
+        # `--opt=value` from `--opt value`, and its `esac` closes before the
+        # outer option list ends. Clearing inopt on the first esac dropped every
+        # option declared after such a block (e.g. --dry-run in cloud-redirect.sh).
+        inopt && /^[[:space:]]*case[[:space:]]/ { depth++ }
+        /^[[:space:]]*esac/ { if (depth > 0) depth--; else inopt=0 }
         inopt && match($0, /^[[:space:]]*(--)?[a-zA-Z][a-zA-Z0-9-]*(=\*)?\)/) {
             arm = substr($0, RSTART, RLENGTH)
             gsub(/^[[:space:]]*/, "", arm)
@@ -88,7 +93,7 @@ Which program and test scripts source each helper library.
 
 HDR2
 
-for helper in common.sh cli.sh cmd.sh auth.sh orch.sh mcp.sh; do
+for helper in common.sh cli.sh cmd.sh auth.sh mcp.sh; do
     users=$(grep -l "SCRIPTS_DIR/$helper\"" *.sh 2>/dev/null |
             grep -v "^$helper$" | tr '\n' ';' | sed 's/;$//')
     printf -- "- %s: %s\n" "$helper" "${users:-(none)}"

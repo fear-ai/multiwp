@@ -10,7 +10,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS_DIR="$ROOT_DIR/scripts"
 . "$SCRIPTS_DIR/common.sh"
 . "$SCRIPTS_DIR/cli.sh"
-. "$SCRIPTS_DIR/orch.sh"
 
 EDGE_ARGS=()
 ORIGIN_ARGS=()
@@ -116,6 +115,30 @@ if [ "$ALLOW_ROOT" = true ]; then
 fi
 
 cli_require_non_root
+
+# Run the three per-domain checks in order, collecting failures rather than
+# stopping at the first. Previously this lived in orch.sh as a shared library,
+# but check-domain.sh was its only caller: the other two orchestrators
+# (check-verify.sh, record-status.sh) each fan out in their own order and never
+# used it. A one-consumer library that communicates through six caller-set
+# globals is harder to follow than the loop it replaces, so it lives here.
+run_domain_checks() {
+    local domain="$1"
+    local ok=true
+
+    if ! "$ORIGIN_SCRIPT" "${ORIGIN_ARGS[@]}" "$domain"; then
+        ok=false
+    fi
+    if ! "$WP_SCRIPT" "${WP_ARGS[@]}" "$domain"; then
+        ok=false
+    fi
+    if ! "$EDGE_SCRIPT" "${EDGE_ARGS[@]}" "$domain"; then
+        ok=false
+    fi
+
+    $ok || return 1
+    return 0
+}
 
 EDGE_SCRIPT="$SCRIPTS_DIR/check-edge.sh"
 ORIGIN_SCRIPT="$SCRIPTS_DIR/check-origin.sh"

@@ -17,7 +17,7 @@ ALL_COMMANDS=(syn unit edge dns server origin wp)
 COMMAND_ALL=false
 STATE_FILTER=""
 SITE_TYPE_FILTER=""
-DOMAINS_FILE="${DOMAINS_FILE:-$ROOT_DIR/domains.csv}"
+DOMAINS_FILE="${DOMAINS_FILE:-$(domains_csv_path)}"
 AUTH_FILE_OVERRIDE=""
 CHECK_IDS=false
 INCLUDE_IGNORE=false
@@ -32,7 +32,7 @@ WP_MODE="auto"
 WP_MODE_FROM_CLI=false
 
 usage() {
-    cat <<'EOF'
+    cat <<EOF
 check-verify.sh - Run syntax checks, unit tests, and read-only edge/dns checks.
 Example: check-verify.sh syn unit
 
@@ -81,10 +81,15 @@ while getopts ":-:" opt; do
                 help) usage; exit 0 ;;
                 api) USE_API=true ;;
                 include-ignore) INCLUDE_IGNORE=true ;;
-                domains-file=*) DOMAINS_FILE="${OPTARG#*=}" ;;
+                domains-file=*) DOMAINS_FILE="${OPTARG#*=}"; export DOMAINS_FILE ;;
                 domains-file)
                     [ -n "${!OPTIND-}" ] || err "--domains-file requires a path"
                     DOMAINS_FILE="${!OPTIND}"
+                    # Exported because this script fans out to check-*.sh children,
+                    # which each resolve the inventory from their own environment.
+                    # Without the export they silently fall back to the default
+                    # domains.csv and verify a different set of domains than asked.
+                    export DOMAINS_FILE
                     OPTIND=$((OPTIND+1))
                     ;;
                 state=*) STATE_FILTER="${OPTARG#*=}" ;;
