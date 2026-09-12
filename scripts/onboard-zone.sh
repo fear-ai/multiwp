@@ -80,6 +80,10 @@ Notes:
 EOF
 }
 
+# Options may appear after positional domains; getopts would otherwise stop at
+# the first positional and leave the rest unparsed. See cli_reorder_args.
+eval set -- "$(cli_reorder_args "$@")"
+
 while getopts ":-:" opt; do
     case "$opt" in
         -)

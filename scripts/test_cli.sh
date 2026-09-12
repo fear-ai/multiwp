@@ -284,6 +284,33 @@ assert_status 1 $? "cli_cf_auth_opt returns 1 for unknown option"
 
 SUDO_BIN="$SAVED_SUDO_BIN"
 
+echo "== cli_reorder_args =="
+assert_equal "--domains-file x.csv --dry-run bitfwd.net" \
+    "$(cli_reorder_args bitfwd.net --domains-file x.csv --dry-run)" \
+    "cli_reorder_args moves options ahead of positionals"
+assert_equal "--flag=v a.com" "$(cli_reorder_args a.com --flag=v)" \
+    "cli_reorder_args keeps --opt=value intact"
+assert_equal "--opt val a.com" "$(cli_reorder_args a.com --opt val)" \
+    "cli_reorder_args keeps a separated option value adjacent"
+assert_equal "--flag=v a.com --literal" "$(cli_reorder_args a.com --flag=v -- --literal)" \
+    "cli_reorder_args treats words after -- as positional"
+assert_equal "a.com b.com" "$(cli_reorder_args a.com b.com)" \
+    "cli_reorder_args preserves positional order"
+assert_equal "" "$(cli_reorder_args)" \
+    "cli_reorder_args handles no arguments"
+assert_equal "--a --b" "$(cli_reorder_args --a --b)" \
+    "cli_reorder_args leaves consecutive flags alone"
+
+echo "== cli_cf_zone_opt =="
+zone_case() { ( CF_ZONE_CLI=""; CF_ZONE_ID_CLI=""; OPTIND=1
+    cli_cf_zone_opt "$1" "${2-}" >/dev/null 2>&1 && echo "${CF_ZONE_CLI}|${CF_ZONE_ID_CLI}" ); }
+assert_equal "a.com|" "$(zone_case 'zone=a.com')" "cli_cf_zone_opt parses --zone=VAL"
+assert_equal "a.com|" "$(zone_case zone a.com)" "cli_cf_zone_opt parses --zone VAL"
+assert_equal "|zid1"  "$(zone_case 'zone-id=zid1')" "cli_cf_zone_opt parses --zone-id=VAL"
+assert_equal "|zid1"  "$(zone_case zone-id zid1)" "cli_cf_zone_opt parses --zone-id VAL"
+( cli_cf_zone_opt other >/dev/null 2>&1 )
+assert_status 1 $? "cli_cf_zone_opt returns 1 for an unrelated option"
+
 if [ "$failures" -gt 0 ]; then
     printf "\n%s test(s) failed.\n" "$failures" >&2
     exit 1

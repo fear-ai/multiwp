@@ -401,6 +401,21 @@ assert_equal "josephine.ns.cloudflare.com" \
 expected_cloudflare_ns "" >/dev/null 2>&1
 assert_status 1 $? "expected_cloudflare_ns fails on empty input"
 
+echo "== dns_lookup =="
+dns_stub_case() {
+    ( command() { [ "$2" = "dig" ] && return 0; return 1; }
+      dig() { printf '1.2.3.4\n5.6.7.8\n'; }
+      dns_lookup A example.test )
+}
+assert_equal "1.2.3.4 5.6.7.8" "$(dns_stub_case)" "dns_lookup joins records on one line"
+
+dns_missing_dig() {
+    ( command() { return 1; }
+      dns_lookup A example.test )
+}
+dns_missing_dig >/dev/null 2>&1
+assert_status 2 $? "dns_lookup returns 2 when dig is unavailable"
+
 if [ "$failures" -gt 0 ]; then
     printf "\n%s test(s) failed.\n" "$failures" >&2
     exit 1

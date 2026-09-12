@@ -281,7 +281,10 @@ Arguments:
 - None.
 
 Options (script-specific):
+- `--zone NAME [CF_ZONE]` supplies a zone apex, resolved to a zone ID for Origin CA key validation. Added 2026-09-12: the script previously documented that it resolves `CF_ZONE_ID` from `CF_ZONE`, but had no flag to set it, so the Origin CA check could only run when the raw zone ID was already known.
 - `--zone-id ID [CF_ZONE_ID]` supplies a zone ID for Origin CA key validation.
+
+When neither is supplied and an Origin CA key is present, the CA check is reported as skipped (`INFO ca=skipped reason=no-zone-id`) and does not fail the run.
 
 Common arguments: --auth, --auth-file, --account, --token, --key, --email, --ca-key, --help.
 

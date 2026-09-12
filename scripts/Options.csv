@@ -89,5 +89,5 @@ Option,Scripts
 --ufw,cloudflare-ips.sh
 --update,cloud-dns.sh
 --wp-root,apache-vhost.sh;check-origin.sh;check-verify.sh;check-wp.sh;install-site.sh;record-status.sh;check-domain.sh
---zone,check-cf.sh;check-edge.sh
+--zone,check-cf.sh;check-edge.sh;verify-cf-auth.sh
 --zone-id,check-cf.sh;check-edge.sh;verify-cf-auth.sh

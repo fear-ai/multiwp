@@ -112,7 +112,7 @@ Section marker:
 ```
 
 Rules:
-- `SECTION` is uppercase (`AUTH`, `CF`, `DNS`, `EDGE`, `SETTINGS`, `RULES`, `ZONE`, `CERT`, `FIREWALL`, `ORIGIN`, `SERVER`, `WP`, `ORCH`, `MCP`, `TEST`).
+- `SECTION` is uppercase (`AUTH`, `BACKUP`, `CF`, `DNS`, `EDGE`, `SETTINGS`, `RULES`, `ZONE`, `CERT`, `FIREWALL`, `ORIGIN`, `SERVER`, `WP`, `ORCH`, `MCP`, `LOGS`, `PERF`).
 - `Topic` is UpperCamelCase without spaces (`Tls`, `DnsProxy`, `RedirectRule`).
 - Section markers appear on their own line and are always prefixed with `==`.
 
@@ -144,7 +144,7 @@ Tables below list the **complete** set of `SECTION` values and expected `Topic` 
 | `EDGE` | `check-edge.sh`, `cloud-redirect.sh` | `Dns`, `Https`, `RedirectRule`, `Headers` |
 | `SETTINGS` | `cloud-settings.sh` | `ZoneSettings`, `Baseline` |
 | `RULES` | `rules-cf.sh` | `Get`, `Put`, `Copy` |
-| `ZONE` | `onboard-zone.sh` | `Create`, `Dns`, `Record` |
+| `ZONE` | `onboard-zone.sh`, `onboard-site.sh` | `Create`, `Dns`, `Record`, `Delegation`, `NextSteps` |
 | `CERT` | `get-cert.sh` | `OriginCa`, `Install`, `Verify` |
 | `FIREWALL` | `cloudflare-ips.sh` | `IpList`, `UfwRules` |
 | `ORIGIN` | `apache-vhost.sh`, `check-origin.sh` | `Vhosts`, `Tls`, `Enable` |
@@ -152,10 +152,13 @@ Tables below list the **complete** set of `SECTION` values and expected `Topic` 
 | `WP` | `setup-wp.sh`, `install-site.sh`, `check-wp.sh` | `Install`, `Site`, `Mapping`, `Root`, `Config`, `Routing`, `Security`, `Templates` |
 | `ORCH` | `check-verify.sh`, `record-status.sh`, `check-domain.sh` | `Selection`, `Run`, `Record`, `Results` |
 | `MCP` | `mcp.sh`, `mcp-cf.sh` | `Server`, `Request`, `Response` |
-| `INIT` | `perf-load.sh` | `Run`, `Domain` |
-| `LOAD` | `perf-load.sh` | `Run`, `Domain` |
-| `NONE` | `perf-load.sh` | `Run`, `Domain` |
-| `TEST` | `test_common.sh`, `test_cli.sh`, `test_cmd.sh`, `test_cf.sh`, `test_mcp.sh` | `Setup`, `Cases`, `Results` |
+| `PERF` | `perf-load.sh` | `Summary`, `Telemetry`, `Process` |
+| `LOGS` | `slice-logs.sh` | `Analyze`, `Csv` |
+
+The `test_*.sh` scripts emit no section markers; they use `PASS:` / `FAIL:` lines
+and a final summary. An earlier revision of this table listed a `TEST` section
+with `Setup`/`Cases`/`Results` topics, and `INIT`/`LOAD`/`NONE` for
+`perf-load.sh`; none of those were ever emitted.
 
 #### Script-to-section mapping
 
@@ -172,8 +175,8 @@ Use this mapping when implementing or refactoring output so every script emits t
 | `cloud-redirect.sh` | `EDGE` | `RedirectRule` |
 | `cloud-settings.sh` | `SETTINGS` | `ZoneSettings`, `Baseline` |
 | `rules-cf.sh` | `RULES` | `Get`, `Put`, `Copy` |
-| `onboard-zone.sh` | `ZONE` | `Create`, `Dns`, `Record` |
-| `onboard-site.sh` | `ZONE` | `Create`, `Dns`, `RedirectRule`, `NextSteps` |
+| `onboard-zone.sh` | `ZONE` | `Create`, `Dns`, `Record`, `Delegation` |
+| `onboard-site.sh` | `ZONE` | `Create`, `NextSteps` (its children emit `Dns`, `Record`, `Delegation`, `EDGE:RedirectRule`) |
 | `get-cert.sh` | `CERT` | `OriginCa`, `Install`, `Verify` |
 | `cloudflare-ips.sh` | `FIREWALL` | `IpList`, `UfwRules` |
 | `apache-vhost.sh` | `ORIGIN` | `Vhosts`, `Enable`, `Tls` |
@@ -187,7 +190,8 @@ Use this mapping when implementing or refactoring output so every script emits t
 | `check-domain.sh` | `ORCH` | `Selection`, `Run`, `Results` |
 | `mcp.sh` | `MCP` | `Server`, `Request`, `Response` |
 | `mcp-cf.sh` | `MCP` | `Server`, `Request`, `Response` |
-| `perf-load.sh` | `INIT`, `LOAD`, `NONE` | `Run`, `Domain` |
+| `perf-load.sh` | `PERF` | `Summary`, `Telemetry`, `Process` |
+| `slice-logs.sh` | `LOGS` | `Analyze`, `Csv` |
 | `test_common.sh` | `TEST` | `Setup`, `Cases`, `Results` |
 | `test_cli.sh` | `TEST` | `Setup`, `Cases`, `Results` |
 | `test_cmd.sh` | `TEST` | `Setup`, `Cases`, `Results` |
@@ -445,5 +449,35 @@ Defects found by review and fixed. Each was reproduced before the change and re-
 | `check-origin.sh` | printed certificate `-dates` but never asserted them, so an expired cert passed | `-checkend 0` fails on expiry; `-checkend $CERT_EXPIRY_WARN_SECONDS` (default 30d) warns |
 
 Reuse improvement, same date: `cf_setup_zone <domain> [context]` (`auth.sh`) replaces the `cf_init_auth` → `cf_require_auth` → `cf_require_zone_id` sequence that `cloud-redirect.sh` and `cloud-settings.sh` each open-coded. The two copies had drifted — `cloud-settings.sh` cleared `CF_ZONE`/`CF_ZONE_ID` before loading auth and `cloud-redirect.sh` did not — so the helper adopts the safer ordering: clear stale globals, load auth, then set `CF_ZONE` for apex fallback. This matters in multi-domain loops, where a value left from the previous iteration would otherwise be reused for a domain with no inventory entry. Verified across three domains that each still resolves its own zone. Callers needing only credentials continue to call `cf_init_auth` + `cf_require_auth` directly.
+
+Standardization pass, 2026-09-12:
+
+| Change | Rationale |
+| --- | --- |
+| `cli_reorder_args` (`cli.sh`), adopted by `cloud-redirect.sh`, `cloud-settings.sh`, `onboard-zone.sh`, `check-domain.sh` | **Fixes a real bug.** `getopts` stops at the first non-option word, so `script domain.tld --flag` left `OPTIND=1`: flags after a positional were never parsed and were collected as domains, failing with `Error: domain must include a dot` for `--domains-file`. Verified before and after; flag-first ordering unchanged, typos still rejected. |
+| `dns_lookup` (`common.sh`), adopted by all 5 `dig` sites in `check-edge.sh` | `check-edge.sh` used the host stub resolver, so a negative answer cached before a record existed kept record checks failing for the full 1800s SOA negative TTL while HTTP checks on the same host passed. Now pinned to `DELEGATION_RESOLVER`, matching the delegation check. The three `apps*` zones that flapped now pass consistently. |
+| `--zone` added to `verify-cf-auth.sh`; `cli_cf_zone_opt` + `cli_usage_cf_zone` added to `cli.sh` and adopted by `check-cf.sh`, `check-edge.sh` | The script documented that it resolves `CF_ZONE_ID` from `CF_ZONE` but had no flag to set it, so the Origin CA check ran only when the raw zone ID was known. Verified: `--zone alternat.info` now resolves and validates. `check-cf.sh` and `check-edge.sh` each hand-rolled the same four arms; they now share one helper. **Deliberately not added** to `cloud-redirect.sh`, `cloud-settings.sh`, `onboard-zone.sh`, `cloud-dns.sh`: those iterate a domain list and resolve a zone per domain, so a single `CF_ZONE` would override every iteration. |
+| `report_tee` / `report_log` / `report_section` / `report_kv` moved into `common.sh` | `perf-load.sh` and `slice-logs.sh` each implemented the same "print via the shared helper, then append to a transcript file" pattern under different variable names. The shared versions use one `REPORT_FILE`; `slice-logs.sh` maps its `--report`/`--no-report` semantics onto it. Verified the transcript is still written. |
+| `slice-logs.sh` log-registry arrays declared | `analyze_admin_log` indexed `LOG_DEST[apache_admin_access]` while `LOG_DEST` was never declared, so under `set -u` the script **aborted** partway instead of taking its documented "log missing, skip" path. An undeclared array errors even with the `${arr[key]-}` default form, so `LOG_DEST`, `LOG_TYPE`, `LOG_OPTIONAL` and `LOG_IDS` are now declared empty. Pre-existing (present at 614231d). |
+| `gen-crossref.sh` alternation arms | The arm regex required a single name before `)`, so `zone\|zone=*\|zone-id\|zone-id=*)` was invisible and the option was credited to `cli.sh` instead of the scripts an operator runs. Now splits on `\|`. This also corrected long-standing under-reporting: `--wp-root` listed only `cli.sh` and now lists all 8 real consumers, matching what `Options.csv` always said. |
+| `note()` removed from `check-cf.sh` | Bypassed `common.sh`. The three informational messages became `log()`; the genuine zone-name mismatch stayed `warn()`. |
+| `log_msg()` in `slice-logs.sh` now wraps `log()` | It was not redundant — it tees to a report file — but it bypassed the shared timestamp/stdout contract. It now builds on `log()` and keeps the tee. `LOGS:Analyze` / `LOGS:Csv` sections and a `status_pass` were added; the script previously emitted no structured markers at all across 731 lines. |
+
+Note on `perf-load.sh`: its `report_section`/`report_kv` were left as-is. They already call `section`/`kv` and add a report-file tee, so they extend the shared contract rather than bypass it.
+
+A claim from the earlier review that did **not** hold: unknown options are not silently treated as domains. `cli_domain_opt` returns 1 for anything but `domain`/`domain=*`, so the `*)` arm falls through to `usage; exit 1`. Verified: `--bogus-flag` prints usage and exits.
+
+### Postponed task: standardize on Python for JSON and CSV
+
+**Status: accepted, not scheduled.** Recorded here so it is not rediscovered as a new finding.
+
+Today three parsers coexist. `auth.sh` alone uses `jq` 11 times and `python3` 3 times; seven scripts declare `require_cmds ... jq python3` and so depend on both interpreters. Several CSV readers additionally carry an `awk` fallback for hosts without `python3`.
+
+Reasons to do it:
+- `python3` is already a hard dependency (`require_cmds python3`); `jq` is an extra install. Standardizing on Python removes a dependency rather than adding one.
+- The `awk` CSV fallbacks are the weak link. They are rarely exercised and silently wrong when they are: the `IFS=$'\t' read` field-shift bug (fixed 2026-09-11, see `csv_split_row`) and the `\\(` regex abort in `check-wp.sh` both lived in that class of code.
+- One language for structured data makes the option/inventory helpers reviewable as a unit.
+
+Scope when scheduled: roughly 30 `jq` call sites plus the `awk` fallbacks in `load_domain_meta` (`check-verify.sh`, `record-status.sh`) and `load_dns_redirects` (`common.sh`). Mechanical but wide, so it wants its own pass with tests rather than being folded into unrelated work. Do not drop `jq` from `require_cmds` until the last call site is converted.
 
 Known remaining, not addressed: the three orchestrators (`check-domain.sh`, `check-verify.sh`, `record-status.sh`) still fan out over the same children in different orders; DNS records are read both via API (`check-cf.sh`) and `dig` (`check-edge.sh`) without reconciliation; several scripts use private logging helpers instead of `common.sh`.

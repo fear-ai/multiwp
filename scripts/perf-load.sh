@@ -1079,20 +1079,6 @@ summarize_pidstat() {
     fi
 }
 
-report_section() {
-    section "$1" "$2"
-    if [ -n "${REPORT_FILE-}" ]; then
-        echo "== $1:$2" >> "$REPORT_FILE"
-    fi
-}
-
-report_kv() {
-    kv "$1" "$2"
-    if [ -n "${REPORT_FILE-}" ]; then
-        echo "$1=$2" >> "$REPORT_FILE"
-    fi
-}
-
 start_telemetry() {
     local prefix="$1"
     TELEMETRY_PIDS=()

@@ -22,6 +22,7 @@ CF_API_EMAIL_CLI=""
 CF_API_KEY_CLI=""
 CF_CA_KEY_CLI=""
 CF_ZONE_ID_CLI=""
+CF_ZONE_CLI=""
 CF_AUTH_CLI=""
 
 usage() {
@@ -30,6 +31,7 @@ verify-cf-auth.sh - Validate Cloudflare API credentials.
 Example: verify-cf-auth.sh [OPTIONS]
 
 Options:
+  --zone NAME [CF_ZONE]  Zone apex; resolved to a zone ID for Origin CA verification
   --zone-id ID [CF_ZONE_ID]  Set CF_ZONE_ID for Origin CA key verification
   --auth-file PATH [CF_AUTH_FILE] (default: ~/.config/cloudflare/default.auth)  Auth file to load
   --auth token|key|auto [CF_AUTH]  Select which credential to use (default: auto)
@@ -52,11 +54,8 @@ while getopts ":-:" opt; do
         -)
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
-                zone-id=*) CF_ZONE_ID_CLI="${OPTARG#*=}" ;;
-                zone-id)
-                    [ -n "${!OPTIND-}" ] || err "--zone-id requires a value"
-                    CF_ZONE_ID_CLI="${!OPTIND}"
-                    OPTIND=$((OPTIND+1))
+                zone|zone=*|zone-id|zone-id=*)
+                    cli_cf_zone_opt "${OPTARG}" "${!OPTIND-}" || { usage; exit 1; }
                     ;;
                 *)
                     if cli_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then

@@ -69,17 +69,8 @@ while getopts ":-:" opt; do
                         usage; exit 1
                     fi
                     ;;
-                zone=*) CF_ZONE_CLI="${OPTARG#*=}" ;;
-                zone)
-                    [ -n "${!OPTIND-}" ] || err "--zone requires a value"
-                    CF_ZONE_CLI="${!OPTIND}"
-                    OPTIND=$((OPTIND+1))
-                    ;;
-                zone-id=*) CF_ZONE_ID_CLI="${OPTARG#*=}" ;;
-                zone-id)
-                    [ -n "${!OPTIND-}" ] || err "--zone-id requires a value"
-                    CF_ZONE_ID_CLI="${!OPTIND}"
-                    OPTIND=$((OPTIND+1))
+                zone|zone=*|zone-id|zone-id=*)
+                    cli_cf_zone_opt "${OPTARG}" "${!OPTIND-}" || { usage; exit 1; }
                     ;;
                 *)
                     if cli_domain_opt "${OPTARG}" DOMAINS "${!OPTIND-}"; then
@@ -251,7 +242,7 @@ check_domain() {
     }
 
     local a_records
-    a_records=$(dig +short A "$canonical_domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    a_records=$(dns_lookup A "$canonical_domain")
     if [ -z "$a_records" ]; then
         fail "DNS A records not found for $canonical_domain"
         ok=false
@@ -260,12 +251,12 @@ check_domain() {
     fi
 
     local cname_records
-    cname_records=$(dig +short CNAME "$www_domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    cname_records=$(dns_lookup CNAME "$www_domain")
     if [ -n "$cname_records" ]; then
         kv "DNS_CNAME_WWW" "$cname_records"
     else
         local www_a_records
-        www_a_records=$(dig +short A "$www_domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+        www_a_records=$(dns_lookup A "$www_domain")
         if [ -n "$www_a_records" ]; then
             kv "DNS_A_WWW" "$www_a_records"
         else
@@ -275,13 +266,13 @@ check_domain() {
     fi
 
     local wildcard_cname
-    wildcard_cname=$(dig +short CNAME "*.${canonical_domain}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    wildcard_cname=$(dns_lookup CNAME "*.${canonical_domain}")
     if [ -n "$wildcard_cname" ]; then
         kv "DNS_CNAME_WILDCARD" "$wildcard_cname"
     fi
 
     local aaaa_records
-    aaaa_records=$(dig +short AAAA "$canonical_domain" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    aaaa_records=$(dns_lookup AAAA "$canonical_domain")
     if [ -n "$aaaa_records" ]; then
         kv "DNS_AAAA" "$aaaa_records"
     fi

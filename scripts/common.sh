@@ -28,6 +28,33 @@ err() { echo "[$(date +%H:%M:%S)] ERROR: $*" >&2; status_error "$*"; exit 1; }
 warn() { echo "[$(date +%H:%M:%S)] Warning: $*" >&2; }
 fail() { echo "[$(date +%H:%M:%S)] FAIL: $*" >&2; status_error "$*"; }
 
+# Optional transcript file. When set, the report_* wrappers below append the
+# same text they print, so a run leaves a machine-readable transcript without
+# each script inventing its own tee. Scripts that want one set this (perf-load.sh
+# and slice-logs.sh do); everything else leaves it empty and the wrappers behave
+# exactly like the plain helpers.
+REPORT_FILE="${REPORT_FILE-}"
+
+report_tee() {
+    [ -n "${REPORT_FILE-}" ] || return 0
+    printf '%s\n' "$*" >> "$REPORT_FILE"
+}
+
+report_log() {
+    log "$@"
+    report_tee "$@"
+}
+
+report_section() {
+    section "$1" "$2"
+    report_tee "== ${1}:${2}"
+}
+
+report_kv() {
+    kv "$1" "${2-}"
+    report_tee "${1}=${2-}"
+}
+
 section() {
     local section="$1"
     local topic="$2"
@@ -585,6 +612,26 @@ redirect_target() {
 # records, an undelegated one returns none. Query a public resolver explicitly so
 # a local stub or split-horizon resolver cannot mask the result.
 DELEGATION_RESOLVER="${DELEGATION_RESOLVER:-1.1.1.1}"
+
+# Resolve one record type for a host, using the same public resolver as the
+# delegation check.
+#
+# check-edge.sh previously called `dig` with no @server, so it used whatever
+# stub resolver the host has. A negative answer cached before a record existed
+# then kept the check failing for the full SOA negative TTL (1800s here) while
+# the record resolved fine everywhere else - the record checks flapped while the
+# HTTP checks on the same host passed. Pinning the resolver makes the two agree.
+#
+# Note this deliberately reports what public DNS answers, which for a proxied
+# record is Cloudflare's edge address, not the value configured in the zone.
+# check-cf.sh reports the configured value via the API; the two differ by design.
+dns_lookup() {
+    local rrtype="$1"
+    local host="$2"
+    local resolver="${3:-$DELEGATION_RESOLVER}"
+    command -v dig >/dev/null 2>&1 || return 2
+    dig +short "$rrtype" "$host" @"$resolver" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+}
 
 domain_delegated_ns() {
     local domain

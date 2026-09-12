@@ -17,6 +17,17 @@ overwritten and, historically, drift: before this file was split out, the helper
 list omitted `slice-logs.sh` (which does source `common.sh`) and `onboard-site.sh`
 was missing from both tables.
 
+**Scope — how this differs from `Options.csv`.** This file lists the scripts that
+declare an explicit `case` arm for an option, including alternation arms such as
+`zone|zone=*|zone-id|zone-id=*)`. `Options.csv` additionally lists scripts that
+accept an option only through a shared-helper fallback in their `*)` arm (for
+example `cli_cf_auth_opt`, which supplies `--auth`, `--token` and `--account` to
+every Cloudflare script without any of them naming those options). So
+`Options.csv` is the answer to "which scripts accept this flag", while this file
+answers "which scripts parse it themselves". A library name in a row here
+(`cli.sh`, `auth.sh`) means the shared parser lives there; it is not a script an
+operator runs.
+
 Regenerate:
 
 ```bash
@@ -53,14 +64,23 @@ for f in *.sh; do
         # option declared after such a block (e.g. --dry-run in cloud-redirect.sh).
         inopt && /^[[:space:]]*case[[:space:]]/ { depth++ }
         /^[[:space:]]*esac/ { if (depth > 0) depth--; else inopt=0 }
-        inopt && match($0, /^[[:space:]]*(--)?[a-zA-Z][a-zA-Z0-9-]*(=\*)?\)/) {
+        # Match a whole case arm, including alternations such as
+        # `zone|zone=*|zone-id|zone-id=*)`. Matching only a single name meant an
+        # arm that delegates several options to one cli.sh helper was invisible,
+        # and the option was then credited to cli.sh instead of the script the
+        # operator actually runs.
+        inopt && match($0, /^[[:space:]]*(--)?[a-zA-Z][a-zA-Z0-9|=*-]*\)/) {
             arm = substr($0, RSTART, RLENGTH)
             gsub(/^[[:space:]]*/, "", arm)
             gsub(/\)$/, "", arm)
-            gsub(/=\*$/, "", arm)
-            gsub(/^-+/, "", arm)
-            if (arm != "help" && length(arm) > 1)
-                printf "%s\t%s\n", arm, file
+            n = split(arm, alts, "|")
+            for (i = 1; i <= n; i++) {
+                a = alts[i]
+                gsub(/=\*$/, "", a)
+                gsub(/^-+/, "", a)
+                if (a != "help" && length(a) > 1)
+                    printf "%s\t%s\n", a, file
+            }
         }
     ' "$f" 2>/dev/null
 done | sort -u -t"$(printf '\t')" -k1,1 -k2,2 | awk -F'\t' '

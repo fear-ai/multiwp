@@ -45,13 +45,19 @@ Notes:
 EOF
 }
 
+# Wraps common.sh log() rather than replacing it: the shared helper supplies the
+# timestamp and stdout contract, and this adds the report-file tee that the other
+# scripts have no need for. Previously this bypassed common.sh entirely, so
+# slice-logs output carried no timestamps while every other script's did.
+# REPORT_FILE is the shared transcript variable that common.sh report_* writes
+# to; SLICE_LOG is this script's name for the same file, kept for its existing
+# --report/--no-report semantics.
 log_msg() {
-    local msg="$1"
-    if [ "$REPORT_MODE" = "true" ]; then
-        echo "$msg" | tee -a "$SLICE_LOG"
-    else
-        echo "$msg"
+    REPORT_FILE=""
+    if [ "$REPORT_MODE" = "true" ] && [ -n "${SLICE_LOG:-}" ]; then
+        REPORT_FILE="$SLICE_LOG"
     fi
+    report_log "$1"
 }
 
 param_var() {
@@ -133,6 +139,15 @@ else
     PREFIX="${DOMAIN_OVERRIDE//./_}_${RUN_ID}"
     DURATION_MODE="true"
 fi
+
+# The log registry populates these; declare them so that a run without a
+# registry takes the documented "log missing, skip" paths instead of aborting on
+# an unbound array subscript under `set -u`. An undeclared array errors even with
+# the ${arr[key]-} default form; a declared empty one does not.
+declare -A LOG_DEST=()
+declare -A LOG_TYPE=()
+declare -A LOG_OPTIONAL=()
+declare -a LOG_IDS=()
 
 SLICE_LOG=""
 if [ "$REPORT_MODE" = "true" ]; then
@@ -367,8 +382,11 @@ for log_id in "${LOG_IDS[@]}"; do
 done
 
 analyze_admin_log() {
-    local admin_log="$OUT_DIR/${LOG_DEST[apache_admin_access]}"
-    if [ ! -f "$admin_log" ]; then
+    # LOG_DEST is populated by the log-registry config; when no registry is
+    # loaded the direct subscript aborts under `set -u` before the missing-file
+    # check below can report it cleanly. Default to empty so the skip path runs.
+    local admin_log="$OUT_DIR/${LOG_DEST[apache_admin_access]-}"
+    if [ -z "${LOG_DEST[apache_admin_access]-}" ] || [ ! -f "$admin_log" ]; then
         log_msg "INFO admin access log missing; skip admin timing"
         return 0
     fi
@@ -430,6 +448,9 @@ PYCODE
     done <<<"$summary"
 }
 
+section "LOGS" "Analyze"
+kv "RUN_PARAM" "${RUN_PARAM:-}"
+kv "PAD_SEC" "${PAD_SEC:-0}"
 analyze_admin_log
 
 generate_csv() {
@@ -726,6 +747,9 @@ with open(seg_csv, "a", newline="") as f:
 PYCODE
 }
 
+section "LOGS" "Csv"
+kv "OUT_DIR" "$OUT_DIR"
 generate_csv
+status_pass "slice=done out_dir=$OUT_DIR"
 
 log_msg "DONE slice-logs for $DOMAIN"

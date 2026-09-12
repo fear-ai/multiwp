@@ -20,8 +20,6 @@ CF_AUTH_CLI=""
 expects=()
 show_keys=()
 raw=false
-note() { echo "Note: $*" >&2; }
-
 usage() {
     cat <<'EOF'
 check-cf.sh - Inspect Cloudflare zone settings via the API.
@@ -62,17 +60,8 @@ while getopts ":e:s:-:" opt; do
             case "${OPTARG}" in
                 help) usage; exit 0 ;;
                 raw) raw=true ;;
-                zone=*) CF_ZONE_CLI="${OPTARG#*=}" ;;
-                zone)
-                    [ -n "${!OPTIND-}" ] || err "--zone requires a value"
-                    CF_ZONE_CLI="${!OPTIND}"
-                    OPTIND=$((OPTIND+1))
-                    ;;
-                zone-id=*) CF_ZONE_ID_CLI="${OPTARG#*=}" ;;
-                zone-id)
-                    [ -n "${!OPTIND-}" ] || err "--zone-id requires a value"
-                    CF_ZONE_ID_CLI="${!OPTIND}"
-                    OPTIND=$((OPTIND+1))
+                zone|zone=*|zone-id|zone-id=*)
+                    cli_cf_zone_opt "${OPTARG}" "${!OPTIND-}" || { usage; exit 1; }
                     ;;
                 *)
                     if cli_cf_auth_opt "${OPTARG}" "${!OPTIND-}"; then
@@ -115,7 +104,7 @@ fi
 cf_require_auth "for Cloudflare settings check"
 
 if cf_has_zone_id && [ -n "${CF_ZONE:-}" ]; then
-    note "Using CF_ZONE_ID and CF_ZONE; zone ID takes precedence for API calls"
+    log "Using CF_ZONE_ID and CF_ZONE; zone ID takes precedence for API calls"
 fi
 if ! cf_has_zone_id; then
     [ -n "${CF_ZONE:-}" ] || err "CF_ZONE or CF_ZONE_ID is required"
@@ -123,14 +112,14 @@ if ! cf_has_zone_id; then
 fi
 
 if [ -z "${CF_ZONE:-}" ]; then
-    note "Resolving zone name from zone ID: $CF_ZONE_ID"
+    log "Resolving zone name from zone ID: $CF_ZONE_ID"
     zone_detail=$(cf_api_request GET "/zones/${CF_ZONE_ID}")
     if [ "$(cf_api_success "$zone_detail")" = "true" ]; then
         CF_ZONE_API=$(echo "$zone_detail" | jq -r '.result.name // empty')
         CF_ZONE="$CF_ZONE_API"
     fi
 elif [ -z "$CF_ZONE_API" ]; then
-    note "Confirming zone name for zone ID: $CF_ZONE_ID"
+    log "Confirming zone name for zone ID: $CF_ZONE_ID"
     zone_detail=$(cf_api_request GET "/zones/${CF_ZONE_ID}")
     if [ "$(cf_api_success "$zone_detail")" = "true" ]; then
         CF_ZONE_API=$(echo "$zone_detail" | jq -r '.result.name // empty')
@@ -138,7 +127,7 @@ elif [ -z "$CF_ZONE_API" ]; then
 fi
 
 if [ -n "$CF_ZONE_INPUT_RAW" ] && [ -n "$CF_ZONE_API" ] && [ "$CF_ZONE_INPUT_RAW" != "$CF_ZONE_API" ]; then
-    note "Zone name differs from Cloudflare: input='$CF_ZONE_INPUT_RAW' api='$CF_ZONE_API' (case-sensitive)"
+    warn "Zone name differs from Cloudflare: input='$CF_ZONE_INPUT_RAW' api='$CF_ZONE_API' (case-sensitive)"
 fi
 
 section "CF" "Zone"

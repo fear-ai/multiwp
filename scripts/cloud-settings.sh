@@ -175,6 +175,10 @@ apply_managed_headers() {
     log "$domain: set managed_add_security_headers=$desired"
 }
 
+# Options may appear after positional domains; getopts would otherwise stop at
+# the first positional and leave the rest unparsed. See cli_reorder_args.
+eval set -- "$(cli_reorder_args "$@")"
+
 while getopts ":-:" opt; do
     case "$opt" in
         -)
